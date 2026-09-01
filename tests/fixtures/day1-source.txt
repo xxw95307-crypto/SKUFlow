@@ -1,0 +1,3 @@
+SKU: DAY1-TEST-001
+Product name: Day 1 integration test product
+Material: sample-only data
