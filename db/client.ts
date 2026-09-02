@@ -4,6 +4,9 @@ import { schemaStatements } from './schema';
 export interface AppBindings {
   DB: D1Database;
   UPLOADS: R2Bucket;
+  BAILIAN_API_KEY?: string;
+  BAILIAN_BASE_URL?: string;
+  BAILIAN_MODEL?: string;
 }
 
 let schemaPromise: Promise<void> | null = null;

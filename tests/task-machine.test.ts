@@ -22,6 +22,11 @@ test('requires unified parsing before fact extraction', () => {
   assert.equal(canTransition('FILES_PARSED', 'FACTS_EXTRACTED'), true);
 });
 
+test('routes extracted facts with gaps to human confirmation', () => {
+  assert.equal(canTransition('FILES_PARSED', 'FACTS_EXTRACTED'), true);
+  assert.equal(canTransition('FACTS_EXTRACTED', 'NEEDS_CONFIRMATION'), true);
+});
+
 test('exposes agent ownership and terminal state metadata', () => {
   assert.equal(TASK_STATE_METADATA.FACTS_EXTRACTED.owner, 'agent');
   assert.equal(TASK_STATE_METADATA.NEEDS_CONFIRMATION.requiresHumanAction, true);

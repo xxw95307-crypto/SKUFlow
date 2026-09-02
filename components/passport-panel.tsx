@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { FactExtractionPanel } from '@/components/fact-extraction-panel';
 import { ParseResultsPanel } from '@/components/parse-results-panel';
-import type { ProductPassport } from '@/lib/domain/product-passport';
+import type { EvidenceRecord, ProductFact, ProductPassport } from '@/lib/domain/product-passport';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
 
@@ -32,14 +33,26 @@ function displayFactValue(value: unknown, unit: string | null): string {
   return unit ? `${rendered} ${unit}` : rendered;
 }
 
+function evidenceSource(fact: ProductFact, evidence: EvidenceRecord[], task: TaskSnapshot): string {
+  const record = evidence.find((item) => fact.evidenceIds.includes(item.id));
+  if (!record) return fact.status === 'MISSING' ? '未找到可信来源' : fact.sourceKind;
+  const filename = task.files.find((file) => file.id === record.fileId)?.name ?? (record.fileId ? '源文件' : '用户输入');
+  if (record.locator.kind === 'PAGE') return `${filename} · 第 ${record.locator.page} 页`;
+  if (record.locator.kind === 'TABLE_RANGE') return `${filename} · ${record.locator.sheet ?? '工作表'} ${record.locator.range ?? ''}`.trim();
+  if (record.locator.kind === 'TEXT_LINES') return `${filename} · 行 ${record.locator.lineStart ?? '?'}–${record.locator.lineEnd ?? '?'}`;
+  return filename;
+}
+
 export function PassportPanel({
   task,
   onBack,
   onNext,
+  onTaskChange,
 }: {
   task: TaskSnapshot | null;
   onBack: () => void;
   onNext: () => void;
+  onTaskChange: (task: TaskSnapshot) => void;
 }) {
   const [passport, setPassport] = useState<ProductPassport | null>(null);
   const [brand, setBrand] = useState('');
@@ -123,11 +136,12 @@ export function PassportPanel({
 
   return <section className="panel facts-panel">
     <div className="section-heading">
-      <div><span>DAY 03 · PARSING WORKSPACE</span><h2>统一解析与商品护照</h2><p>先检查文件解析结果，再由 Day 4 Agent 将内容块转成可追溯事实。</p></div>
+      <div><span>DAY 04 · EVIDENCE WORKSPACE</span><h2>事实抽取与商品护照</h2><p>百炼 Agent 将统一内容块转成带来源、置信度和冲突状态的商品事实。</p></div>
       <div className="passport-version"><b>v{passport.version}</b><small>{passport.status === 'OPEN' ? '可编辑' : passport.status}</small></div>
     </div>
 
     <ParseResultsPanel task={task} />
+    <FactExtractionPanel task={task} onPassportUpdate={setPassport} onTaskUpdate={onTaskChange} />
 
     <div className="passport-metrics">
       <article><b>{passport.facts.length}</b><span>商品事实</span></article>
@@ -149,17 +163,18 @@ export function PassportPanel({
     {saved && <div className="form-success" role="status">✓ {saved}</div>}
 
     <div className="fact-table">
-      <div className="fact-head"><span>字段</span><span>当前值</span><span>证据</span><span>状态</span></div>
+      <div className="fact-head"><span>字段</span><span>当前值</span><span>证据来源</span><span>置信度</span><span>状态</span></div>
       {passport.facts.map((fact) => <div className="fact-row" key={fact.id}>
         <b>{fact.label}<small>{fact.key}</small></b>
         <span>{displayFactValue(fact.value, fact.unit)}</span>
-        <span className="source-link">{fact.evidenceIds.length} 条 · {fact.sourceKind}</span>
+        <span className="source-link">{evidenceSource(fact, passport.evidence, task)}</span>
+        <span>{fact.confidence === null ? '—' : `${Math.round(fact.confidence * 100)}%`}</span>
         <span><i className={`status-dot ${fact.status.toLowerCase()}`} />{factStatusLabels[fact.status]}</span>
       </div>)}
     </div>
 
     <div className="passport-structure-grid">
-      <article><span className="tiny-label">CONFLICT LEDGER</span><h3>冲突账本</h3>{openConflictCount === 0 ? <p>当前没有开放冲突。Day 3 解析器产生不一致值时，将在这里保留候选值与证据。</p> : <p>{openConflictCount} 项冲突等待人工裁决。</p>}</article>
+      <article><span className="tiny-label">CONFLICT LEDGER</span><h3>冲突账本</h3>{openConflictCount === 0 ? <p>当前没有开放冲突。事实 Agent 发现同一字段存在不同值时，会保留全部候选值与来源。</p> : <div className="conflict-ledger-list">{passport.conflicts.filter((conflict) => conflict.status === 'OPEN').map((conflict) => <div key={conflict.id}><b>{passport.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey}</b>{conflict.candidates.map((candidate) => <span key={candidate.id}>{displayFactValue(candidate.value, null)} · {candidate.sourceLabel}</span>)}</div>)}</div>}</article>
       <article><span className="tiny-label">PLATFORM DRAFTS</span><h3>平台草稿矩阵</h3><div className="draft-chip-list">{passport.platformDrafts.map((draft) => <span key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b>{draft.market} · {draftStatusLabels[draft.status]}</span>)}</div></article>
     </div>
 

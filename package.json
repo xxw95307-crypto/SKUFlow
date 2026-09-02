@@ -12,7 +12,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:day1": "node --experimental-strip-types --test tests/task-machine.test.ts",
     "test:day2": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:day3": "node --experimental-strip-types --test tests/*.test.ts"
+    "test:day3": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:day4": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "next": "16.2.6",

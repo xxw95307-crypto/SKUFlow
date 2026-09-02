@@ -23,7 +23,7 @@ export type EvidenceSourceKind =
   | 'RULE_ENGINE'
   | 'PLATFORM_API';
 
-export type EvidenceLocatorKind = 'FORM_FIELD' | 'PAGE' | 'SHEET_CELL' | 'IMAGE_REGION' | 'JSON_PATH';
+export type EvidenceLocatorKind = 'FORM_FIELD' | 'PAGE' | 'TEXT_LINES' | 'TABLE_RANGE' | 'SHEET_CELL' | 'IMAGE_REGION' | 'JSON_PATH';
 
 export interface EvidenceLocator {
   kind: EvidenceLocatorKind;
@@ -31,6 +31,9 @@ export interface EvidenceLocator {
   page?: number;
   sheet?: string;
   cell?: string;
+  range?: string;
+  lineStart?: number;
+  lineEnd?: number;
   bbox?: [number, number, number, number];
 }
 

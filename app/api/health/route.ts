@@ -11,7 +11,7 @@ export async function GET() {
 
     return Response.json({
       ok: database?.ok === 1,
-      service: 'skuflow-day1',
+      service: 'skuflow-ai',
       storage: { d1: 'ready', r2: bucket.truncated ? 'ready' : 'ready' },
       timestamp: new Date().toISOString(),
     });

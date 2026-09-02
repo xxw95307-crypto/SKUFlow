@@ -132,6 +132,23 @@ export const schemaStatements = [
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
     FOREIGN KEY (file_id) REFERENCES task_files(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS agent_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    passport_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    status TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    result_json TEXT,
+    usage_json TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (passport_id) REFERENCES product_passports(id) ON DELETE CASCADE
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_task_files_task_id ON task_files(task_id)`,
   `CREATE INDEX IF NOT EXISTS idx_task_events_task_created ON task_events(task_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC)`,
@@ -142,4 +159,5 @@ export const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_conflicts_passport_status ON fact_conflicts(passport_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_drafts_task_platform ON platform_drafts(task_id, platform_id, market)`,
   `CREATE INDEX IF NOT EXISTS idx_parse_results_task_status ON file_parse_results(task_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_runs_task_created ON agent_runs(task_id, created_at DESC)`,
 ] as const;
