@@ -1,7 +1,9 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import type { PlatformId } from '@/lib/domain/platform';
+import { createInitialProductPassport } from '@/lib/domain/product-passport';
 import type { TaskFile, TaskSnapshot, TaskStatus } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
+import { prepareInitialPassportWrites } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,6 +100,7 @@ export async function POST(request: Request) {
     if (markets.length === 0 || markets.length > 8) throw new Error('请选择 1–8 个目标市场');
     if (platforms.length === 0 || platforms.length > platformRegistry.length) throw new Error('请至少选择一个目标平台');
     if (platforms.some((id) => !platformIds.has(id))) throw new Error('包含未知平台');
+    if (platforms.length * markets.length > 24) throw new Error('平台与市场组合不能超过 24 个');
     if (files.length === 0 || files.length > MAX_FILE_COUNT) throw new Error(`请上传 1–${MAX_FILE_COUNT} 个资料文件`);
 
     files.forEach(validateFile);
@@ -106,6 +109,7 @@ export async function POST(request: Request) {
 
     const taskId = `task_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
+    const initialPassport = createInitialProductPassport({ taskId, productName, platforms, markets, now });
     const storedFiles: Array<TaskFile & { objectKey: string }> = [];
 
     for (const file of files) {
@@ -139,6 +143,7 @@ export async function POST(request: Request) {
         `INSERT INTO task_files (id, task_id, filename, object_key, content_type, size, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 'STORED', ?)`,
       ).bind(file.id, taskId, file.name, file.objectKey, file.contentType, file.size, now)),
+      ...prepareInitialPassportWrites(DB, initialPassport),
     ];
 
     await DB.batch(writes);

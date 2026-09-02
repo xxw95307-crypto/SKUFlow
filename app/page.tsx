@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { PassportPanel } from '@/components/passport-panel';
 import { TaskIntake } from '@/components/task-intake';
+import type { TaskSnapshot } from '@/lib/domain/task';
 
 type View = 'upload' | 'facts' | 'listing' | 'assets' | 'publish';
 type Platform = 'Amazon' | 'TikTok Shop' | 'Shopify' | 'Shopee';
@@ -16,15 +18,6 @@ const navigation: { id: View; icon: string; label: string }[] = [
 
 const stepMap: Record<View, number> = { upload: 0, facts: 1, listing: 2, assets: 2, publish: 3 };
 const steps = [['01', '上传资料'], ['02', '事实档案'], ['03', '平台编译'], ['04', '发布交付']];
-const facts = [
-  ['商品名称', 'BlendGo Mini 便携榨汁杯', '图片 + 参数表', 'confirmed', '已确认'],
-  ['额定容量', '380 ml', '参数表 B12', 'extracted', '已提取'],
-  ['额定功率', '70 W', '参数表 B16', 'extracted', '已提取'],
-  ['杯体材质', '食品接触级 PCTG', '包装背标', 'confirmed', '已确认'],
-  ['刀头数量', '6 叶', '图片识别 / 参数表', 'conflict', '存在冲突'],
-  ['电池容量', '待补充', '未找到可信来源', 'missing', '待补充'],
-];
-
 const listingContent: Record<Platform, { score: number; market: string; title: string; bullets: string[]; note: string }> = {
   Amazon: { score: 92, market: 'Amazon US · English', title: 'BlendGo Mini Portable Blender, 380ml Personal Smoothie Maker with 6-Blade System, USB-C Rechargeable Travel Blender for Shakes', bullets: ['380ML PERSONAL SIZE — Blend directly in the cup for smoothies and shakes on the go.', '6-BLADE MIXING SYSTEM — Designed for fruit, milk and soft ingredients.', 'FOOD-CONTACT PCTG CUP — Lightweight cup with a secure drinking lid.'], note: '标题 154/200 字符 · 后台搜索词待生成' },
   'TikTok Shop': { score: 88, market: 'TikTok Shop US · English', title: 'Fresh smoothies anywhere 🍓 BlendGo Mini USB-C Portable Blender', bullets: ['One cup. One button. Fresh in minutes.', '380ml travel-friendly size', 'Easy USB-C charging for your daily routine'], note: '短标题已适配移动端 · 禁用绝对化功效词' },
@@ -36,12 +29,8 @@ function ProductVisual({ compact = false }: { compact?: boolean }) {
   return <div className={`product-stage ${compact ? 'compact' : ''}`} aria-label="便携榨汁杯产品示意"><div className="glow" /><div className="blender"><div className="lid" /><div className="cup"><i /><i /><i /></div><div className="base"><span>◎</span></div></div>{!compact && <><span className="color-dot coral" /><span className="color-dot mint" /><span className="color-dot cream" /></>}</div>;
 }
 
-function UploadScreen({ onNext }: { onNext: () => void }) {
-  return <div className="content-grid"><TaskIntake onNext={onNext} /><aside className="panel product-preview"><div className="preview-top"><span>Day 1 架构预览</span><b>12 个平台注册</b></div><ProductVisual /><h3>平台无关的商品事实底座</h3><p>上传资料只建立任务与保存源文件；事实提取、证据定位和 Agent 工具将在后续迭代接入。</p><div className="market-row"><span>首批参考适配器</span><b>4 个</b></div><div className="platforms"><span>Amazon</span><span>TikTok Shop</span><span>Shopify</span><span>Shopee</span><span>+8</span></div><div className="notice"><b>Day 1 真实边界</b><p>任务、文件和状态流已持久化；下方事实与 Listing 页面仍使用预置演示数据。</p></div></aside></div>;
-}
-
-function FactsScreen({ onNext }: { onNext: () => void }) {
-  return <section className="panel facts-panel"><div className="section-heading"><div><span>STEP 02 · PRODUCT PASSPORT</span><h2>商品事实档案</h2><p>每条参数都保留来源；冲突与缺失信息不会进入文案。</p></div><div className="score-ring">87<small>可信度</small></div></div><div className="facts-summary"><ProductVisual compact /><div><span className="tiny-label">识别商品</span><h3>BlendGo Mini 便携榨汁杯</h3><p>SKU BG-MINI-380 · 6 个资料源 · 刚刚更新</p></div><button className="ghost small">查看原始资料</button></div><div className="fact-table"><div className="fact-head"><span>字段</span><span>当前值</span><span>证据来源</span><span>状态</span></div>{facts.map(([field, value, source, status, label]) => <div className="fact-row" key={field}><b>{field}</b><span>{value}</span><span className="source-link">{source}</span><span><i className={`status-dot ${status}`} />{label}</span></div>)}</div><div className="conflict-card"><div className="conflict-icon">!</div><div><b>刀头数量需要确认</b><p>主图视觉识别为 6 叶，但参数表 B18 填写为 4 叶。系统将暂停生成相关卖点。</p></div><button>选择正确值</button></div><div className="footer-actions"><span>4 项已确认 · 1 项冲突 · 1 项待补充</span><button className="primary" onClick={onNext}>锁定事实并生成平台版本</button></div></section>;
+function UploadScreen({ onNext }: { onNext: (task: TaskSnapshot) => void }) {
+  return <div className="content-grid"><TaskIntake onNext={onNext} /><aside className="panel product-preview"><div className="preview-top"><span>Day 2 数据底座</span><b>12 个平台注册</b></div><ProductVisual /><h3>平台无关的商品事实护照</h3><p>创建任务时同步建立商品事实、证据账本、冲突记录与平台草稿矩阵。</p><div className="market-row"><span>首批参考适配器</span><b>4 个</b></div><div className="platforms"><span>Amazon</span><span>TikTok Shop</span><span>Shopify</span><span>Shopee</span><span>+8</span></div><div className="notice"><b>Day 2 真实边界</b><p>字段可保存、证据可追溯、平台草稿有独立状态；文件自动解析从 Day 3 开始。</p></div></aside></div>;
 }
 
 function ListingScreen({ onAssets }: { onAssets: () => void }) {
@@ -60,8 +49,14 @@ function PublishScreen({ onToast }: { onToast: (message: string) => void }) {
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>('upload'); const [toast, setToast] = useState(''); const activeStep = stepMap[view];
+  const [view, setView] = useState<View>('upload'); const [toast, setToast] = useState(''); const [activeTask, setActiveTask] = useState<TaskSnapshot | null>(null); const activeStep = stepMap[view];
+  useEffect(() => {
+    fetch('/api/tasks')
+      .then((response) => response.json())
+      .then((payload: { tasks?: TaskSnapshot[] }) => setActiveTask(payload.tasks?.[0] ?? null))
+      .catch(() => undefined);
+  }, []);
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600); };
   const next = (target: View) => { setView(target); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-  return <main className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-mark">S</span><div><strong>SKUFlow</strong><small>AI 智能上新</small></div></div><nav aria-label="工作区导航">{navigation.map(item => <button className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => next(item.id)} key={item.id}><span>{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-note"><span className="live-dot" /> Day 1 基础链路<p>任务、源文件和状态流使用持久化存储；后续页面为预置演示。</p></div><div className="user-card"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div><i>···</i></div></aside><section className="workspace"><header className="topbar"><div><p className="eyebrow">DAY 01 · CORE FOUNDATION</p><h1>SKUFlow · 多平台上新任务</h1></div><div className="top-actions"><button className="ghost" onClick={() => showToast('Day 1 状态已持久化')}>检查状态</button><button className="primary" onClick={() => next('upload')}>新建任务</button></div></header><div className="stepper">{steps.map(([number, label], index) => <button className={`step ${index === activeStep ? 'current' : ''} ${index < activeStep ? 'done' : ''}`} onClick={() => next((['upload', 'facts', 'listing', 'publish'] as View[])[index])} key={number}><span>{index < activeStep ? '✓' : number}</span><div><b>{label}</b><small>{index < activeStep ? '已完成' : index === activeStep ? '进行中' : '待处理'}</small></div></button>)}</div>{view === 'upload' && <UploadScreen onNext={() => next('facts')} />}{view === 'facts' && <FactsScreen onNext={() => next('listing')} />}{view === 'listing' && <ListingScreen onAssets={() => next('assets')} />}{view === 'assets' && <AssetsScreen onNext={() => next('publish')} />}{view === 'publish' && <PublishScreen onToast={showToast} />}</section>{toast && <div className="toast"><span>✓</span>{toast}</div>}</main>;
+  return <main className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-mark">S</span><div><strong>SKUFlow</strong><small>AI 智能上新</small></div></div><nav aria-label="工作区导航">{navigation.map(item => <button className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => next(item.id)} key={item.id}><span>{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-note"><span className="live-dot" /> Day 2 商品护照<p>商品、证据、冲突和平台草稿已经使用持久化数据结构。</p></div><div className="user-card"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div><i>···</i></div></aside><section className="workspace"><header className="topbar"><div><p className="eyebrow">DAY 02 · PRODUCT PASSPORT</p><h1>SKUFlow · 可追溯商品档案</h1></div><div className="top-actions"><button className="ghost" onClick={() => showToast(activeTask ? `当前任务：${activeTask.id}` : '暂无任务')}>检查状态</button><button className="primary" onClick={() => next('upload')}>新建任务</button></div></header><div className="stepper">{steps.map(([number, label], index) => <button className={`step ${index === activeStep ? 'current' : ''} ${index < activeStep ? 'done' : ''}`} onClick={() => next((['upload', 'facts', 'listing', 'publish'] as View[])[index])} key={number}><span>{index < activeStep ? '✓' : number}</span><div><b>{label}</b><small>{index < activeStep ? '已完成' : index === activeStep ? '进行中' : '待处理'}</small></div></button>)}</div>{view === 'upload' && <UploadScreen onNext={(task) => { setActiveTask(task); next('facts'); }} />}{view === 'facts' && <PassportPanel task={activeTask} onBack={() => next('upload')} onNext={() => next('listing')} />}{view === 'listing' && <ListingScreen onAssets={() => next('assets')} />}{view === 'assets' && <AssetsScreen onNext={() => next('publish')} />}{view === 'publish' && <PublishScreen onToast={showToast} />}</section>{toast && <div className="toast"><span>✓</span>{toast}</div>}</main>;
 }

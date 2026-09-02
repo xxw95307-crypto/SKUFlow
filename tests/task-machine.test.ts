@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertTransition, canTransition } from '../lib/workflow/task-machine.ts';
+import { assertTransition, canTransition, getAllowedTransitions, isTerminalStatus, TASK_STATE_METADATA } from '../lib/workflow/task-machine.ts';
 
 test('allows the Day 1 task to enter ingestion', () => {
   assert.equal(canTransition('CREATED', 'INGESTING'), true);
@@ -14,4 +14,12 @@ test('blocks skipping human approval', () => {
 
 test('permits a failed ingestion to retry', () => {
   assert.equal(canTransition('FAILED', 'INGESTING'), true);
+});
+
+test('exposes agent ownership and terminal state metadata', () => {
+  assert.equal(TASK_STATE_METADATA.FACTS_EXTRACTED.owner, 'agent');
+  assert.equal(TASK_STATE_METADATA.NEEDS_CONFIRMATION.requiresHumanAction, true);
+  assert.deepEqual(getAllowedTransitions('HUMAN_APPROVED'), ['EXPORTED', 'DRAFT_CREATED', 'FAILED']);
+  assert.equal(isTerminalStatus('EXPORTED'), true);
+  assert.equal(isTerminalStatus('FAILED'), false);
 });

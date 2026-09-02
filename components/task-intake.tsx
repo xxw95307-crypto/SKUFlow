@@ -13,7 +13,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function TaskIntake({ onNext }: { onNext: () => void }) {
+export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [productName, setProductName] = useState('BlendGo Mini 便携榨汁杯');
   const [markets, setMarkets] = useState<string[]>(['美国']);
@@ -78,12 +78,12 @@ export function TaskIntake({ onNext }: { onNext: () => void }) {
       const response = await fetch(`/api/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ status: 'INGESTING', note: '用户启动 Day 1 资料解析流程' }),
+        body: JSON.stringify({ status: 'INGESTING', note: '用户启动资料解析流程并进入 Product Passport' }),
       });
       const payload = await response.json() as { task?: TaskSnapshot; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || '状态更新失败');
       setTask(payload.task);
-      onNext();
+      onNext(payload.task);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '状态更新失败');
     } finally {
@@ -92,7 +92,7 @@ export function TaskIntake({ onNext }: { onNext: () => void }) {
   };
 
   return <section className="panel upload-panel">
-    <div className="section-heading"><div><span>DAY 01 · LIVE INTAKE</span><h2>建立多平台上新任务</h2><p>原始文件存入对象存储，任务与状态记录进入数据库。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
+    <div className="section-heading"><div><span>DAY 01 → DAY 02 · LIVE INTAKE</span><h2>建立多平台上新任务</h2><p>原始文件存入对象存储，同时初始化可追溯的商品事实护照。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
 
     <div className="intake-fields">
       <label><span>商品名称</span><input value={productName} maxLength={120} onChange={(event) => setProductName(event.target.value)} /></label>
@@ -108,6 +108,6 @@ export function TaskIntake({ onNext }: { onNext: () => void }) {
     <div className="file-list">{files.length === 0 ? <div className="empty-files"><b>尚未选择文件</b><span>建议至少包含商品主图与一份参数资料</span></div> : files.map((file, index) => <div className="file-row" key={`${file.name}:${file.size}`}><span className="file-icon image">{file.name.split('.').pop()?.slice(0, 3).toUpperCase()}</span><div><b>{file.name}</b><small>{formatBytes(file.size)} · 等待安全上传</small></div><button className="remove-file" type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>移除</button></div>)}</div>
 
     {error && <div className="form-error" role="alert">{error}</div>}
-    {task ? <div className="task-created"><div><span>✓</span><div><b>{TASK_STATUS_LABELS[task.status]}</b><small>{task.id} · {task.files.length} 个源文件已持久化</small></div></div><button type="button" onClick={startIngestion} disabled={busy}>{busy ? '正在推进…' : '进入资料解析 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? '正在创建任务…' : '创建任务并安全上传'} <span>Day 1 实际链路</span></button>}
+    {task ? <div className="task-created"><div><span>✓</span><div><b>{TASK_STATUS_LABELS[task.status]}</b><small>{task.id} · {task.files.length} 个源文件已持久化</small></div></div><button type="button" onClick={startIngestion} disabled={busy}>{busy ? '正在推进…' : '打开商品护照 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? '正在创建任务…' : '创建任务并安全上传'} <span>同时初始化 Day 2 数据</span></button>}
   </section>;
 }
