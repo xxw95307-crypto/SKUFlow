@@ -3,6 +3,7 @@ import type { PlatformId } from './platform';
 export const TASK_STATUSES = [
   'CREATED',
   'INGESTING',
+  'FILES_PARSED',
   'FACTS_EXTRACTED',
   'NEEDS_CONFIRMATION',
   'CATEGORY_MAPPED',
@@ -19,6 +20,7 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   CREATED: '任务已创建',
   INGESTING: '资料接收中',
+  FILES_PARSED: '源文件已解析',
   FACTS_EXTRACTED: '事实已提取',
   NEEDS_CONFIRMATION: '等待人工确认',
   CATEGORY_MAPPED: '类目已匹配',
@@ -30,12 +32,15 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   FAILED: '任务执行失败',
 };
 
+export const TASK_FILE_STATUSES = ['STORED', 'PARSING', 'PARSED', 'PARTIAL', 'FAILED'] as const;
+export type TaskFileStatus = (typeof TASK_FILE_STATUSES)[number];
+
 export interface TaskFile {
   id: string;
   name: string;
   contentType: string;
   size: number;
-  status: 'STORED';
+  status: TaskFileStatus;
 }
 
 export interface TaskEvent {

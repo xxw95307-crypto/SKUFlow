@@ -70,29 +70,25 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
     }
   };
 
-  const startIngestion = async () => {
+  const parseFiles = async () => {
     if (!task) return;
     setBusy(true);
     setError('');
     try {
-      const response = await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ status: 'INGESTING', note: '用户启动资料解析流程并进入 Product Passport' }),
-      });
+      const response = await fetch(`/api/tasks/${task.id}/parse`, { method: 'POST' });
       const payload = await response.json() as { task?: TaskSnapshot; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || '状态更新失败');
+      if (!response.ok || !payload.task) throw new Error(payload.error || '文件解析失败');
       setTask(payload.task);
       onNext(payload.task);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '状态更新失败');
+      setError(caught instanceof Error ? caught.message : '文件解析失败');
     } finally {
       setBusy(false);
     }
   };
 
   return <section className="panel upload-panel">
-    <div className="section-heading"><div><span>DAY 01 → DAY 02 · LIVE INTAKE</span><h2>建立多平台上新任务</h2><p>原始文件存入对象存储，同时初始化可追溯的商品事实护照。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
+    <div className="section-heading"><div><span>DAY 03 · UNIFIED PARSING</span><h2>上传并解析商品资料</h2><p>源文件安全保存后，统一解析图片、PDF、Excel、CSV 与文本。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
 
     <div className="intake-fields">
       <label><span>商品名称</span><input value={productName} maxLength={120} onChange={(event) => setProductName(event.target.value)} /></label>
@@ -108,6 +104,6 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
     <div className="file-list">{files.length === 0 ? <div className="empty-files"><b>尚未选择文件</b><span>建议至少包含商品主图与一份参数资料</span></div> : files.map((file, index) => <div className="file-row" key={`${file.name}:${file.size}`}><span className="file-icon image">{file.name.split('.').pop()?.slice(0, 3).toUpperCase()}</span><div><b>{file.name}</b><small>{formatBytes(file.size)} · 等待安全上传</small></div><button className="remove-file" type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>移除</button></div>)}</div>
 
     {error && <div className="form-error" role="alert">{error}</div>}
-    {task ? <div className="task-created"><div><span>✓</span><div><b>{TASK_STATUS_LABELS[task.status]}</b><small>{task.id} · {task.files.length} 个源文件已持久化</small></div></div><button type="button" onClick={startIngestion} disabled={busy}>{busy ? '正在推进…' : '打开商品护照 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? '正在创建任务…' : '创建任务并安全上传'} <span>同时初始化 Day 2 数据</span></button>}
+    {task ? <div className="task-created"><div><span>✓</span><div><b>{TASK_STATUS_LABELS[task.status]}</b><small>{task.id} · {task.files.length} 个源文件等待统一解析</small></div></div><button type="button" onClick={parseFiles} disabled={busy}>{busy ? '正在解析文件…' : '开始解析并查看结果 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? '正在创建任务…' : '创建任务并安全上传'} <span>支持 5 类解析入口</span></button>}
   </section>;
 }

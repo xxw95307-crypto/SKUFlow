@@ -1,6 +1,6 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import type { PlatformId } from '@/lib/domain/platform';
-import { isTaskStatus, type TaskEvent, type TaskFile, type TaskSnapshot, type TaskStatus } from '@/lib/domain/task';
+import { isTaskStatus, type TaskEvent, type TaskFile, type TaskFileStatus, type TaskSnapshot, type TaskStatus } from '@/lib/domain/task';
 import { assertTransition } from '@/lib/workflow/task-machine';
 
 export const dynamic = 'force-dynamic';
@@ -36,7 +36,7 @@ async function getTask(taskId: string): Promise<TaskSnapshot | null> {
     DB.prepare(
       `SELECT id, filename, content_type, size, status
        FROM task_files WHERE task_id = ? ORDER BY created_at ASC`,
-    ).bind(taskId).all<{ id: string; filename: string; content_type: string; size: number; status: 'STORED' }>(),
+    ).bind(taskId).all<{ id: string; filename: string; content_type: string; size: number; status: TaskFileStatus }>(),
     DB.prepare(
       `SELECT id, from_status, to_status, actor, note, created_at
        FROM task_events WHERE task_id = ? ORDER BY id ASC`,

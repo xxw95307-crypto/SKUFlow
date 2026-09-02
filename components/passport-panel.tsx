@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ParseResultsPanel } from '@/components/parse-results-panel';
 import type { ProductPassport } from '@/lib/domain/product-passport';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
@@ -122,9 +123,11 @@ export function PassportPanel({
 
   return <section className="panel facts-panel">
     <div className="section-heading">
-      <div><span>DAY 02 · LIVE PRODUCT PASSPORT</span><h2>商品事实护照</h2><p>事实、证据、冲突与平台草稿均来自 D1 持久化数据。</p></div>
+      <div><span>DAY 03 · PARSING WORKSPACE</span><h2>统一解析与商品护照</h2><p>先检查文件解析结果，再由 Day 4 Agent 将内容块转成可追溯事实。</p></div>
       <div className="passport-version"><b>v{passport.version}</b><small>{passport.status === 'OPEN' ? '可编辑' : passport.status}</small></div>
     </div>
+
+    <ParseResultsPanel task={task} />
 
     <div className="passport-metrics">
       <article><b>{passport.facts.length}</b><span>商品事实</span></article>

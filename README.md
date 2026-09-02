@@ -2,7 +2,7 @@
 
 SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的商品事实档案，并通过平台适配器编译为不同电商平台的上架草稿。
 
-## Day 1–2 已完成
+## Day 1–3 已完成
 
 - 真实文件上传：源文件进入 R2 对象存储。
 - 持久化任务：任务、文件元数据和状态事件进入 D1。
@@ -16,8 +16,12 @@ SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的�
 - 平台草稿矩阵：按“平台 × 市场”初始化草稿，并预留 Schema、类目、校验与发布状态。
 - 可编辑事实：品牌与候选类目可通过 API 保存；每次修改生成表单证据并递增护照版本。
 - 状态机元数据：明确每一阶段由用户、Agent 或系统负责，并标注人工关口与终态。
+- 多格式解析：图片、PDF、XLSX/XLS、CSV 和文本进入统一解析入口。
+- 统一解析结果：文本、表格和图片统一为带定位的内容块，并记录哈希、警告与错误。
+- 解析结果持久化：D1 保存解析结构，R2 保留源文件，支持刷新恢复与强制重新解析。
+- 解析工作台：可查看逐文件结果摘要并下载 `UnifiedParseResult v1.0` JSON。
 
-Product Passport 页面已使用真实持久化数据；Listing 和素材页面仍是预置演示内容。Day 3 将接入图片、PDF、Excel 与文本解析。
+Product Passport 与文件解析页面已使用真实持久化数据；Listing 和素材页面仍是预置演示内容。Day 4 将从统一内容块提取事实、证据、置信度与冲突。
 
 ## 本地运行
 
@@ -32,6 +36,7 @@ pnpm dev
 ```bash
 pnpm test:day1
 pnpm test:day2
+pnpm test:day3
 pnpm lint
 pnpm build
 ```
@@ -46,7 +51,8 @@ db/                      D1 Schema 与迁移
 lib/domain/              核心领域模型
 lib/platforms/           多平台注册表
 lib/workflow/            Agent 任务状态机
-tests/                   Day 1–2 验收测试
+lib/parsers/             图片、PDF、表格与文本解析器
+tests/                   Day 1–3 验收测试
 ```
 
 ## 密钥安全

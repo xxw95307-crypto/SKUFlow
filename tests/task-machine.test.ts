@@ -16,6 +16,12 @@ test('permits a failed ingestion to retry', () => {
   assert.equal(canTransition('FAILED', 'INGESTING'), true);
 });
 
+test('requires unified parsing before fact extraction', () => {
+  assert.equal(canTransition('INGESTING', 'FACTS_EXTRACTED'), false);
+  assert.equal(canTransition('INGESTING', 'FILES_PARSED'), true);
+  assert.equal(canTransition('FILES_PARSED', 'FACTS_EXTRACTED'), true);
+});
+
 test('exposes agent ownership and terminal state metadata', () => {
   assert.equal(TASK_STATE_METADATA.FACTS_EXTRACTED.owner, 'agent');
   assert.equal(TASK_STATE_METADATA.NEEDS_CONFIRMATION.requiresHumanAction, true);

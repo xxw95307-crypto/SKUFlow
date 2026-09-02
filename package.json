@@ -11,12 +11,15 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:day1": "node --experimental-strip-types --test tests/task-machine.test.ts",
-    "test:day2": "node --experimental-strip-types --test tests/*.test.ts"
+    "test:day2": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:day3": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "unpdf": "^1.8.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",

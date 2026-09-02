@@ -2,7 +2,8 @@ import type { TaskStatus } from '../domain/task';
 
 export const TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   CREATED: ['INGESTING', 'FAILED'],
-  INGESTING: ['FACTS_EXTRACTED', 'FAILED'],
+  INGESTING: ['FILES_PARSED', 'FAILED'],
+  FILES_PARSED: ['FACTS_EXTRACTED', 'INGESTING', 'FAILED'],
   FACTS_EXTRACTED: ['NEEDS_CONFIRMATION', 'CATEGORY_MAPPED', 'FAILED'],
   NEEDS_CONFIRMATION: ['FACTS_EXTRACTED', 'CATEGORY_MAPPED', 'FAILED'],
   CATEGORY_MAPPED: ['CONTENT_GENERATED', 'FAILED'],
@@ -23,6 +24,7 @@ export const TASK_STATE_METADATA: Record<TaskStatus, {
 }> = {
   CREATED: { label: '任务已创建', owner: 'user', phase: 'intake', requiresHumanAction: false, terminal: false },
   INGESTING: { label: '资料接收中', owner: 'system', phase: 'intake', requiresHumanAction: false, terminal: false },
+  FILES_PARSED: { label: '源文件已解析', owner: 'agent', phase: 'intake', requiresHumanAction: false, terminal: false },
   FACTS_EXTRACTED: { label: '事实已提取', owner: 'agent', phase: 'facts', requiresHumanAction: false, terminal: false },
   NEEDS_CONFIRMATION: { label: '等待人工确认', owner: 'user', phase: 'facts', requiresHumanAction: true, terminal: false },
   CATEGORY_MAPPED: { label: '类目已匹配', owner: 'agent', phase: 'compile', requiresHumanAction: false, terminal: false },
