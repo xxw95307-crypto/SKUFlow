@@ -22,7 +22,7 @@ function resultPreview(result: UnifiedParseResult): string {
   if (result.error) return result.error;
   if (result.text) return result.text.slice(0, 260).replace(/\s+/g, ' ');
   const image = result.blocks.find((block): block is Extract<ParsedBlock, { type: 'image' }> => block.type === 'image');
-  if (image) return `${image.format} · ${image.width ?? '?'} × ${image.height ?? '?'} px · 已生成视觉解析块`;
+  if (image) return `${image.format} · ${image.width ?? '?'} × ${image.height ?? '?'} px · 图片块已就绪，等待视觉 Agent`;
   const table = result.blocks.find((block): block is Extract<ParsedBlock, { type: 'table' }> => block.type === 'table');
   if (table) return `${table.locator.sheet ?? '工作表'} · ${table.headers.length} 列 · ${table.rows.length} 行预览`;
   return '文件已进入统一解析结构。';

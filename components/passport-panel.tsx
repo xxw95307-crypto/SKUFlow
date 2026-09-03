@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AdapterSdkPanel } from '@/components/adapter-sdk-panel';
 import { FactExtractionPanel } from '@/components/fact-extraction-panel';
 import { ParseResultsPanel } from '@/components/parse-results-panel';
+import { VisionAnalysisPanel } from '@/components/vision-analysis-panel';
 import type { EvidenceRecord, ProductFact, ProductPassport } from '@/lib/domain/product-passport';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
@@ -142,6 +143,7 @@ export function PassportPanel({
     </div>
 
     <ParseResultsPanel task={task} />
+    <VisionAnalysisPanel task={task} />
     <FactExtractionPanel task={task} onPassportUpdate={setPassport} onTaskUpdate={onTaskChange} />
     <AdapterSdkPanel task={task} passport={passport} onPassportUpdate={setPassport} />
 

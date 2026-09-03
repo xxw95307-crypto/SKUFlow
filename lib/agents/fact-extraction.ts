@@ -6,6 +6,7 @@ import type {
   FactExtractionOutput,
 } from '../domain/fact-extraction';
 import type { EvidenceLocator, FactValue } from '../domain/product-passport';
+import type { VisionAgentRun } from '../domain/vision-analysis';
 
 export const FACT_EXTRACTION_PROMPT_VERSION = 'day4-v1';
 const MAX_EVIDENCE_ITEMS = 120;
@@ -79,17 +80,23 @@ function describeLocator(locator: EvidenceLocator): string {
   return locator.path;
 }
 
-export function buildFactExtractionContext(results: UnifiedParseResult[]): ExtractionContext {
+export function buildFactExtractionContext(
+  results: UnifiedParseResult[],
+  visionRuns: readonly VisionAgentRun[] = [],
+): ExtractionContext {
   const items: ExtractionEvidenceItem[] = [];
   let usedCharacters = 0;
   let imageBlocksPending = 0;
   let eligibleItems = 0;
+  const completedVisionFileIds = new Set(
+    visionRuns.filter((run) => run.status === 'COMPLETED' && run.result).map((run) => run.fileId),
+  );
 
   for (const result of results) {
     for (let blockIndex = 0; blockIndex < result.blocks.length; blockIndex += 1) {
       const block = result.blocks[blockIndex];
       if (block.type === 'image') {
-        imageBlocksPending += 1;
+        if (!completedVisionFileIds.has(result.fileId)) imageBlocksPending += 1;
         continue;
       }
       eligibleItems += 1;
@@ -110,6 +117,41 @@ export function buildFactExtractionContext(results: UnifiedParseResult[]): Extra
       });
       usedCharacters += boundedExcerpt.length;
     }
+  }
+
+  const filenameByFileId = new Map(results.map((result) => [result.fileId, result.filename]));
+  const appendVisionItem = (
+    run: VisionAgentRun,
+    path: string,
+    excerpt: string,
+    bbox?: [number, number, number, number],
+  ) => {
+    eligibleItems += 1;
+    if (!excerpt || items.length >= MAX_EVIDENCE_ITEMS || usedCharacters >= MAX_EVIDENCE_CHARACTERS) return;
+    const remaining = MAX_EVIDENCE_CHARACTERS - usedCharacters;
+    const boundedExcerpt = excerpt.slice(0, remaining);
+    items.push({
+      ref: `E${items.length + 1}`,
+      fileId: run.fileId,
+      filename: filenameByFileId.get(run.fileId) ?? '商品图片',
+      sourceKind: 'VISION',
+      locator: { kind: 'IMAGE_REGION', path, ...(bbox ? { bbox } : {}) },
+      excerpt: boundedExcerpt,
+      contentHash: run.inputHash,
+    });
+    usedCharacters += boundedExcerpt.length;
+  };
+
+  for (const run of visionRuns) {
+    if (run.status !== 'COMPLETED' || !run.result) continue;
+    appendVisionItem(run, `vision.${run.id}.summary`, run.result.summary);
+    appendVisionItem(run, `vision.${run.id}.visible_text`, run.result.visibleText);
+    run.result.facts.forEach((fact, index) => appendVisionItem(
+      run,
+      `vision.${run.id}.facts.${index}`,
+      `视觉字段 ${fact.key}（${fact.label}）：${JSON.stringify(fact.value)}${fact.unit ? ` ${fact.unit}` : ''}；视觉置信度 ${fact.confidence}`,
+      fact.bbox ?? undefined,
+    ));
   }
 
   const prompt = items.map((item) => [

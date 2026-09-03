@@ -174,7 +174,10 @@ export async function applyFactExtraction(
     const factId = existing?.id ?? `fact_${crypto.randomUUID()}`;
     const allRefs = [...new Set(candidates.flatMap((candidate) => candidate.evidenceRefs))];
     const status = hasConflict ? 'CONFLICT' : existingIsConfirmed ? 'CONFIRMED' : 'EXTRACTED';
-    const sourceKind = existingIsConfirmed ? 'USER_INPUT' : 'FILE_TEXT';
+    const extractedSourceKind = selected.evidenceRefs
+      .map((ref) => evidenceByRef.get(ref)?.sourceKind)
+      .find((sourceKind) => sourceKind === 'VISION' || sourceKind === 'OCR' || sourceKind === 'FILE_TEXT');
+    const sourceKind = existingIsConfirmed ? 'USER_INPUT' : extractedSourceKind ?? 'FILE_TEXT';
     if (existingIsConfirmed && !hasConflict) confirmedPreserved += 1;
 
     if (existing) {

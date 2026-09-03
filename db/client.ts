@@ -7,6 +7,9 @@ export interface AppBindings {
   BAILIAN_API_KEY?: string;
   BAILIAN_BASE_URL?: string;
   BAILIAN_MODEL?: string;
+  BAILIAN_VISION_API_KEY?: string;
+  BAILIAN_VISION_BASE_URL?: string;
+  BAILIAN_VISION_MODEL?: string;
 }
 
 let schemaPromise: Promise<void> | null = null;

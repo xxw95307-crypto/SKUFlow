@@ -2,6 +2,7 @@ import { ensureSchema, getBindings } from '@/db/client';
 import { buildFactExtractionContext, FACT_EXTRACTION_PROMPT_VERSION } from '@/lib/agents/fact-extraction';
 import { callBailianFactExtraction, hashExtractionInput } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
+import { loadBailianVisionConfig, missingBailianVisionConfig } from '@/lib/config/bailian-vision';
 import type { AgentRun } from '@/lib/domain/fact-extraction';
 import type { TaskStatus } from '@/lib/domain/task';
 import {
@@ -13,6 +14,7 @@ import {
 import { getParseResults } from '@/lib/server/parse-store';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot, prepareTaskTransition } from '@/lib/server/task-store';
+import { getLatestCompletedVisionRuns } from '@/lib/server/vision-analysis-store';
 import { assertTransition } from '@/lib/workflow/task-machine';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +30,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
     const { taskId } = await context.params;
     const bindings = getBindings();
     const config = loadBailianConfig(bindings);
+    const visionConfig = loadBailianVisionConfig(bindings);
     const task = await getTaskSnapshot(bindings.DB, taskId);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     return Response.json({
@@ -37,7 +40,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
         name: '阿里云百炼',
         model: config.model || '未配置',
         configured: missingBailianConfig(config).length === 0,
-        visionSupported: false,
+        visionSupported: missingBailianVisionConfig(visionConfig).length === 0,
       },
     });
   } catch (error) {
@@ -74,11 +77,15 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
     if (passport.status === 'LOCKED') return Response.json({ error: 'Product passport is locked' }, { status: 409 });
     const parseResults = await getParseResults(DB, taskId);
-    const contextData = buildFactExtractionContext(parseResults.filter((result) => result.status !== 'FAILED'));
+    const visionRuns = await getLatestCompletedVisionRuns(DB, taskId);
+    const contextData = buildFactExtractionContext(
+      parseResults.filter((result) => result.status !== 'FAILED'),
+      visionRuns,
+    );
     if (contextData.items.length === 0) {
       return Response.json({
         error: contextData.imageBlocksPending > 0
-          ? '当前 Token Plan 仅支持文本模型；任务只有图片内容，需要另配百炼多模态 API Key'
+          ? '任务只有尚未理解的图片内容，请先配置并运行视觉 Agent'
           : '没有可供事实 Agent 使用的解析文本',
       }, { status: 409 });
     }

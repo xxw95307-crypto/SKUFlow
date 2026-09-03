@@ -14,7 +14,8 @@
     "test:day2": "node --experimental-strip-types --test tests/*.test.ts",
     "test:day3": "node --experimental-strip-types --test tests/*.test.ts",
     "test:day4": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:day5": "node --experimental-strip-types --test tests/*.test.ts"
+    "test:day5": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:vision": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "next": "16.2.6",

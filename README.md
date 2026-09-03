@@ -29,6 +29,9 @@ SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的�
 - 通用草稿编译：Product Passport 可真实编译并持久化为每个“平台 × 市场”的 Payload、Schema 版本和校验结果。
 - 多平台兜底：通用 Adapter 覆盖注册表中的 12 个平台，后续平台专用 Adapter 可按优先级无侵入替换。
 - SDK 编译台：可查看接口版本、字段规则、平台注册覆盖、编译摘要与实际 JSON 草稿。
+- 图片视觉理解 Agent：从私有 R2 读取原图，通过百炼 VL 模型抽取 OCR、可见商品属性和归一化图片区域。
+- Agent 间证据交接：视觉结果作为 `VISION` 证据进入事实 Agent，纯图片任务可以继续生成 Product Passport。
+- 视觉运行审计：每张图片独立记录模型、Prompt 版本、输入哈希、结构化结果、Token 与错误。
 
 Product Passport、文件解析、文本事实抽取和通用草稿编译均已使用真实持久化数据；Listing 和素材页面仍是预置演示内容。当前 Token Plan 接口仅用于文本推理，图片块会保留为待多模态处理。Day 6 将接入首批平台的专用字段结构。
 
@@ -48,6 +51,7 @@ pnpm test:day2
 pnpm test:day3
 pnpm test:day4
 pnpm test:day5
+pnpm test:vision
 pnpm lint
 pnpm build
 ```
@@ -65,6 +69,7 @@ lib/workflow/            Agent 任务状态机
 lib/parsers/             图片、PDF、表格与文本解析器
 lib/agents/              事实抽取 Prompt、上下文与输出规范化
 lib/ai/                  百炼 OpenAI 兼容客户端
+lib/agents/vision-analysis.ts  视觉 Prompt 与输出规范化
 lib/platform-sdk/        通用接口、规则编译器与适配器注册表
 tests/                   Day 1–5 验收测试
 ```
