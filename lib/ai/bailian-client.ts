@@ -1,14 +1,6 @@
 import { buildFactExtractionMessages, parseFactExtractionOutput, type ExtractionContext } from '../agents/fact-extraction.ts';
+import type { BailianConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
-
-export const DEFAULT_BAILIAN_BASE_URL = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
-export const DEFAULT_BAILIAN_MODEL = 'qwen3.8-max';
-
-export interface BailianConfig {
-  apiKey: string;
-  baseUrl?: string;
-  model?: string;
-}
 
 export interface BailianFactExtractionResponse {
   output: FactExtractionOutput;
@@ -24,8 +16,9 @@ interface ChatCompletionResponse {
   usage?: Record<string, unknown>;
 }
 
-function normalizeBaseUrl(value: string | undefined): string {
-  const baseUrl = (value || DEFAULT_BAILIAN_BASE_URL).replace(/\/+$/, '');
+function normalizeBaseUrl(value: string): string {
+  const baseUrl = value.trim().replace(/\/+$/, '');
+  if (!baseUrl) throw new Error('BAILIAN_BASE_URL 尚未配置');
   const parsed = new URL(baseUrl);
   if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.aliyuncs.com')) {
     throw new Error('百炼 Base URL 必须使用 aliyuncs.com 的 HTTPS 地址');
@@ -53,7 +46,8 @@ export async function callBailianFactExtraction(
   if (!apiKey) throw new Error('百炼 API Key 尚未配置');
   if (context.items.length === 0) throw new Error('没有可供文本模型抽取的证据内容');
   const baseUrl = normalizeBaseUrl(config.baseUrl);
-  const model = config.model?.trim() || DEFAULT_BAILIAN_MODEL;
+  const model = config.model.trim();
+  if (!model) throw new Error('BAILIAN_MODEL 尚未配置');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
 

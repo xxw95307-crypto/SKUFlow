@@ -1,11 +1,7 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import { buildFactExtractionContext, FACT_EXTRACTION_PROMPT_VERSION } from '@/lib/agents/fact-extraction';
-import {
-  callBailianFactExtraction,
-  DEFAULT_BAILIAN_BASE_URL,
-  DEFAULT_BAILIAN_MODEL,
-  hashExtractionInput,
-} from '@/lib/ai/bailian-client';
+import { callBailianFactExtraction, hashExtractionInput } from '@/lib/ai/bailian-client';
+import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import type { AgentRun } from '@/lib/domain/fact-extraction';
 import type { TaskStatus } from '@/lib/domain/task';
 import {
@@ -30,16 +26,17 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   try {
     await ensureSchema();
     const { taskId } = await context.params;
-    const { DB, BAILIAN_API_KEY, BAILIAN_MODEL } = getBindings();
-    const task = await getTaskSnapshot(DB, taskId);
+    const bindings = getBindings();
+    const config = loadBailianConfig(bindings);
+    const task = await getTaskSnapshot(bindings.DB, taskId);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     return Response.json({
       task,
-      run: await getLatestAgentRun(DB, taskId),
+      run: await getLatestAgentRun(bindings.DB, taskId),
       provider: {
         name: '阿里云百炼',
-        model: BAILIAN_MODEL?.trim() || DEFAULT_BAILIAN_MODEL,
-        configured: Boolean(BAILIAN_API_KEY?.trim()),
+        model: config.model || '未配置',
+        configured: missingBailianConfig(config).length === 0,
         visionSupported: false,
       },
     });
@@ -59,8 +56,11 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const { taskId } = await context.params;
     const bindings = getBindings();
     DB = bindings.DB;
-    const apiKey = bindings.BAILIAN_API_KEY?.trim() ?? '';
-    if (!apiKey) return Response.json({ error: '百炼 API Key 尚未配置' }, { status: 503 });
+    const config = loadBailianConfig(bindings);
+    const missingConfig = missingBailianConfig(config);
+    if (missingConfig.length > 0) {
+      return Response.json({ error: `百炼运行时配置不完整：${missingConfig.join(', ')}` }, { status: 503 });
+    }
 
     const task = await DB.prepare('SELECT id, status FROM tasks WHERE id = ?')
       .bind(taskId)
@@ -83,7 +83,6 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       }, { status: 409 });
     }
 
-    const model = bindings.BAILIAN_MODEL?.trim() || DEFAULT_BAILIAN_MODEL;
     const now = new Date().toISOString();
     runId = `run_${crypto.randomUUID()}`;
     const run: AgentRun = {
@@ -91,7 +90,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       taskId,
       passportId: passport.id,
       provider: 'BAILIAN',
-      model,
+      model: config.model,
       promptVersion: FACT_EXTRACTION_PROMPT_VERSION,
       status: 'RUNNING',
       inputHash: await hashExtractionInput(contextData.prompt),
@@ -103,11 +102,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     };
     await prepareAgentRunStart(DB, run).run();
 
-    const modelResponse = await callBailianFactExtraction({
-      apiKey,
-      baseUrl: bindings.BAILIAN_BASE_URL || DEFAULT_BAILIAN_BASE_URL,
-      model,
-    }, contextData);
+    const modelResponse = await callBailianFactExtraction(config, contextData);
     const completedAt = new Date().toISOString();
     const summary = await applyFactExtraction(DB, {
       runId,

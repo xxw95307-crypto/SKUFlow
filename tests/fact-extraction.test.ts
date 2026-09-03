@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildFactExtractionContext, parseFactExtractionOutput } from '../lib/agents/fact-extraction.ts';
 import { callBailianFactExtraction } from '../lib/ai/bailian-client.ts';
+import { loadBailianConfig, missingBailianConfig } from '../lib/config/bailian.ts';
 import type { UnifiedParseResult } from '../lib/domain/document-parsing.ts';
 
 function parseResult(): UnifiedParseResult {
@@ -55,6 +56,25 @@ test('normalizes model facts, evidence refs and conflict candidates', () => {
   assert.equal(output.facts[0].confidence, 1);
   assert.deepEqual(output.facts[0].evidenceRefs, ['E1']);
   assert.equal(output.facts[0].alternatives[0].value, 400);
+});
+
+test('loads all Bailian settings from the runtime environment without source defaults', () => {
+  const complete = loadBailianConfig({
+    BAILIAN_API_KEY: ' secret ',
+    BAILIAN_BASE_URL: ' https://example.aliyuncs.com/v1 ',
+    BAILIAN_MODEL: ' qwen3.8-max ',
+  });
+  assert.deepEqual(complete, {
+    apiKey: 'secret',
+    baseUrl: 'https://example.aliyuncs.com/v1',
+    model: 'qwen3.8-max',
+  });
+  assert.deepEqual(missingBailianConfig(complete), []);
+  assert.deepEqual(missingBailianConfig(loadBailianConfig({})), [
+    'BAILIAN_API_KEY',
+    'BAILIAN_BASE_URL',
+    'BAILIAN_MODEL',
+  ]);
 });
 
 test('calls the Bailian OpenAI-compatible endpoint with JSON mode and no thinking', async () => {
