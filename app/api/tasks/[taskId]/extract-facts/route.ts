@@ -2,7 +2,6 @@ import { ensureSchema, getBindings } from '@/db/client';
 import { buildFactExtractionContext, FACT_EXTRACTION_PROMPT_VERSION } from '@/lib/agents/fact-extraction';
 import { callBailianFactExtraction, hashExtractionInput } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
-import { loadBailianVisionConfig, missingBailianVisionConfig } from '@/lib/config/bailian-vision';
 import type { AgentRun } from '@/lib/domain/fact-extraction';
 import type { TaskStatus } from '@/lib/domain/task';
 import {
@@ -30,7 +29,6 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
     const { taskId } = await context.params;
     const bindings = getBindings();
     const config = loadBailianConfig(bindings);
-    const visionConfig = loadBailianVisionConfig(bindings);
     const task = await getTaskSnapshot(bindings.DB, taskId);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     return Response.json({
@@ -40,7 +38,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
         name: '阿里云百炼',
         model: config.model || '未配置',
         configured: missingBailianConfig(config).length === 0,
-        visionSupported: missingBailianVisionConfig(visionConfig).length === 0,
+        visionSupported: missingBailianConfig(config).length === 0,
       },
     });
   } catch (error) {

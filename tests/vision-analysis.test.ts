@@ -2,27 +2,27 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildFactExtractionContext } from '../lib/agents/fact-extraction.ts';
 import { parseVisionAnalysisOutput } from '../lib/agents/vision-analysis.ts';
-import { callBailianVisionAnalysis } from '../lib/ai/bailian-vision-client.ts';
-import { loadBailianVisionConfig, missingBailianVisionConfig } from '../lib/config/bailian-vision.ts';
+import { callBailianVisionAnalysis } from '../lib/ai/bailian-client.ts';
+import { loadBailianConfig, missingBailianConfig } from '../lib/config/bailian.ts';
 import type { UnifiedParseResult } from '../lib/domain/document-parsing.ts';
 import type { VisionAgentRun } from '../lib/domain/vision-analysis.ts';
 
-test('loads an independent vision endpoint and falls back to the server-side Bailian key', () => {
-  const config = loadBailianVisionConfig({
+test('uses the same Bailian model configuration for text and image understanding', () => {
+  const config = loadBailianConfig({
     BAILIAN_API_KEY: ' shared-key ',
-    BAILIAN_VISION_BASE_URL: ' https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 ',
-    BAILIAN_VISION_MODEL: ' qwen3-vl-plus ',
+    BAILIAN_BASE_URL: ' https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 ',
+    BAILIAN_MODEL: ' qwen3.8-max ',
   });
   assert.deepEqual(config, {
     apiKey: 'shared-key',
-    baseUrl: 'https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3-vl-plus',
+    baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.8-max',
   });
-  assert.deepEqual(missingBailianVisionConfig(config), []);
-  assert.deepEqual(missingBailianVisionConfig(loadBailianVisionConfig({})), [
-    'BAILIAN_VISION_API_KEY 或 BAILIAN_API_KEY',
-    'BAILIAN_VISION_BASE_URL',
-    'BAILIAN_VISION_MODEL',
+  assert.deepEqual(missingBailianConfig(config), []);
+  assert.deepEqual(missingBailianConfig(loadBailianConfig({})), [
+    'BAILIAN_API_KEY',
+    'BAILIAN_BASE_URL',
+    'BAILIAN_MODEL',
   ]);
 });
 
@@ -49,8 +49,8 @@ test('sends a private Base64 image through the OpenAI-compatible vision request'
   let requestBody: Record<string, unknown> | null = null;
   const response = await callBailianVisionAnalysis({
     apiKey: 'test-key',
-    baseUrl: 'https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3-vl-plus',
+    baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.8-max',
   }, {
     bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
     contentType: 'image/jpeg',
@@ -60,14 +60,14 @@ test('sends a private Base64 image through the OpenAI-compatible vision request'
     requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
       id: 'vision-request',
-      model: 'qwen3-vl-plus',
+      model: 'qwen3.8-max',
       choices: [{ message: { content: JSON.stringify({ summary: '商品图', visible_text: '', facts: [], warnings: [] }) } }],
       usage: { total_tokens: 42 },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch);
 
   const messages = requestBody?.messages as Array<{ content: Array<{ type: string; image_url?: { url: string } }> }>;
-  assert.equal(requestBody?.model, 'qwen3-vl-plus');
+  assert.equal(requestBody?.model, 'qwen3.8-max');
   assert.deepEqual(requestBody?.response_format, { type: 'json_object' });
   assert.equal(requestBody?.enable_thinking, false);
   assert.match(messages[0].content[0].image_url?.url ?? '', /^data:image\/jpeg;base64,/);
@@ -85,7 +85,7 @@ test('turns a completed Vision Agent run into citable VISION evidence', () => {
   };
   const visionRun: VisionAgentRun = {
     id: 'vision_1', taskId: 'task_1', passportId: 'passport_1', fileId: 'file_1', provider: 'BAILIAN',
-    model: 'qwen3-vl-plus', promptVersion: 'vision-v1', status: 'COMPLETED', inputHash: 'source-hash',
+    model: 'qwen3.8-max', promptVersion: 'vision-v1', status: 'COMPLETED', inputHash: 'source-hash',
     result: {
       summary: '商品包装图', visibleText: 'BlendGo', warnings: [],
       facts: [{ key: 'product.brand', label: '品牌', value: 'BlendGo', unit: null, confidence: 0.98, bbox: [100, 100, 500, 220] }],

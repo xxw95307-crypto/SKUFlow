@@ -97,7 +97,7 @@ export function VisionAnalysisPanel({ task }: { task: TaskSnapshot }) {
         <h3>百炼商品视觉理解 Agent</h3>
         <p>读取 R2 原图，识别可见文字与商品属性，并生成可定位的视觉证据。</p>
       </div>
-      <div className="agent-provider"><i className={provider?.configured ? 'online' : ''} /><span>{provider?.name ?? '阿里云百炼视觉'}<small>{provider?.model ?? '读取配置中'}</small></span></div>
+      <div className="agent-provider"><i className={provider?.configured ? 'online' : ''} /><span>{provider?.name ?? '阿里云百炼'}<small>{provider?.model ?? '读取配置中'}</small></span></div>
       <div className="vision-actions">
         <button className="ghost small" type="button" onClick={downloadJson} disabled={runs.length === 0}>下载视觉 JSON</button>
         <button type="button" onClick={analyzeImages} disabled={busy || !provider?.configured || files.length === 0}>
@@ -107,11 +107,11 @@ export function VisionAnalysisPanel({ task }: { task: TaskSnapshot }) {
     </div>
 
     {!provider?.configured && provider && <div className="vision-config-note">
-      <b>视觉模型尚未配置</b>
-      <span>还需在服务端填写 {provider.missing.join('、')}。现有 Token Plan 文本端点不会被错误复用。</span>
+      <b>百炼模型尚未配置</b>
+      <span>还需在服务端填写 {provider.missing.join('、')}。视觉理解与事实抽取共用同一套配置。</span>
     </div>}
     {provider?.configured && <div className="vision-security-note">
-      <b>私有图片链路</b><span>图片从 R2 读取并以 Base64 请求视觉模型，不生成公开文件 URL；模型输出独立存档后交给事实 Agent。</span>
+      <b>统一模型链路</b><span>图片从 R2 私有读取，由当前百炼模型完成视觉理解；同一模型随后合并文档证据并抽取商品事实。</span>
     </div>}
     {error && <div className="form-error" role="alert">{error}</div>}
 

@@ -16,13 +16,12 @@ R2 原始图片
 ## 百炼配置
 
 ```dotenv
-# 若视觉模型与文本模型使用同一个百炼工作空间，可省略该项并复用 BAILIAN_API_KEY。
-BAILIAN_VISION_API_KEY=
-BAILIAN_VISION_BASE_URL=https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
-BAILIAN_VISION_MODEL=qwen3-vl-plus
+BAILIAN_API_KEY=
+BAILIAN_BASE_URL=https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+BAILIAN_MODEL=qwen3.8-max
 ```
 
-Token Plan、Coding Plan 与按量付费/工作空间的 Key 和 Base URL 彼此隔离。必须使用实际开通了视觉理解模型的工作空间地址和对应 Key；图片生成模型不能代替视觉理解模型。
+视觉理解 Agent 与事实抽取 Agent 共用这一套配置。`qwen3.8-max` 原生支持图片理解和结构化输出，因此只需要一个模型客户端；两个 Agent 仅代表不同的任务 Prompt、输入和审计记录。图片生成仍属于另一类能力，后续需要时再接入图片生成模型。
 
 ## API
 

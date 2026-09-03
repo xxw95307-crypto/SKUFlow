@@ -36,8 +36,8 @@
 - `BAILIAN_API_KEY` 仅作为服务端托管环境的加密变量存在；仓库只有空值示例。
 - 浏览器接口只返回“是否已配置”，不会返回密钥内容。
 - API 错误只保留 HTTP 状态和 Request ID，不记录响应正文，避免供应商响应意外进入日志。
-- 当前 Token Plan 专属接口支持文本推理，因此 PDF/Excel/TXT 的已解析文本可进入 Agent；图片内容块只计数并标记为待视觉处理。
-- 图片商品参数要在后续接入支持视觉理解的百炼多模态模型及相应 API 凭据，不能复用本阶段的文本能力假装识图。
+- 当前 Token Plan 的 `qwen3.8-max` 同时支持文本推理和视觉理解；图片先由视觉 Agent 生成证据，再与 PDF/Excel/TXT 内容一起交给事实 Agent。
+- 两个 Agent 共用 `BAILIAN_API_KEY`、`BAILIAN_BASE_URL` 和 `BAILIAN_MODEL`，只通过不同 Prompt 和运行记录区分职责。
 
 ## Day 4 / Day 5 分界
 

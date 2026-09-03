@@ -1,7 +1,7 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import { VISION_ANALYSIS_PROMPT_VERSION } from '@/lib/agents/vision-analysis';
-import { callBailianVisionAnalysis, hashVisionInput } from '@/lib/ai/bailian-vision-client';
-import { loadBailianVisionConfig, missingBailianVisionConfig } from '@/lib/config/bailian-vision';
+import { callBailianVisionAnalysis, hashVisionInput } from '@/lib/ai/bailian-client';
+import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import type { TaskStatus } from '@/lib/domain/task';
 import type { VisionAgentRun } from '@/lib/domain/vision-analysis';
 import { getProductPassport } from '@/lib/server/passport-store';
@@ -51,15 +51,15 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
     const bindings = getBindings();
     const task = await getTaskSnapshot(bindings.DB, taskId);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
-    const config = loadBailianVisionConfig(bindings);
+    const config = loadBailianConfig(bindings);
     const files = await getImageFiles(bindings.DB, taskId);
     const runs = await getLatestVisionRuns(bindings.DB, taskId);
     return Response.json({
       provider: {
-        name: '阿里云百炼视觉',
+        name: '阿里云百炼',
         model: config.model || '未配置',
-        configured: missingBailianVisionConfig(config).length === 0,
-        missing: missingBailianVisionConfig(config),
+        configured: missingBailianConfig(config).length === 0,
+        missing: missingBailianConfig(config),
       },
       files: files.map((file) => ({ id: file.id, filename: file.filename, contentType: file.content_type, size: file.size })),
       runs,
@@ -79,10 +79,10 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
     const { taskId } = await context.params;
     const force = await parseForce(request);
     const bindings = getBindings();
-    const config = loadBailianVisionConfig(bindings);
-    const missingConfig = missingBailianVisionConfig(config);
+    const config = loadBailianConfig(bindings);
+    const missingConfig = missingBailianConfig(config);
     if (missingConfig.length > 0) {
-      return Response.json({ error: `百炼视觉运行时配置不完整：${missingConfig.join(', ')}` }, { status: 503 });
+      return Response.json({ error: `百炼运行时配置不完整：${missingConfig.join(', ')}` }, { status: 503 });
     }
 
     const task = await bindings.DB.prepare('SELECT id, product_name, status FROM tasks WHERE id = ?')

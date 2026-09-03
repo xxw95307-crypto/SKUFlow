@@ -79,8 +79,8 @@ export function FactExtractionPanel({
       <button type="button" onClick={extractFacts} disabled={busy || !provider?.configured}>{busy ? 'Agent 正在推理…' : '启动事实抽取'}</button>
     </div>
 
-    {!provider?.visionSupported && <div className="agent-capability-note"><b>视觉链路待配置</b><span>PDF/Excel/TXT 可直接抽取；纯图片任务需要先配置并运行上方视觉 Agent。</span></div>}
-    {provider?.visionSupported && <div className="agent-capability-note ready"><b>Agent 间交接已启用</b><span>事实 Agent 会合并文档内容块与已完成的 VISION 证据，纯图片任务也可继续抽取。</span></div>}
+    {!provider?.visionSupported && <div className="agent-capability-note"><b>百炼模型待配置</b><span>配置一次 API Key、Base URL 和模型后，即可同时运行视觉理解与事实抽取。</span></div>}
+    {provider?.visionSupported && <div className="agent-capability-note ready"><b>统一模型已启用</b><span>当前百炼模型同时处理图片理解和事实抽取，并保留 Agent 间的证据交接。</span></div>}
     {!provider?.configured && provider && <div className="form-error">百炼运行时密钥尚未配置，事实抽取按钮已停用。</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
 
