@@ -299,3 +299,33 @@ export async function getProductPassport(DB: D1Database, taskId: string): Promis
     updatedAt: passport.updated_at,
   };
 }
+
+export interface CompiledDraftWrite {
+  draftId: string;
+  status: Extract<PlatformDraftStatus, 'NEEDS_REVIEW' | 'VALIDATED'>;
+  schemaVersion: string;
+  payload: Record<string, unknown>;
+  validationIssues: DraftValidationIssue[];
+}
+
+export async function saveCompiledDrafts(
+  DB: D1Database,
+  passportId: string,
+  drafts: readonly CompiledDraftWrite[],
+  now = new Date().toISOString(),
+): Promise<void> {
+  if (drafts.length === 0) return;
+  await DB.batch(drafts.map((draft) => DB.prepare(
+    `UPDATE platform_drafts
+     SET status = ?, schema_version = ?, payload_json = ?, validation_json = ?, updated_at = ?
+     WHERE id = ? AND passport_id = ?`,
+  ).bind(
+    draft.status,
+    draft.schemaVersion,
+    JSON.stringify(draft.payload),
+    JSON.stringify(draft.validationIssues),
+    now,
+    draft.draftId,
+    passportId,
+  )));
+}

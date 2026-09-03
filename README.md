@@ -2,7 +2,7 @@
 
 SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的商品事实档案，并通过平台适配器编译为不同电商平台的上架草稿。
 
-## Day 1–4 已完成
+## Day 1–5 已完成
 
 - 真实文件上传：源文件进入 R2 对象存储。
 - 持久化任务：任务、文件元数据和状态事件进入 D1。
@@ -25,8 +25,12 @@ SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的�
 - 冲突与缺失检测：同一字段的多个候选值进入冲突账本，16 个核心字段无证据时明确标记为缺失。
 - Agent 运行记录：持久化模型、Prompt 版本、输入哈希、运行状态、结构化输出与 Token 用量。
 - 密钥隔离：百炼 API Key 只从服务端运行时加密变量读取，不进入浏览器、源码或数据库。
+- Platform Adapter SDK：统一 `PlatformAdapter` 编译接口、版本化规则配置和按优先级解析的 Adapter Registry。
+- 通用草稿编译：Product Passport 可真实编译并持久化为每个“平台 × 市场”的 Payload、Schema 版本和校验结果。
+- 多平台兜底：通用 Adapter 覆盖注册表中的 12 个平台，后续平台专用 Adapter 可按优先级无侵入替换。
+- SDK 编译台：可查看接口版本、字段规则、平台注册覆盖、编译摘要与实际 JSON 草稿。
 
-Product Passport、文件解析和文本事实抽取均已使用真实持久化数据；Listing 和素材页面仍是预置演示内容。当前 Token Plan 接口仅用于文本推理，图片块会保留为待多模态处理。Day 5 将开始 Platform Adapter SDK。
+Product Passport、文件解析、文本事实抽取和通用草稿编译均已使用真实持久化数据；Listing 和素材页面仍是预置演示内容。当前 Token Plan 接口仅用于文本推理，图片块会保留为待多模态处理。Day 6 将接入首批平台的专用字段结构。
 
 ## 本地运行
 
@@ -43,6 +47,7 @@ pnpm test:day1
 pnpm test:day2
 pnpm test:day3
 pnpm test:day4
+pnpm test:day5
 pnpm lint
 pnpm build
 ```
@@ -60,7 +65,8 @@ lib/workflow/            Agent 任务状态机
 lib/parsers/             图片、PDF、表格与文本解析器
 lib/agents/              事实抽取 Prompt、上下文与输出规范化
 lib/ai/                  百炼 OpenAI 兼容客户端
-tests/                   Day 1–4 验收测试
+lib/platform-sdk/        通用接口、规则编译器与适配器注册表
+tests/                   Day 1–5 验收测试
 ```
 
 ## 密钥安全

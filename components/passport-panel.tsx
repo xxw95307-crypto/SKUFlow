@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { AdapterSdkPanel } from '@/components/adapter-sdk-panel';
 import { FactExtractionPanel } from '@/components/fact-extraction-panel';
 import { ParseResultsPanel } from '@/components/parse-results-panel';
 import type { EvidenceRecord, ProductFact, ProductPassport } from '@/lib/domain/product-passport';
@@ -142,6 +143,7 @@ export function PassportPanel({
 
     <ParseResultsPanel task={task} />
     <FactExtractionPanel task={task} onPassportUpdate={setPassport} onTaskUpdate={onTaskChange} />
+    <AdapterSdkPanel task={task} passport={passport} onPassportUpdate={setPassport} />
 
     <div className="passport-metrics">
       <article><b>{passport.facts.length}</b><span>商品事实</span></article>
@@ -180,7 +182,7 @@ export function PassportPanel({
 
     <div className="footer-actions">
       <span>{confirmedCount} 项已确认 · {missingCount} 项待补充 · 数据版本 v{passport.version}</span>
-      <button className="primary" type="button" onClick={onNext}>查看 Day 3 平台版本预览 →</button>
+      <button className="primary" type="button" onClick={onNext}>查看平台内容预览 →</button>
     </div>
   </section>;
 }
