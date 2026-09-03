@@ -33,16 +33,20 @@ test('normalizes visual facts, OCR text and normalized image boxes', () => {
     facts: [
       { key: 'product.brand', label: '品牌', value: 'BlendGo', confidence: 1.2, bbox: [-5, 10, 1100, 220] },
       { key: 'product.brand', label: '品牌', value: 'Lower confidence', confidence: 0.2, bbox: null },
+      { key: 'blade.count', label: '叶片数量', value: 4, unit: '片', confidence: 0.94, bbox: [100, 250, 800, 900] },
+      { key: 'product.price', label: '促销价', value: 99, unit: 'CNY', confidence: 0.99, bbox: null },
       { key: 'invalid key', value: 'ignored' },
     ],
     warnings: ['侧面文字不清晰'],
   }));
 
-  assert.equal(output.facts.length, 1);
+  assert.equal(output.facts.length, 2);
   assert.equal(output.facts[0].value, 'BlendGo');
   assert.equal(output.facts[0].confidence, 1);
   assert.deepEqual(output.facts[0].bbox, [0, 10, 1000, 220]);
   assert.equal(output.visibleText, 'BlendGo 380ml');
+  assert.equal(output.facts[1].key, 'product.blade_count');
+  assert.equal(output.facts[1].label, '刀片数量');
 });
 
 test('sends a private Base64 image through the OpenAI-compatible vision request', async () => {

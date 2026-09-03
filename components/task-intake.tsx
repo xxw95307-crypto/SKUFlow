@@ -21,6 +21,7 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
   const [files, setFiles] = useState<File[]>([]);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
 
   const addFiles = (incoming: FileList | File[]) => {
@@ -40,19 +41,33 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
     setMarkets((current) => current.includes(market) ? current.filter((item) => item !== market) : [...current, market]);
   };
 
-  const createTask = async () => {
-    if (files.length === 0) {
-      setError('请先选择至少一个商品资料文件。');
-      return;
-    }
-    if (platforms.length === 0 || markets.length === 0) {
-      setError('请至少选择一个目标市场和一个平台。');
-      return;
+  const generatePassport = async (currentTask: TaskSnapshot) => {
+    setProgress('正在读取全部商品资料…');
+    const parseResponse = await fetch(`/api/tasks/${currentTask.id}/parse`, { method: 'POST' });
+    const parsePayload = await parseResponse.json() as { task?: TaskSnapshot; error?: string };
+    if (!parseResponse.ok || !parsePayload.task) throw new Error(parsePayload.error || '文件解析失败');
+
+    if (currentTask.files.some((file) => file.contentType.startsWith('image/'))) {
+      setProgress('正在从图片提取商品属性…');
+      const visionResponse = await fetch(`/api/tasks/${currentTask.id}/analyze-images`, { method: 'POST' });
+      const visionPayload = await visionResponse.json() as { error?: string };
+      if (!visionResponse.ok) throw new Error(visionPayload.error || '图片属性提取失败');
     }
 
+    setProgress('正在合并属性并检查冲突…');
+    const factResponse = await fetch(`/api/tasks/${currentTask.id}/extract-facts`, { method: 'POST' });
+    const factPayload = await factResponse.json() as { task?: TaskSnapshot; error?: string };
+    if (!factResponse.ok || !factPayload.task) throw new Error(factPayload.error || '商品档案生成失败');
+    onNext(factPayload.task);
+  };
+
+  const createTask = async () => {
+    if (files.length === 0) return setError('请先选择至少一个商品资料文件。');
+    if (platforms.length === 0 || markets.length === 0) return setError('请至少选择一个目标市场和一个平台。');
     setBusy(true);
     setError('');
     try {
+      setProgress('正在安全上传资料…');
       const body = new FormData();
       body.set('productName', productName);
       body.set('markets', JSON.stringify(markets));
@@ -63,32 +78,33 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
       const payload = await response.json() as { task?: TaskSnapshot; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || '任务创建失败');
       setTask(payload.task);
+      await generatePassport(payload.task);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '任务创建失败');
     } finally {
       setBusy(false);
+      setProgress('');
     }
   };
 
-  const parseFiles = async () => {
+  const continueTask = async () => {
     if (!task) return;
     setBusy(true);
     setError('');
     try {
-      const response = await fetch(`/api/tasks/${task.id}/parse`, { method: 'POST' });
-      const payload = await response.json() as { task?: TaskSnapshot; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || '文件解析失败');
-      setTask(payload.task);
-      onNext(payload.task);
+      await generatePassport(task);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '文件解析失败');
+      setError(caught instanceof Error ? caught.message : '商品档案生成失败');
     } finally {
       setBusy(false);
+      setProgress('');
     }
   };
 
   return <section className="panel upload-panel">
-    <div className="section-heading"><div><span>DAY 03 · UNIFIED PARSING</span><h2>上传并解析商品资料</h2><p>源文件安全保存后，统一解析图片、PDF、Excel、CSV 与文本。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
+    <div className="section-heading"><div><span>ONE PRODUCT · ALL SOURCES</span><h2>上传同一个商品的全部资料</h2><p>图片、说明书和参数表会被统一处理，直接生成可核对的商品属性。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
+
+    <div className="single-product-note"><b>一次任务对应一个商品</b><span>请把该商品的图片、参数表、说明书和其他资料一起上传，系统会自动合并并检查冲突。</span></div>
 
     <div className="intake-fields">
       <label><span>商品名称</span><input value={productName} maxLength={120} onChange={(event) => setProductName(event.target.value)} /></label>
@@ -104,6 +120,6 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
     <div className="file-list">{files.length === 0 ? <div className="empty-files"><b>尚未选择文件</b><span>建议至少包含商品主图与一份参数资料</span></div> : files.map((file, index) => <div className="file-row" key={`${file.name}:${file.size}`}><span className="file-icon image">{file.name.split('.').pop()?.slice(0, 3).toUpperCase()}</span><div><b>{file.name}</b><small>{formatBytes(file.size)} · 等待安全上传</small></div><button className="remove-file" type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>移除</button></div>)}</div>
 
     {error && <div className="form-error" role="alert">{error}</div>}
-    {task ? <div className="task-created"><div><span>✓</span><div><b>{TASK_STATUS_LABELS[task.status]}</b><small>{task.id} · {task.files.length} 个源文件等待统一解析</small></div></div><button type="button" onClick={parseFiles} disabled={busy}>{busy ? '正在解析文件…' : '开始解析并查看结果 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? '正在创建任务…' : '创建任务并安全上传'} <span>支持 5 类解析入口</span></button>}
+    {task ? <div className="task-created"><div><span>✓</span><div><b>{busy ? progress : TASK_STATUS_LABELS[task.status]}</b><small>{task.files.length} 个文件属于同一个商品</small></div></div><button type="button" onClick={continueTask} disabled={busy}>{busy ? '处理中…' : '继续生成商品档案 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? progress : '上传资料并生成商品档案'} <span>自动提取属性与检查冲突</span></button>}
   </section>;
 }

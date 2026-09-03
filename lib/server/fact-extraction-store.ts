@@ -84,6 +84,7 @@ function evidenceLabel(item: ExtractionEvidenceItem): string {
   if (item.locator.kind === 'PAGE') return `${item.filename} · 第 ${item.locator.page} 页`;
   if (item.locator.kind === 'TABLE_RANGE') return `${item.filename} · ${item.locator.sheet ?? '工作表'} ${item.locator.range ?? ''}`.trim();
   if (item.locator.kind === 'TEXT_LINES') return `${item.filename} · 行 ${item.locator.lineStart ?? '?'}–${item.locator.lineEnd ?? '?'}`;
+  if (item.sourceKind === 'VISION') return `${item.filename} · 图片证据`;
   return item.filename;
 }
 
@@ -205,6 +206,11 @@ export async function applyFactExtraction(
       const conflictCandidates: ConflictCandidate[] = candidates.map((candidate, index) => ({
         id: `candidate_${input.runId}_${extracted.key.replace(/[^a-z0-9]/g, '_')}_${index + 1}`,
         value: candidate.value,
+        unit: candidate.unit,
+        confidence: candidate.confidence,
+        sourceKind: candidate.evidenceRefs
+          .map((ref) => evidenceByRef.get(ref)?.sourceKind)
+          .find((sourceKind) => sourceKind !== undefined),
         sourceLabel: candidate.evidenceRefs[0]
           ? evidenceLabel(evidenceByRef.get(candidate.evidenceRefs[0]) as ExtractionEvidenceItem)
           : '用户确认值',

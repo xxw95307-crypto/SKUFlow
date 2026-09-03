@@ -1,7 +1,13 @@
 import type { FactValue } from '../domain/product-passport';
+import {
+  isStableProductAttributeKey,
+  normalizeProductAttributeKey,
+  PRODUCT_ATTRIBUTE_DEFINITIONS,
+  productAttributeLabel,
+} from '../domain/product-attributes.ts';
 import type { NormalizedImageBox, VisionAnalysisOutput, VisionFactObservation } from '../domain/vision-analysis';
 
-export const VISION_ANALYSIS_PROMPT_VERSION = 'vision-v1';
+export const VISION_ANALYSIS_PROMPT_VERSION = 'vision-v2';
 
 export interface VisionPromptContext {
   filename: string;
@@ -58,13 +64,17 @@ export function parseVisionAnalysisOutput(content: string): VisionAnalysisOutput
   for (const rawFact of root.facts.slice(0, 60)) {
     if (!rawFact || typeof rawFact !== 'object') continue;
     const record = rawFact as Record<string, unknown>;
-    const key = typeof record.key === 'string' ? record.key.trim().toLowerCase() : '';
+    const key = typeof record.key === 'string' ? normalizeProductAttributeKey(record.key) : '';
     if (!/^[a-z][a-z0-9_.-]{1,79}$/.test(key)) continue;
+    if (!isStableProductAttributeKey(key)) continue;
     const value = normalizeValue(record.value);
     if (value === undefined || value === '') continue;
     const candidate: VisionFactObservation = {
       key,
-      label: typeof record.label === 'string' && record.label.trim() ? record.label.trim().slice(0, 80) : key,
+      label: productAttributeLabel(
+        key,
+        typeof record.label === 'string' && record.label.trim() ? record.label.trim().slice(0, 80) : key,
+      ),
       value,
       unit: typeof record.unit === 'string' && record.unit.trim() ? record.unit.trim().slice(0, 30) : null,
       confidence: normalizeConfidence(record.confidence),
@@ -87,11 +97,15 @@ export function parseVisionAnalysisOutput(content: string): VisionAnalysisOutput
 }
 
 export function buildVisionAnalysisPrompt(context: VisionPromptContext): string {
+  const canonicalFields = PRODUCT_ATTRIBUTE_DEFINITIONS.map((item) => `${item.key} (${item.label})`).join(', ');
   return [
-    '你是跨境电商商品视觉理解 Agent。只报告图片中直接可见或可读的内容，不使用常识补全，不猜测看不见的规格。',
+    '你是跨境电商图片商品属性抽取 Agent。本任务的全部图片和文档都属于同一个商品。',
+    '只报告图片中直接可见或可读的稳定商品属性，不使用常识补全，不猜测看不见的规格。价格、折扣、销量、店铺信息和界面按钮不要作为商品属性输出。',
     `任务商品名称仅作为检索提示：${JSON.stringify(context.productName)}。如果图片与名称不一致，以图片为准并写入 warnings。`,
     `源文件：${JSON.stringify(context.filename)}。`,
-    '提取包装文字、品牌、型号、品名、颜色、材质、容量、功率、电压、尺寸、重量、电池、包装清单与认证标识。没有证据的字段不要生成。',
+    '提取包装文字、品牌、型号、品名、颜色、材质、容量、功率、电压、尺寸、重量、电池、包装清单、认证标识以及清晰可见的物理结构。',
+    '例如刀片清晰可数时使用 product.blade_count；若有遮挡，只能描述可见数量并降低置信度，不能断言总数。没有证据的字段不要生成。',
+    `尽量使用以下规范字段名：${canonicalFields}`,
     'bbox 使用 [x1,y1,x2,y2]，坐标归一化到 0–1000；无法定位或依据为整张图时填 null。confidence 范围为 0–1。',
     '请输出标准 JSON，不要输出 Markdown。必须符合：',
     '{"summary":"图片整体描述","visible_text":"按阅读顺序记录可见文字","facts":[{"key":"product.brand","label":"品牌","value":"示例","unit":null,"confidence":0.95,"bbox":[100,100,400,220]}],"warnings":[]}',

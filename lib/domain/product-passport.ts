@@ -76,6 +76,9 @@ export type ConflictStatus = 'OPEN' | 'RESOLVED' | 'DISMISSED';
 export interface ConflictCandidate {
   id: string;
   value: FactValue;
+  unit?: string | null;
+  confidence?: number;
+  sourceKind?: EvidenceSourceKind;
   sourceLabel: string;
   evidenceIds: string[];
 }

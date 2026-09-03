@@ -6,30 +6,19 @@ import type {
   FactExtractionOutput,
 } from '../domain/fact-extraction';
 import type { EvidenceLocator, FactValue } from '../domain/product-passport';
+import {
+  isStableProductAttributeKey,
+  normalizeProductAttributeKey,
+  PRODUCT_ATTRIBUTE_DEFINITIONS,
+  productAttributeLabel,
+} from '../domain/product-attributes.ts';
 import type { VisionAgentRun } from '../domain/vision-analysis';
 
-export const FACT_EXTRACTION_PROMPT_VERSION = 'day4-v1';
+export const FACT_EXTRACTION_PROMPT_VERSION = 'day4-v2';
 const MAX_EVIDENCE_ITEMS = 120;
 const MAX_EVIDENCE_CHARACTERS = 60_000;
 
-export const REQUIRED_FACT_DEFINITIONS = [
-  { key: 'product.name', label: '商品名称' },
-  { key: 'product.brand', label: '品牌' },
-  { key: 'product.model', label: '型号' },
-  { key: 'product.category_hint', label: '候选类目' },
-  { key: 'product.description', label: '商品描述' },
-  { key: 'product.material', label: '主要材质' },
-  { key: 'product.color', label: '颜色' },
-  { key: 'product.capacity', label: '容量' },
-  { key: 'product.power', label: '额定功率' },
-  { key: 'product.voltage', label: '额定电压' },
-  { key: 'product.weight.net', label: '商品净重' },
-  { key: 'product.dimensions', label: '商品尺寸' },
-  { key: 'battery.capacity', label: '电池容量' },
-  { key: 'battery.energy', label: '电池能量' },
-  { key: 'package.contents', label: '包装清单' },
-  { key: 'compliance.certifications', label: '认证信息' },
-] as const;
+export const REQUIRED_FACT_DEFINITIONS = PRODUCT_ATTRIBUTE_DEFINITIONS.filter((definition) => definition.required);
 
 export interface ExtractionContext {
   items: ExtractionEvidenceItem[];
@@ -155,7 +144,7 @@ export function buildFactExtractionContext(
   }
 
   const prompt = items.map((item) => [
-    `[${item.ref}] file=${JSON.stringify(item.filename)} locator=${describeLocator(item.locator)}`,
+    `[${item.ref}] source=${item.sourceKind} file=${JSON.stringify(item.filename)} locator=${describeLocator(item.locator)}`,
     item.excerpt,
   ].join('\n')).join('\n\n---\n\n');
 
@@ -226,11 +215,13 @@ export function parseFactExtractionOutput(content: string, evidenceItems: Extrac
   for (const rawFact of root.facts.slice(0, 60)) {
     if (!rawFact || typeof rawFact !== 'object') continue;
     const record = rawFact as Record<string, unknown>;
-    const key = typeof record.key === 'string' ? record.key.trim().toLowerCase() : '';
+    const key = typeof record.key === 'string' ? normalizeProductAttributeKey(record.key) : '';
     if (!/^[a-z][a-z0-9_.-]{1,79}$/.test(key)) continue;
+    if (!isStableProductAttributeKey(key)) continue;
     const candidate = normalizeCandidate(record, knownRefs);
     if (!candidate || candidate.evidenceRefs.length === 0) continue;
-    const label = typeof record.label === 'string' && record.label.trim() ? record.label.trim().slice(0, 80) : key;
+    const rawLabel = typeof record.label === 'string' && record.label.trim() ? record.label.trim().slice(0, 80) : key;
+    const label = productAttributeLabel(key, rawLabel);
     const alternatives = Array.isArray(record.alternatives)
       ? record.alternatives.map((item) => normalizeCandidate(item, knownRefs)).filter((item): item is ExtractedCandidate => item !== null && item.evidenceRefs.length > 0)
       : [];
@@ -251,21 +242,35 @@ export function parseFactExtractionOutput(content: string, evidenceItems: Extrac
 }
 
 export function factValueKey(value: FactValue, unit: string | null): string {
-  return `${JSON.stringify(value)}::${unit ?? ''}`.toLowerCase();
+  const normalizedUnit = (unit ?? '').trim().toLowerCase().replace(/\s+/g, '');
+  const numericValue = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : null;
+  if (numericValue !== null) {
+    if (['l', 'liter', 'litre', '升'].includes(normalizedUnit)) return `${numericValue * 1_000}::ml`;
+    if (['ml', 'milliliter', 'millilitre', '毫升'].includes(normalizedUnit)) return `${numericValue}::ml`;
+    if (['kg', '千克', '公斤'].includes(normalizedUnit)) return `${numericValue * 1_000}::g`;
+    if (['g', 'gram', '克'].includes(normalizedUnit)) return `${numericValue}::g`;
+    return `${numericValue}::${normalizedUnit}`;
+  }
+  return `${JSON.stringify(value)}::${normalizedUnit}`.toLowerCase();
 }
 
 export function buildFactExtractionMessages(context: ExtractionContext): Array<{ role: 'system' | 'user'; content: string }> {
-  const requiredFields = REQUIRED_FACT_DEFINITIONS.map((item) => `${item.key} (${item.label})`).join(', ');
+  const canonicalFields = PRODUCT_ATTRIBUTE_DEFINITIONS.map((item) => `${item.key} (${item.label})`).join(', ');
   return [
     {
       role: 'system',
       content: [
-        '你是跨境电商商品事实抽取 Agent。只根据用户提供的证据片段抽取事实，不得补充常识，不得猜测。',
-        '每个非空事实必须引用至少一个真实 evidence_ref。相同字段出现不同值时，将最可信值放 value，其余放 alternatives，不要自行裁决。',
+        '你是跨境电商多源商品属性抽取 Agent。本任务中的全部图片、PDF、表格和文本都属于同一个商品，不需要判断文件属于哪个商品。',
+        '只根据用户提供的证据片段抽取稳定商品属性，不得补充常识，不得猜测。价格、折扣、销量、店铺名称和页面按钮不是稳定商品属性，不要输出。',
+        '每个非空事实必须引用至少一个真实 evidence_ref。必须比较 source=VISION 的图片证据与 source=FILE_TEXT 的文档证据。',
+        '同一字段出现不同值时，必须把各自值及各自 evidence_ref 分别保留：将一个候选放 value，其余全部放 alternatives，绝对不要自行裁决或平均。',
+        '表达不同但含义相同的值应先归一化，例如 0.38 L 与 380 ml 是同一容量，不应制造冲突。可见数量只有在结构清晰可数时才采用；被遮挡时降低 confidence。',
         'confidence 取 0 到 1；直接、清晰、同源一致可高，OCR 模糊或上下文间接应低。单位与数值分开。',
         '输出标准 JSON，不要输出 Markdown。结构：',
         '{"facts":[{"key":"product.capacity","label":"容量","value":380,"unit":"ml","confidence":0.96,"evidence_refs":["E1"],"alternatives":[{"value":400,"unit":"ml","confidence":0.7,"evidence_refs":["E2"]}]}],"notes":[]}',
-        `优先查找这些字段，但没有证据时不要生成：${requiredFields}`,
+        `优先使用以下规范字段名；没有证据时不要生成：${canonicalFields}`,
       ].join('\n'),
     },
     {

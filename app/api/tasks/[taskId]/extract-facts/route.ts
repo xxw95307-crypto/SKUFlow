@@ -80,11 +80,14 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       parseResults.filter((result) => result.status !== 'FAILED'),
       visionRuns,
     );
+    if (contextData.imageBlocksPending > 0) {
+      return Response.json({
+        error: `仍有 ${contextData.imageBlocksPending} 张图片尚未完成属性提取，请先完成全部图片处理后再合并商品档案`,
+      }, { status: 409 });
+    }
     if (contextData.items.length === 0) {
       return Response.json({
-        error: contextData.imageBlocksPending > 0
-          ? '任务只有尚未理解的图片内容，请先配置并运行视觉 Agent'
-          : '没有可供事实 Agent 使用的解析文本',
+        error: '没有可供商品属性 Agent 使用的有效证据',
       }, { status: 409 });
     }
 

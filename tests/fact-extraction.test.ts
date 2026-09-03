@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildFactExtractionContext, parseFactExtractionOutput } from '../lib/agents/fact-extraction.ts';
+import { buildFactExtractionContext, buildFactExtractionMessages, factValueKey, parseFactExtractionOutput } from '../lib/agents/fact-extraction.ts';
 import { callBailianFactExtraction } from '../lib/ai/bailian-client.ts';
 import { loadBailianConfig, missingBailianConfig } from '../lib/config/bailian.ts';
 import type { UnifiedParseResult } from '../lib/domain/document-parsing.ts';
@@ -36,6 +36,7 @@ test('builds auditable evidence refs and leaves image blocks for a multimodal mo
   assert.equal(context.items[0].locator.page, 2);
   assert.equal(context.imageBlocksPending, 1);
   assert.match(context.prompt, /额定容量 380 ml/);
+  assert.match(context.prompt, /source=FILE_TEXT/);
 });
 
 test('normalizes model facts, evidence refs and conflict candidates', () => {
@@ -56,6 +57,36 @@ test('normalizes model facts, evidence refs and conflict candidates', () => {
   assert.equal(output.facts[0].confidence, 1);
   assert.deepEqual(output.facts[0].evidenceRefs, ['E1']);
   assert.equal(output.facts[0].alternatives[0].value, 400);
+});
+
+test('normalizes blade aliases and requires image-document conflicts to remain separate', () => {
+  const context = buildFactExtractionContext([parseResult()]);
+  const output = parseFactExtractionOutput(JSON.stringify({
+    facts: [{
+      key: 'blade_count',
+      label: '叶片数量',
+      value: 4,
+      unit: '片',
+      confidence: 0.94,
+      evidence_refs: ['E1'],
+      alternatives: [{ value: 6, unit: '片', confidence: 0.99, evidence_refs: ['E1'] }],
+    }],
+    notes: [],
+  }), context.items);
+  assert.equal(output.facts[0].key, 'product.blade_count');
+  assert.equal(output.facts[0].label, '刀片数量');
+  assert.equal(output.facts[0].alternatives[0].value, 6);
+
+  const messages = buildFactExtractionMessages(context);
+  assert.match(messages[0].content, /全部图片、PDF、表格和文本都属于同一个商品/);
+  assert.match(messages[0].content, /必须比较 source=VISION.*source=FILE_TEXT/);
+  assert.match(messages[0].content, /product\.blade_count/);
+});
+
+test('treats equivalent capacity and weight units as the same candidate value', () => {
+  assert.equal(factValueKey(0.38, 'L'), factValueKey(380, 'ml'));
+  assert.equal(factValueKey('0.5', 'kg'), factValueKey(500, 'g'));
+  assert.notEqual(factValueKey(4, '片'), factValueKey(6, '片'));
 });
 
 test('loads all Bailian settings from the runtime environment without source defaults', () => {

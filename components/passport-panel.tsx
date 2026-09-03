@@ -2,9 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AdapterSdkPanel } from '@/components/adapter-sdk-panel';
-import { FactExtractionPanel } from '@/components/fact-extraction-panel';
-import { ParseResultsPanel } from '@/components/parse-results-panel';
-import { VisionAnalysisPanel } from '@/components/vision-analysis-panel';
+import { ProductUnderstandingPanel } from '@/components/product-understanding-panel';
 import type { EvidenceRecord, ProductFact, ProductPassport } from '@/lib/domain/product-passport';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
@@ -45,6 +43,13 @@ function evidenceSource(fact: ProductFact, evidence: EvidenceRecord[], task: Tas
   return filename;
 }
 
+function conflictSourceLabel(sourceKind: string | undefined): string {
+  if (sourceKind === 'VISION') return '图片识别';
+  if (sourceKind === 'FILE_TEXT' || sourceKind === 'OCR') return '文档资料';
+  if (sourceKind === 'USER_INPUT') return '商家填写';
+  return '资料来源';
+}
+
 export function PassportPanel({
   task,
   onBack,
@@ -60,6 +65,8 @@ export function PassportPanel({
   const [brand, setBrand] = useState('');
   const [category, setCategory] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resolvingConflict, setResolvingConflict] = useState('');
+  const [manualConflictValues, setManualConflictValues] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
 
@@ -114,6 +121,42 @@ export function PassportPanel({
     }
   };
 
+  const resolveConflict = async (conflictId: string, candidateId?: string) => {
+    if (!task) return;
+    const manualValue = manualConflictValues[conflictId]?.trim();
+    if (!candidateId && !manualValue) {
+      setError('请先填写人工确认值。');
+      return;
+    }
+    setResolvingConflict(conflictId);
+    setError('');
+    setSaved('');
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/passport`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          conflictResolution: candidateId
+            ? { conflictId, candidateId }
+            : { conflictId, manualValue },
+        }),
+      });
+      const payload = await response.json() as { passport?: ProductPassport; error?: string };
+      if (!response.ok || !payload.passport) throw new Error(payload.error || '冲突确认失败');
+      setPassport(payload.passport);
+      setManualConflictValues((current) => {
+        const next = { ...current };
+        delete next[conflictId];
+        return next;
+      });
+      setSaved(`冲突已确认并写入商品档案 v${payload.passport.version}。`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '冲突确认失败');
+    } finally {
+      setResolvingConflict('');
+    }
+  };
+
   if (!task) {
     return <section className="panel facts-panel passport-empty">
       <span>DAY 02 · PRODUCT PASSPORT</span>
@@ -138,24 +181,45 @@ export function PassportPanel({
 
   return <section className="panel facts-panel">
     <div className="section-heading">
-      <div><span>DAY 04 · EVIDENCE WORKSPACE</span><h2>事实抽取与商品护照</h2><p>百炼 Agent 将统一内容块转成带来源、置信度和冲突状态的商品事实。</p></div>
+      <div><span>PRODUCT PASSPORT</span><h2>统一商品档案</h2><p>所有资料都属于同一个商品。系统合并图片与文档属性，只把冲突和缺失内容交给你确认。</p></div>
       <div className="passport-version"><b>v{passport.version}</b><small>{passport.status === 'OPEN' ? '可编辑' : passport.status}</small></div>
     </div>
 
-    <ParseResultsPanel task={task} />
-    <VisionAnalysisPanel task={task} />
-    <FactExtractionPanel task={task} onPassportUpdate={setPassport} onTaskUpdate={onTaskChange} />
-    <AdapterSdkPanel task={task} passport={passport} onPassportUpdate={setPassport} />
+    <ProductUnderstandingPanel task={task} passport={passport} onPassportUpdate={setPassport} onTaskUpdate={onTaskChange} />
 
     <div className="passport-metrics">
-      <article><b>{passport.facts.length}</b><span>商品事实</span></article>
-      <article><b>{passport.evidence.length}</b><span>证据记录</span></article>
-      <article><b>{openConflictCount}</b><span>开放冲突</span></article>
-      <article><b>{passport.platformDrafts.length}</b><span>平台草稿</span></article>
+      <article><b>{passport.facts.filter((fact) => fact.value !== null).length}</b><span>已识别属性</span></article>
+      <article className={openConflictCount > 0 ? 'warn' : ''}><b>{openConflictCount}</b><span>待确认冲突</span></article>
+      <article><b>{missingCount}</b><span>待补充属性</span></article>
+      <article><b>{task.files.length}</b><span>商品资料</span></article>
     </div>
 
+    {openConflictCount > 0 && <div className="merchant-conflict-list">
+      <div className="merchant-conflict-title"><span>!</span><div><b>发现图片与文档中的属性不一致</b><p>系统没有替你选择结果，请根据原始资料确认后再生成平台内容。</p></div></div>
+      {passport.conflicts.filter((conflict) => conflict.status === 'OPEN').map((conflict) => <article key={conflict.id}>
+        <h3>{passport.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey}</h3>
+        <div>{conflict.candidates.map((candidate) => <button className="conflict-candidate" type="button" key={candidate.id} disabled={resolvingConflict === conflict.id} onClick={() => resolveConflict(conflict.id, candidate.id)}>
+          <small>{conflictSourceLabel(candidate.sourceKind)}</small>
+          <b>{displayFactValue(candidate.value, candidate.unit ?? null)}</b>
+          <em>{candidate.sourceLabel}</em>
+          <strong>采用此值</strong>
+        </button>)}</div>
+        <div className="conflict-manual">
+          <input
+            value={manualConflictValues[conflict.id] ?? ''}
+            placeholder="或输入人工核实后的值"
+            maxLength={240}
+            onChange={(event) => setManualConflictValues((current) => ({ ...current, [conflict.id]: event.target.value }))}
+          />
+          <button type="button" disabled={resolvingConflict === conflict.id} onClick={() => resolveConflict(conflict.id)}>
+            {resolvingConflict === conflict.id ? '确认中…' : '采用人工值'}
+          </button>
+        </div>
+      </article>)}
+    </div>}
+
     <div className="passport-identity">
-      <div><span className="tiny-label">CURRENT TASK</span><h3>{task.productName}</h3><p>{task.id} · {TASK_STATUS_LABELS[task.status]} · 护照状态 {passport.status}</p></div>
+      <div><span className="tiny-label">当前商品</span><h3>{task.productName}</h3><p>{TASK_STATUS_LABELS[task.status]} · 商品档案 v{passport.version}</p></div>
       <div className="passport-editors">
         <label><span>品牌</span><input value={brand} maxLength={120} placeholder="例如 BlendGo" onChange={(event) => setBrand(event.target.value)} /></label>
         <label><span>候选类目</span><input value={category} maxLength={120} placeholder="例如 便携式搅拌机" onChange={(event) => setCategory(event.target.value)} /></label>
@@ -167,20 +231,23 @@ export function PassportPanel({
     {saved && <div className="form-success" role="status">✓ {saved}</div>}
 
     <div className="fact-table">
-      <div className="fact-head"><span>字段</span><span>当前值</span><span>证据来源</span><span>置信度</span><span>状态</span></div>
+      <div className="fact-head"><span>商品属性</span><span>当前值</span><span>来自哪份资料</span><span>状态</span></div>
       {passport.facts.map((fact) => <div className="fact-row" key={fact.id}>
-        <b>{fact.label}<small>{fact.key}</small></b>
+        <b>{fact.label}</b>
         <span>{displayFactValue(fact.value, fact.unit)}</span>
         <span className="source-link">{evidenceSource(fact, passport.evidence, task)}</span>
-        <span>{fact.confidence === null ? '—' : `${Math.round(fact.confidence * 100)}%`}</span>
         <span><i className={`status-dot ${fact.status.toLowerCase()}`} />{factStatusLabels[fact.status]}</span>
       </div>)}
     </div>
 
-    <div className="passport-structure-grid">
-      <article><span className="tiny-label">CONFLICT LEDGER</span><h3>冲突账本</h3>{openConflictCount === 0 ? <p>当前没有开放冲突。事实 Agent 发现同一字段存在不同值时，会保留全部候选值与来源。</p> : <div className="conflict-ledger-list">{passport.conflicts.filter((conflict) => conflict.status === 'OPEN').map((conflict) => <div key={conflict.id}><b>{passport.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey}</b>{conflict.candidates.map((candidate) => <span key={candidate.id}>{displayFactValue(candidate.value, null)} · {candidate.sourceLabel}</span>)}</div>)}</div>}</article>
-      <article><span className="tiny-label">PLATFORM DRAFTS</span><h3>平台草稿矩阵</h3><div className="draft-chip-list">{passport.platformDrafts.map((draft) => <span key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b>{draft.market} · {draftStatusLabels[draft.status]}</span>)}</div></article>
-    </div>
+    <details className="passport-advanced">
+      <summary>查看平台适配与技术详情</summary>
+      <div className="passport-structure-grid">
+        <article><span className="tiny-label">证据记录</span><h3>{passport.evidence.length} 条可追溯证据</h3><p>每个属性都保留对应文件、页码、表格范围或图片区域，供需要时核查。</p></article>
+        <article><span className="tiny-label">平台草稿</span><h3>平台草稿矩阵</h3><div className="draft-chip-list">{passport.platformDrafts.map((draft) => <span key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b>{draft.market} · {draftStatusLabels[draft.status]}</span>)}</div></article>
+      </div>
+      <AdapterSdkPanel task={task} passport={passport} onPassportUpdate={setPassport} />
+    </details>
 
     <div className="footer-actions">
       <span>{confirmedCount} 项已确认 · {missingCount} 项待补充 · 数据版本 v{passport.version}</span>
