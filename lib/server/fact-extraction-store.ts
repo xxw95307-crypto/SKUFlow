@@ -1,4 +1,4 @@
-import { REQUIRED_FACT_DEFINITIONS, factValueKey } from '../agents/fact-extraction';
+import { REQUIRED_FACT_DEFINITIONS, factValueKey } from '../agents/fact-extraction.ts';
 import type {
   AgentRun,
   ExtractedCandidate,
@@ -161,17 +161,23 @@ export async function applyFactExtraction(
   ).bind(input.passport.id)];
   let confirmedPreserved = 0;
   let conflicts = 0;
+  let generatedProductName: string | null = null;
   const processedKeys = new Set<string>();
 
   for (const extracted of input.output.facts) {
     const existing = existingByKey.get(extracted.key);
     const candidates = dedupeCandidates([extracted, ...extracted.alternatives]);
-    const existingIsConfirmed = hasValue(existing) && existing.status === 'CONFIRMED' && existing.sourceKind === 'USER_INPUT';
+    const existingIsConfirmed = extracted.key !== 'product.name'
+      && hasValue(existing)
+      && existing.status === 'CONFIRMED'
+      && existing.sourceKind === 'USER_INPUT';
     if (existingIsConfirmed && !candidates.some((candidate) => factValueKey(candidate.value, candidate.unit) === factValueKey(existing.value, existing.unit))) {
       candidates.unshift({ value: existing.value, unit: existing.unit, confidence: 1, evidenceRefs: [] });
     }
-    const hasConflict = candidates.length > 1;
-    const selected = existingIsConfirmed ? { value: existing.value, unit: existing.unit, confidence: 1 } : candidates[0];
+    const hasConflict = extracted.key !== 'product.name' && candidates.length > 1;
+    const selected: ExtractedCandidate = existingIsConfirmed
+      ? { value: existing.value, unit: existing.unit, confidence: 1, evidenceRefs: [] }
+      : candidates[0];
     const factId = existing?.id ?? `fact_${crypto.randomUUID()}`;
     const allRefs = [...new Set(candidates.flatMap((candidate) => candidate.evidenceRefs))];
     const status = hasConflict ? 'CONFLICT' : existingIsConfirmed ? 'CONFIRMED' : 'EXTRACTED';
@@ -180,6 +186,9 @@ export async function applyFactExtraction(
       .find((sourceKind) => sourceKind === 'VISION' || sourceKind === 'OCR' || sourceKind === 'FILE_TEXT');
     const sourceKind = existingIsConfirmed ? 'USER_INPUT' : extractedSourceKind ?? 'FILE_TEXT';
     if (existingIsConfirmed && !hasConflict) confirmedPreserved += 1;
+    if (extracted.key === 'product.name' && !hasConflict && typeof selected.value === 'string') {
+      generatedProductName = selected.value.trim().slice(0, 120) || null;
+    }
 
     if (existing) {
       factWrites.push(DB.prepare(
@@ -267,6 +276,8 @@ export async function applyFactExtraction(
     ...conflictWrites,
     DB.prepare('UPDATE product_passports SET version = version + 1, updated_at = ? WHERE id = ?')
       .bind(input.now, input.passport.id),
+    ...(generatedProductName ? [DB.prepare('UPDATE tasks SET product_name = ?, updated_at = ? WHERE id = ?')
+      .bind(generatedProductName, input.now, input.passport.taskId)] : []),
     DB.prepare(
       `UPDATE agent_runs
        SET status = 'COMPLETED', model = ?, result_json = ?, usage_json = ?, error = NULL, completed_at = ?

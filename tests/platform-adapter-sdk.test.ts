@@ -11,7 +11,6 @@ function createPassport() {
   let sequence = 0;
   return createInitialProductPassport({
     taskId: 'task_adapter',
-    productName: '  BlendGo Mini  ',
     platforms: ['amazon'],
     markets: ['US'],
     now: '2026-09-03T00:00:00.000Z',
@@ -34,8 +33,13 @@ test('validates the versioned rule configuration format', () => {
   }), /目标字段重复/);
 });
 
-test('compiles usable passport facts and reports required missing facts', () => {
+test('compiles model-extracted product names and reports required missing facts', () => {
   const passport = createPassport();
+  const name = passport.facts.find((fact) => fact.key === 'product.name')!;
+  name.value = '  BlendGo Mini  ';
+  name.status = 'EXTRACTED';
+  name.sourceKind = 'FILE_TEXT';
+  name.confidence = 0.98;
   const draft = passport.platformDrafts[0];
   const result = compileWithRules({
     passport,

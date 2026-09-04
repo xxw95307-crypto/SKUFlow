@@ -1,7 +1,7 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import type { PlatformId } from '@/lib/domain/platform';
 import { createInitialProductPassport } from '@/lib/domain/product-passport';
-import type { TaskFile, TaskSnapshot, TaskStatus } from '@/lib/domain/task';
+import { PENDING_PRODUCT_NAME, type TaskFile, type TaskSnapshot, type TaskStatus } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
 import { prepareInitialPassportWrites } from '@/lib/server/passport-store';
 
@@ -91,12 +91,10 @@ export async function POST(request: Request) {
     await ensureSchema();
     const { DB, UPLOADS } = getBindings();
     const form = await request.formData();
-    const productName = String(form.get('productName') ?? '').trim();
     const markets = parseStringArray(form.get('markets'), 'markets');
     const platforms = parseStringArray(form.get('platforms'), 'platforms') as PlatformId[];
     const files = form.getAll('files').filter((entry): entry is File => entry instanceof File);
 
-    if (productName.length < 2 || productName.length > 120) throw new Error('商品名称需为 2–120 个字符');
     if (markets.length === 0 || markets.length > 8) throw new Error('请选择 1–8 个目标市场');
     if (platforms.length === 0 || platforms.length > platformRegistry.length) throw new Error('请至少选择一个目标平台');
     if (platforms.some((id) => !platformIds.has(id))) throw new Error('包含未知平台');
@@ -109,7 +107,7 @@ export async function POST(request: Request) {
 
     const taskId = `task_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    const initialPassport = createInitialProductPassport({ taskId, productName, platforms, markets, now });
+    const initialPassport = createInitialProductPassport({ taskId, platforms, markets, now });
     const storedFiles: Array<TaskFile & { objectKey: string }> = [];
 
     for (const file of files) {
@@ -134,7 +132,7 @@ export async function POST(request: Request) {
       DB.prepare(
         `INSERT INTO tasks (id, product_name, status, markets_json, platforms_json, created_at, updated_at)
          VALUES (?, ?, 'CREATED', ?, ?, ?, ?)`,
-      ).bind(taskId, productName, JSON.stringify(markets), JSON.stringify(platforms), now, now),
+      ).bind(taskId, PENDING_PRODUCT_NAME, JSON.stringify(markets), JSON.stringify(platforms), now, now),
       DB.prepare(
         `INSERT INTO task_events (task_id, from_status, to_status, actor, note, created_at)
          VALUES (?, NULL, 'CREATED', 'user', '原始资料已安全接收', ?)`,
@@ -150,7 +148,7 @@ export async function POST(request: Request) {
 
     const task: TaskSnapshot = {
       id: taskId,
-      productName,
+      productName: PENDING_PRODUCT_NAME,
       status: 'CREATED',
       markets,
       platforms,

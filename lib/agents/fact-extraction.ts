@@ -264,6 +264,7 @@ export function buildFactExtractionMessages(context: ExtractionContext): Array<{
       content: [
         '你是跨境电商多源商品属性抽取 Agent。本任务中的全部图片、PDF、表格和文本都属于同一个商品，不需要判断文件属于哪个商品。',
         '只根据用户提供的证据片段抽取稳定商品属性，不得补充常识，不得猜测。价格、折扣、销量、店铺名称和页面按钮不是稳定商品属性，不要输出。',
+        '必须综合图片与文档证据生成一个简短、客观的 product.name（商品名称），例如“浅粉色圆领短袖 T 恤”；不要加入促销词、平台关键词或没有证据的规格。',
         '每个非空事实必须引用至少一个真实 evidence_ref。必须比较 source=VISION 的图片证据与 source=FILE_TEXT 的文档证据。',
         '同一字段出现不同值时，必须把各自值及各自 evidence_ref 分别保留：将一个候选放 value，其余全部放 alternatives，绝对不要自行裁决或平均。',
         '表达不同但含义相同的值应先归一化，例如 0.38 L 与 380 ml 是同一容量，不应制造冲突。可见数量只有在结构清晰可数时才采用；被遮挡时降低 confidence。',

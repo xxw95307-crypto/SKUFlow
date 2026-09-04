@@ -11,7 +11,7 @@ export const VISION_ANALYSIS_PROMPT_VERSION = 'vision-v2';
 
 export interface VisionPromptContext {
   filename: string;
-  productName: string;
+  productName: string | null;
 }
 
 function normalizeValue(value: unknown): Exclude<FactValue, null> | undefined {
@@ -101,7 +101,9 @@ export function buildVisionAnalysisPrompt(context: VisionPromptContext): string 
   return [
     '你是跨境电商图片商品属性抽取 Agent。本任务的全部图片和文档都属于同一个商品。',
     '只报告图片中直接可见或可读的稳定商品属性，不使用常识补全，不猜测看不见的规格。价格、折扣、销量、店铺信息和界面按钮不要作为商品属性输出。',
-    `任务商品名称仅作为检索提示：${JSON.stringify(context.productName)}。如果图片与名称不一致，以图片为准并写入 warnings。`,
+    context.productName
+      ? `已有商品名称仅作为检索提示：${JSON.stringify(context.productName)}。如果图片与名称不一致，以图片为准并写入 warnings。`
+      : '当前没有预填商品名称。请根据图片中清晰可见的商品种类、款式和文字生成客观、简短的 product.name，不要加入促销词。',
     `源文件：${JSON.stringify(context.filename)}。`,
     '提取包装文字、品牌、型号、品名、颜色、材质、容量、功率、电压、尺寸、重量、电池、包装清单、认证标识以及清晰可见的物理结构。',
     '例如刀片清晰可数时使用 product.blade_count；若有遮挡，只能描述可见数量并降低置信度，不能断言总数。没有证据的字段不要生成。',

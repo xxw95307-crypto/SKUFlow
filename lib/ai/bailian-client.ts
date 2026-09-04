@@ -172,7 +172,7 @@ export interface VisionImageInput {
   bytes: Uint8Array;
   contentType: string;
   filename: string;
-  productName: string;
+  productName: string | null;
 }
 
 export interface BailianVisionResponse {

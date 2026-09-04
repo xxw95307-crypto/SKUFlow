@@ -180,7 +180,6 @@ export async function ensureProductPassport(DB: D1Database, taskId: string): Pro
 
   const passport = createInitialProductPassport({
     taskId,
-    productName: task.product_name,
     platforms: parseJson<PlatformId[]>(task.platforms_json, []),
     markets: parseJson<string[]>(task.markets_json, []),
   });

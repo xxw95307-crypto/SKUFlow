@@ -17,7 +17,6 @@ function formatBytes(bytes: number): string {
 
 export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [productName, setProductName] = useState('BlendGo Mini 便携榨汁杯');
   const [markets, setMarkets] = useState<string[]>(['美国']);
   const [platforms, setPlatforms] = useState<PlatformId[]>(defaultPlatformIds);
   const [files, setFiles] = useState<File[]>([]);
@@ -74,7 +73,6 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
     try {
       setProgress('正在安全上传资料…');
       const body = new FormData();
-      body.set('productName', productName);
       body.set('markets', JSON.stringify(markets));
       body.set('platforms', JSON.stringify(platforms));
       files.forEach((file) => body.append('files', file));
@@ -109,10 +107,9 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
   return <section className="panel upload-panel">
     <div className="section-heading"><div><span>ONE PRODUCT · ALL SOURCES</span><h2>上传同一个商品的全部资料</h2><p>图片、说明书和参数表会被统一处理，直接生成可核对的商品属性。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
 
-    <div className="single-product-note"><b>一次任务对应一个商品</b><span>请把该商品的图片、参数表、说明书和其他资料一起上传，系统会自动合并并检查冲突。</span></div>
+    <div className="single-product-note"><b>一次任务对应一个商品</b><span>无需提前填写商品名称。请把该商品的图片、参数表、说明书和其他资料一起上传，模型会自动命名、合并属性并检查冲突。</span></div>
 
     <div className="intake-fields">
-      <label><span>商品名称</span><input value={productName} maxLength={120} onChange={(event) => setProductName(event.target.value)} /></label>
       <fieldset><legend>目标市场</legend><div className="choice-row">{marketOptions.map((market) => <button type="button" className={markets.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(market)} key={market}>{market}</button>)}</div></fieldset>
       <fieldset><legend>目标平台 <small>12 个平台均可走 Mock 流程</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>
     </div>

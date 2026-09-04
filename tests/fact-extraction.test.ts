@@ -81,6 +81,7 @@ test('normalizes blade aliases and requires image-document conflicts to remain s
   assert.match(messages[0].content, /全部图片、PDF、表格和文本都属于同一个商品/);
   assert.match(messages[0].content, /必须比较 source=VISION.*source=FILE_TEXT/);
   assert.match(messages[0].content, /product\.blade_count/);
+  assert.match(messages[0].content, /必须综合图片与文档证据生成.*product\.name/);
 });
 
 test('treats equivalent capacity and weight units as the same candidate value', () => {

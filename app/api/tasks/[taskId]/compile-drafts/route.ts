@@ -41,6 +41,8 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
 
     const categoryFact = passport.facts.find((fact) => fact.key === 'product.category_hint' && fact.value !== null);
     const categoryLabel = typeof categoryFact?.value === 'string' ? categoryFact.value : '通用商品';
+    const productNameFact = passport.facts.find((fact) => fact.key === 'product.name' && fact.value !== null && fact.status !== 'CONFLICT');
+    const productName = typeof productNameFact?.value === 'string' ? productNameFact.value : task.product_name;
     const targets = passport.platformDrafts.map((draft) => ({
       draftId: draft.id,
       schema: resolveMockListingSchema({
@@ -51,7 +53,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       }),
     }));
     const modelResponse = await callBailianListingGeneration(config, {
-      productName: task.product_name,
+      productName,
       facts: passport.facts,
       drafts: targets,
     });

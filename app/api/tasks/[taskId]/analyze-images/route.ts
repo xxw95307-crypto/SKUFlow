@@ -2,7 +2,7 @@ import { ensureSchema, getBindings } from '@/db/client';
 import { VISION_ANALYSIS_PROMPT_VERSION } from '@/lib/agents/vision-analysis';
 import { callBailianVisionAnalysis, hashVisionInput } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
-import type { TaskStatus } from '@/lib/domain/task';
+import { PENDING_PRODUCT_NAME, type TaskStatus } from '@/lib/domain/task';
 import type { VisionAgentRun } from '@/lib/domain/vision-analysis';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
@@ -134,7 +134,7 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
           bytes,
           contentType: file.content_type,
           filename: file.filename,
-          productName: task.product_name,
+          productName: task.product_name === PENDING_PRODUCT_NAME ? null : task.product_name,
         });
         await prepareVisionRunComplete(bindings.DB, {
           runId,

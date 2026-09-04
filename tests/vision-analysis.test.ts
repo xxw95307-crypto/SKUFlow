@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildFactExtractionContext } from '../lib/agents/fact-extraction.ts';
-import { parseVisionAnalysisOutput } from '../lib/agents/vision-analysis.ts';
+import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../lib/agents/vision-analysis.ts';
 import { callBailianVisionAnalysis } from '../lib/ai/bailian-client.ts';
 import { loadBailianConfig, missingBailianConfig } from '../lib/config/bailian.ts';
 import type { UnifiedParseResult } from '../lib/domain/document-parsing.ts';
@@ -47,6 +47,13 @@ test('normalizes visual facts, OCR text and normalized image boxes', () => {
   assert.equal(output.visibleText, 'BlendGo 380ml');
   assert.equal(output.facts[1].key, 'product.blade_count');
   assert.equal(output.facts[1].label, '刀片数量');
+});
+
+test('asks the vision model to name an unnamed product from visible evidence', () => {
+  const prompt = buildVisionAnalysisPrompt({ filename: 'product.png', productName: null });
+  assert.match(prompt, /没有预填商品名称/);
+  assert.match(prompt, /product\.name/);
+  assert.doesNotMatch(prompt, /等待模型识别商品/);
 });
 
 test('sends a private Base64 image through the OpenAI-compatible vision request', async () => {

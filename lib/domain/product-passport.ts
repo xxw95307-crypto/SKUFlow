@@ -152,7 +152,6 @@ export interface ProductPassport {
 
 export interface InitialPassportInput {
   taskId: string;
-  productName: string;
   platforms: PlatformId[];
   markets: string[];
   now?: string;
@@ -167,19 +166,18 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
   const now = input.now ?? new Date().toISOString();
   const makeId = input.idFactory ?? defaultIdFactory;
   const passportId = `passport_${makeId()}`;
-  const nameEvidenceId = `evidence_${makeId()}`;
 
   const facts: ProductFact[] = [
     {
       id: `fact_${makeId()}`,
       key: 'product.name',
       label: '商品名称',
-      value: input.productName,
+      value: null,
       unit: null,
-      status: 'CONFIRMED',
-      confidence: 1,
-      sourceKind: 'USER_INPUT',
-      evidenceIds: [nameEvidenceId],
+      status: 'MISSING',
+      confidence: null,
+      sourceKind: 'RULE_ENGINE',
+      evidenceIds: [],
       createdAt: now,
       updatedAt: now,
     },
@@ -191,7 +189,7 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
       unit: null,
       status: 'MISSING',
       confidence: null,
-      sourceKind: 'USER_INPUT',
+      sourceKind: 'RULE_ENGINE',
       evidenceIds: [],
       createdAt: now,
       updatedAt: now,
@@ -204,23 +202,14 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
       unit: null,
       status: 'MISSING',
       confidence: null,
-      sourceKind: 'USER_INPUT',
+      sourceKind: 'RULE_ENGINE',
       evidenceIds: [],
       createdAt: now,
       updatedAt: now,
     },
   ];
 
-  const evidence: EvidenceRecord[] = [{
-    id: nameEvidenceId,
-    taskId: input.taskId,
-    fileId: null,
-    sourceKind: 'USER_INPUT',
-    locator: { kind: 'FORM_FIELD', path: 'task.create.productName' },
-    excerpt: input.productName,
-    contentHash: null,
-    createdAt: now,
-  }];
+  const evidence: EvidenceRecord[] = [];
 
   const platformDrafts: PlatformDraft[] = input.platforms.flatMap((platformId) =>
     input.markets.map((market) => ({

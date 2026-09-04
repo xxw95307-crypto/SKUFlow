@@ -9,12 +9,16 @@ function productPassport() {
   let sequence = 0;
   const passport = createInitialProductPassport({
     taskId: 'task_listing',
-    productName: 'BlendGo Mini 便携榨汁杯',
     platforms: ['amazon'],
     markets: ['美国'],
     now: '2026-09-04T00:00:00.000Z',
     idFactory: () => `id-${++sequence}`,
   });
+  const name = passport.facts.find((fact) => fact.key === 'product.name')!;
+  name.value = 'BlendGo Mini 便携榨汁杯';
+  name.status = 'EXTRACTED';
+  name.sourceKind = 'VISION';
+  name.confidence = 0.99;
   const brand = passport.facts.find((fact) => fact.key === 'product.brand')!;
   brand.value = 'BlendGo';
   brand.status = 'EXTRACTED';
@@ -32,6 +36,7 @@ test('Amazon Mock Schema separates facts, AI copy and seller inputs', () => {
 
   assert.equal(schema.mode, 'MOCK');
   assert.equal(schema.locale, 'en-US');
+  assert.equal(schema.fields.find((field) => field.key === 'product_name')?.factKey, 'product.name');
   assert.equal(bullets?.source, 'AI_GENERATED');
   assert.equal(bullets?.minItems, 5);
   assert.equal(schema.fields.find((field) => field.key === 'brand_name')?.source, 'PRODUCT_FACT');

@@ -1,5 +1,7 @@
 import type { PlatformId } from './platform';
 
+export const PENDING_PRODUCT_NAME = '等待模型识别商品';
+
 export const TASK_STATUSES = [
   'CREATED',
   'INGESTING',

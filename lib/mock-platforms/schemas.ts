@@ -20,8 +20,13 @@ const ai = (key: string, label: string, type: ListingFieldDefinition['type'], re
 const seller = (key: string, label: string, type: ListingFieldDefinition['type'], required = true, extra: Partial<ListingFieldDefinition> = {}): ListingFieldDefinition => ({
   key, label, type, required, source: 'SELLER_INPUT', ...extra,
 });
+const productNameField = () => fact('product_name', '商品名称', 'product.name', true, {
+  maxLength: 120,
+  helpText: '由模型综合图片和文档生成的统一商品名称。',
+});
 
 const amazonFields: ListingFieldDefinition[] = [
+  productNameField(),
   ai('item_name', '商品标题', 'string', true, { maxLength: 200, helpText: '根据可信商品事实生成，适配站内搜索与可读性。' }),
   fact('brand_name', '品牌', 'product.brand', true, { maxLength: 120 }),
   fact('model_name', '型号', 'product.model', false, { maxLength: 120 }),
@@ -37,6 +42,7 @@ const amazonFields: ListingFieldDefinition[] = [
 ];
 
 const tiktokFields: ListingFieldDefinition[] = [
+  productNameField(),
   ai('title', '短标题', 'string', true, { maxLength: 188 }),
   ai('description', '商品详情', 'text', true, { maxLength: 3000 }),
   ai('selling_points', '核心卖点', 'string_array', true, { minItems: 3, maxItems: 5, itemMaxLength: 300 }),
@@ -51,6 +57,7 @@ const tiktokFields: ListingFieldDefinition[] = [
 ];
 
 const shopifyFields: ListingFieldDefinition[] = [
+  productNameField(),
   ai('title', '商品标题', 'string', true, { maxLength: 255 }),
   ai('body_html', '商品详情', 'text', true, { maxLength: 5000 }),
   ai('tags', '商品标签', 'string_array', false, { maxItems: 12, itemMaxLength: 60 }),
@@ -64,7 +71,8 @@ const shopifyFields: ListingFieldDefinition[] = [
 ];
 
 const shopeeFields: ListingFieldDefinition[] = [
-  ai('item_name', '商品名称', 'string', true, { maxLength: 120 }),
+  productNameField(),
+  ai('item_name', '平台商品标题', 'string', true, { maxLength: 120 }),
   ai('description', '商品描述', 'text', true, { maxLength: 3000 }),
   ai('highlights', '商品卖点', 'string_array', true, { minItems: 3, maxItems: 5, itemMaxLength: 300 }),
   fact('brand', '品牌', 'product.brand', true),
@@ -78,6 +86,7 @@ const shopeeFields: ListingFieldDefinition[] = [
 ];
 
 const genericFields: ListingFieldDefinition[] = [
+  productNameField(),
   ai('title', '商品标题', 'string', true, { maxLength: 180 }),
   ai('description', '商品描述', 'text', true, { maxLength: 3000 }),
   ai('selling_points', '核心卖点', 'string_array', true, { minItems: 3, maxItems: 5, itemMaxLength: 300 }),
@@ -115,7 +124,7 @@ export function resolveMockListingSchema(input: {
     locale: marketLocale[input.market] ?? 'en-US',
     categoryId,
     categoryLabel,
-    schemaVersion: `mock-${input.platformId}-${(marketLocale[input.market] ?? 'en-US').toLowerCase()}-v1`,
+    schemaVersion: `mock-${input.platformId}-${(marketLocale[input.market] ?? 'en-US').toLowerCase()}-v2`,
     fields: fieldsFor(input.platformId).map((field) => ({ ...field })),
   };
 }
