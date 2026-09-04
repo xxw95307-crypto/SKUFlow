@@ -1,7 +1,9 @@
 import { ensureSchema, getBindings } from '@/db/client';
+import { callBailianListingGeneration } from '@/lib/ai/bailian-client';
+import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import type { DraftValidationIssue, ProductPassport } from '@/lib/domain/product-passport';
-import { getPlatformProfile } from '@/lib/platforms/registry';
-import { platformAdapterRegistry } from '@/lib/platform-sdk';
+import { compileMockListingDraft, isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
+import { resolveMockListingSchema } from '@/lib/mock-platforms/schemas';
 import { getProductPassport, saveCompiledDrafts } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +14,6 @@ interface DraftCompileSummary {
   market: string;
   adapterId: string;
   mappedFields: number;
-  skippedFields: number;
   issues: DraftValidationIssue[];
   status: 'NEEDS_REVIEW' | 'VALIDATED';
 }
@@ -21,59 +22,77 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
   try {
     await ensureSchema();
     const { taskId } = await context.params;
-    const { DB } = getBindings();
-    const task = await DB.prepare('SELECT id FROM tasks WHERE id = ?').bind(taskId).first<{ id: string }>();
+    const bindings = getBindings();
+    const config = loadBailianConfig(bindings);
+    const missing = missingBailianConfig(config);
+    if (missing.length > 0) return Response.json({ error: `百炼运行时配置不完整：${missing.join(', ')}` }, { status: 503 });
+
+    const task = await bindings.DB.prepare('SELECT id, product_name FROM tasks WHERE id = ?')
+      .bind(taskId)
+      .first<{ id: string; product_name: string }>();
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
-    const passport = await getProductPassport(DB, taskId);
-    if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
+    const passport = await getProductPassport(bindings.DB, taskId);
+    if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
     if (passport.status === 'LOCKED') return Response.json({ error: 'Product passport is locked' }, { status: 409 });
-    if (passport.platformDrafts.length === 0) {
-      return Response.json({ error: '当前任务没有平台草稿' }, { status: 409 });
+    if (passport.conflicts.some((conflict) => conflict.status === 'OPEN')) {
+      return Response.json({ error: '请先确认商品档案中的图文冲突，再生成平台 Listing' }, { status: 409 });
     }
+    if (passport.platformDrafts.length === 0) return Response.json({ error: '当前任务没有平台草稿' }, { status: 409 });
+
+    const categoryFact = passport.facts.find((fact) => fact.key === 'product.category_hint' && fact.value !== null);
+    const categoryLabel = typeof categoryFact?.value === 'string' ? categoryFact.value : '通用商品';
+    const targets = passport.platformDrafts.map((draft) => ({
+      draftId: draft.id,
+      schema: resolveMockListingSchema({
+        platformId: draft.platformId,
+        market: draft.market,
+        categoryId: draft.categoryId,
+        categoryLabel,
+      }),
+    }));
+    const modelResponse = await callBailianListingGeneration(config, {
+      productName: task.product_name,
+      facts: passport.facts,
+      drafts: targets,
+    });
+    const generatedByDraft = new Map(modelResponse.output.drafts.map((draft) => [draft.draftId, draft.fields]));
 
     const writes = [];
     const summaries: DraftCompileSummary[] = [];
     for (const draft of passport.platformDrafts) {
-      const platform = getPlatformProfile(draft.platformId);
-      const adapter = platformAdapterRegistry.resolve(draft.platformId);
-      const result = await adapter.compile({ passport, platform, draft });
-      const payload: Record<string, unknown> = {
-        ...result.payload,
-        adapter: {
-          id: adapter.id,
-          version: adapter.version,
-          kind: adapter.kind,
-          ruleId: adapter.rules.id,
-          ruleVersion: adapter.rules.version,
-        },
-      };
-      const status = result.validationIssues.some((issue) => issue.severity === 'error')
-        ? 'NEEDS_REVIEW' as const
-        : 'VALIDATED' as const;
-
+      const target = targets.find((item) => item.draftId === draft.id)!;
+      const existingFields = isListingDraftPayload(draft.payload) ? draft.payload.fields : undefined;
+      const result = compileMockListingDraft({
+        passport,
+        draft,
+        schema: target.schema,
+        generatedFields: generatedByDraft.get(draft.id),
+        existingFields,
+      });
+      const status = result.validationIssues.some((issue) => issue.severity === 'error') ? 'NEEDS_REVIEW' as const : 'VALIDATED' as const;
       writes.push({
         draftId: draft.id,
         status,
-        schemaVersion: result.schemaVersion,
-        payload,
+        schemaVersion: target.schema.schemaVersion,
+        payload: result.payload as unknown as Record<string, unknown>,
         validationIssues: result.validationIssues,
       });
       summaries.push({
         draftId: draft.id,
         platformId: draft.platformId,
         market: draft.market,
-        adapterId: adapter.id,
+        adapterId: `${draft.platformId}-mock-adapter`,
         mappedFields: result.mappedFields,
-        skippedFields: result.skippedFields,
         issues: result.validationIssues,
         status,
       });
     }
 
-    await saveCompiledDrafts(DB, passport.id, writes);
-    const refreshedPassport = await getProductPassport(DB, taskId) as ProductPassport;
+    await saveCompiledDrafts(bindings.DB, passport.id, writes);
+    const refreshedPassport = await getProductPassport(bindings.DB, taskId) as ProductPassport;
     return Response.json({
       passport: refreshedPassport,
+      provider: { mode: 'MOCK_PLATFORM_API', model: modelResponse.model },
       summary: {
         compiledDrafts: summaries.length,
         validatedDrafts: summaries.filter((item) => item.status === 'VALIDATED').length,
@@ -84,9 +103,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       },
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Unable to compile platform drafts' },
-      { status: 500 },
-    );
+    const message = error instanceof Error ? error.message : 'Unable to generate platform listings';
+    return Response.json({ error: message }, { status: /百炼|Listing Agent/.test(message) ? 502 : 500 });
   }
 }

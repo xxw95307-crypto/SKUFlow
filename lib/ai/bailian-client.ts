@@ -1,13 +1,22 @@
 import { buildFactExtractionMessages, parseFactExtractionOutput, type ExtractionContext } from '../agents/fact-extraction.ts';
 import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/vision-analysis.ts';
+import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
 import type { BailianConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
+import type { ListingGenerationOutput } from '../domain/listing';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export interface BailianFactExtractionResponse {
   output: FactExtractionOutput;
+  model: string;
+  usage: Record<string, number> | null;
+  requestId: string | null;
+}
+
+export interface BailianListingGenerationResponse {
+  output: ListingGenerationOutput;
   model: string;
   usage: Record<string, number> | null;
   requestId: string | null;
@@ -104,6 +113,55 @@ export async function callBailianFactExtraction(
     };
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼调用超时');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function callBailianListingGeneration(
+  config: BailianConfig,
+  context: ListingGenerationContext,
+  fetchImpl: typeof fetch = fetch,
+): Promise<BailianListingGenerationResponse> {
+  const apiKey = config.apiKey.trim();
+  if (!apiKey) throw new Error('百炼 API Key 尚未配置');
+  if (context.drafts.length === 0) throw new Error('没有需要生成的 Listing 草稿');
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const model = config.model.trim();
+  if (!model) throw new Error('BAILIAN_MODEL 尚未配置');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: buildListingGenerationMessages(context),
+        response_format: { type: 'json_object' },
+        enable_thinking: false,
+        temperature: 0.55,
+        max_completion_tokens: 8_192,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
+      throw new Error(`百炼 Listing 生成失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+    }
+    const payload = await response.json() as ChatCompletionResponse;
+    const content = responseText(payload.choices?.[0]?.message?.content);
+    if (!content) throw new Error('百炼 Listing 生成内容为空');
+    return {
+      output: parseListingGenerationOutput(content, context),
+      model: payload.model || model,
+      usage: normalizeUsage(payload.usage),
+      requestId: payload.id || response.headers.get('x-request-id'),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼 Listing 生成超时');
     throw error;
   } finally {
     clearTimeout(timeout);

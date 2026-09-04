@@ -2,7 +2,7 @@
 
 SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的商品事实档案，并通过平台适配器编译为不同电商平台的上架草稿。
 
-## Day 1–5 已完成
+## 当前已完成
 
 - 真实文件上传：源文件进入 R2 对象存储。
 - 持久化任务：任务、文件元数据和状态事件进入 D1。
@@ -38,8 +38,14 @@ SKUFlow 将供应商图片、表格、PDF 和文本资料整理为可追溯的�
 - 冲突确认闭环：商家可采用图片值、采用文档值或手动填写核实值，选择结果会写回档案并保留审计记录。
 - 属性归一化：常见单位表达会归一后比较，例如 `0.38 L` 与 `380 ml` 不会被误判为冲突。
 - 稳定属性过滤：价格、折扣、销量、店铺信息和页面按钮不会进入 Product Passport。
+- Mock 平台服务器：12 个已登记平台均可按“平台 + 站点 + 类目”返回 Listing Schema；Amazon、TikTok Shop、Shopify、Shopee 使用专用字段，其余平台使用通用 Schema。
+- 多平台 Listing Agent：同一次任务可生成多个平台/站点版本，客观字段来自 Product Passport，标题、卖点和详情由百炼生成，SKU、价格和库存留给卖家填写。
+- 动态审核工作台：页面按 Mock Schema 渲染字段、显示字段来源、执行长度/类型/必填校验，并要求逐个平台确认。
+- Mock 发布交付：确认后的版本可创建模拟平台草稿并返回 Mock draft ID；不会连接或修改真实卖家店铺。
 
-Product Passport、文件解析、视觉理解、事实抽取和通用草稿编译均已使用真实持久化数据；视觉理解与事实抽取共用一套百炼 `qwen3.8-max` 配置。商品档案页默认只展示商家需要确认的属性、来源、冲突和缺失信息，技术明细已折叠。Listing 和素材页面仍是预置演示内容，Day 6 将接入首批平台的专用字段结构。
+Product Passport、文件解析、视觉理解、事实抽取、Listing 生成、人工审核和 Mock 草稿交付均使用持久化任务数据；视觉理解、事实抽取和 Listing 生成共用一套百炼模型配置。视觉素材生成页当前仍为明确标注的 Mock 工作流，下一阶段再接图片生成模型。
+
+完整的 Mock 接口和替换真实平台 API 的边界见 [`docs/mock-platform-flow.md`](docs/mock-platform-flow.md)。
 
 ## 本地运行
 
@@ -77,6 +83,7 @@ lib/agents/              事实抽取 Prompt、上下文与输出规范化
 lib/ai/                  百炼 OpenAI 兼容客户端
 lib/agents/vision-analysis.ts  视觉 Prompt 与输出规范化
 lib/platform-sdk/        通用接口、规则编译器与适配器注册表
+lib/mock-platforms/      Mock Listing Schema、校验与编译逻辑
 tests/                   Day 1–5 验收测试
 ```
 

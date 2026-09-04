@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AdapterSdkPanel } from '@/components/adapter-sdk-panel';
 import { ProductUnderstandingPanel } from '@/components/product-understanding-panel';
 import type { EvidenceRecord, ProductFact, ProductPassport } from '@/lib/domain/product-passport';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
@@ -246,7 +245,6 @@ export function PassportPanel({
         <article><span className="tiny-label">证据记录</span><h3>{passport.evidence.length} 条可追溯证据</h3><p>每个属性都保留对应文件、页码、表格范围或图片区域，供需要时核查。</p></article>
         <article><span className="tiny-label">平台草稿</span><h3>平台草稿矩阵</h3><div className="draft-chip-list">{passport.platformDrafts.map((draft) => <span key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b>{draft.market} · {draftStatusLabels[draft.status]}</span>)}</div></article>
       </div>
-      <AdapterSdkPanel task={task} passport={passport} onPassportUpdate={setPassport} />
     </details>
 
     <div className="footer-actions">
