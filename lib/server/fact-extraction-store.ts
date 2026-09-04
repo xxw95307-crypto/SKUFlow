@@ -1,4 +1,4 @@
-import { REQUIRED_FACT_DEFINITIONS, factValueKey } from '../agents/fact-extraction.ts';
+import { factValueKey } from '../agents/fact-extraction.ts';
 import type {
   AgentRun,
   ExtractedCandidate,
@@ -124,7 +124,6 @@ export async function applyFactExtraction(
 ): Promise<FactExtractionSummary> {
   const evidenceByRef = new Map(input.evidenceItems.map((item) => [item.ref, item]));
   const existingByKey = new Map(input.passport.facts.map((fact) => [fact.key, fact]));
-  const extractedByKey = new Map(input.output.facts.map((fact) => [fact.key, fact]));
   const usedRefs = new Set<string>();
   for (const fact of input.output.facts) {
     fact.evidenceRefs.forEach((ref) => usedRefs.add(ref));
@@ -162,7 +161,6 @@ export async function applyFactExtraction(
   let confirmedPreserved = 0;
   let conflicts = 0;
   let generatedProductName: string | null = null;
-  const processedKeys = new Set<string>();
 
   for (const extracted of input.output.facts) {
     const existing = existingByKey.get(extracted.key);
@@ -231,38 +229,12 @@ export async function applyFactExtraction(
          VALUES (?, ?, ?, 'OPEN', ?, NULL, ?, ?)`,
       ).bind(`conflict_${crypto.randomUUID()}`, input.passport.id, extracted.key, JSON.stringify(conflictCandidates), input.now, input.now));
     }
-    processedKeys.add(extracted.key);
   }
 
-  for (const definition of REQUIRED_FACT_DEFINITIONS) {
-    if (processedKeys.has(definition.key)) continue;
-    const existing = existingByKey.get(definition.key);
-    if (hasValue(existing)) continue;
-    if (existing) {
-      factWrites.push(DB.prepare(
-        `UPDATE product_facts
-         SET label = ?, value_json = 'null', unit = NULL, status = 'MISSING', confidence = NULL, updated_at = ?
-         WHERE id = ? AND passport_id = ?`,
-      ).bind(definition.label, input.now, existing.id, input.passport.id));
-    } else {
-      factWrites.push(DB.prepare(
-        `INSERT INTO product_facts
-         (id, passport_id, variant_id, fact_key, label, value_json, unit, status, confidence, source_kind, created_at, updated_at)
-         VALUES (?, ?, NULL, ?, ?, 'null', NULL, 'MISSING', NULL, 'RULE_ENGINE', ?, ?)`,
-      ).bind(`fact_${crypto.randomUUID()}`, input.passport.id, definition.key, definition.label, input.now, input.now));
-    }
-    processedKeys.add(definition.key);
-  }
-
-  const missing = REQUIRED_FACT_DEFINITIONS.filter((definition) => {
-    const extracted = extractedByKey.get(definition.key);
-    if (extracted) return false;
-    return !hasValue(existingByKey.get(definition.key));
-  }).length;
   const summary: FactExtractionSummary = {
     factsExtracted: input.output.facts.length,
     confirmedPreserved,
-    missing,
+    missing: 0,
     conflicts,
     evidenceCreated: evidenceWrites.length,
     imageBlocksPending: input.imageBlocksPending,

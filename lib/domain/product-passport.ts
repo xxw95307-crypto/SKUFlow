@@ -167,47 +167,7 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
   const makeId = input.idFactory ?? defaultIdFactory;
   const passportId = `passport_${makeId()}`;
 
-  const facts: ProductFact[] = [
-    {
-      id: `fact_${makeId()}`,
-      key: 'product.name',
-      label: '商品名称',
-      value: null,
-      unit: null,
-      status: 'MISSING',
-      confidence: null,
-      sourceKind: 'RULE_ENGINE',
-      evidenceIds: [],
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: `fact_${makeId()}`,
-      key: 'product.brand',
-      label: '品牌',
-      value: null,
-      unit: null,
-      status: 'MISSING',
-      confidence: null,
-      sourceKind: 'RULE_ENGINE',
-      evidenceIds: [],
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: `fact_${makeId()}`,
-      key: 'product.category_hint',
-      label: '候选类目',
-      value: null,
-      unit: null,
-      status: 'MISSING',
-      confidence: null,
-      sourceKind: 'RULE_ENGINE',
-      evidenceIds: [],
-      createdAt: now,
-      updatedAt: now,
-    },
-  ];
+  const facts: ProductFact[] = [];
 
   const evidence: EvidenceRecord[] = [];
 

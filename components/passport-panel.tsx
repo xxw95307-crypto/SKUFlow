@@ -61,9 +61,6 @@ export function PassportPanel({
   onTaskChange: (task: TaskSnapshot) => void;
 }) {
   const [passport, setPassport] = useState<ProductPassport | null>(null);
-  const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState('');
-  const [busy, setBusy] = useState(false);
   const [resolvingConflict, setResolvingConflict] = useState('');
   const [manualConflictValues, setManualConflictValues] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -78,8 +75,6 @@ export function PassportPanel({
         if (!response.ok || !payload.passport) throw new Error(payload.error || '商品护照加载失败');
         setError('');
         setPassport(payload.passport);
-        setBrand(String(payload.passport.facts.find((fact) => fact.key === 'product.brand')?.value ?? ''));
-        setCategory(String(payload.passport.facts.find((fact) => fact.key === 'product.category_hint')?.value ?? ''));
       })
       .catch((caught) => {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
@@ -92,33 +87,6 @@ export function PassportPanel({
     () => new Map(platformRegistry.map((platform) => [platform.id, platform.shortName])),
     [],
   );
-
-  const saveFacts = async () => {
-    if (!task) return;
-    setBusy(true);
-    setError('');
-    setSaved('');
-    try {
-      const response = await fetch(`/api/tasks/${task.id}/passport`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          facts: [
-            { key: 'product.brand', label: '品牌', value: brand.trim() || null },
-            { key: 'product.category_hint', label: '候选类目', value: category.trim() || null },
-          ],
-        }),
-      });
-      const payload = await response.json() as { passport?: ProductPassport; error?: string };
-      if (!response.ok || !payload.passport) throw new Error(payload.error || '商品事实保存失败');
-      setPassport(payload.passport);
-      setSaved(`已保存为护照 v${payload.passport.version}，并生成表单证据记录。`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '商品事实保存失败');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const resolveConflict = async (conflictId: string, candidateId?: string) => {
     if (!task) return;
@@ -174,22 +142,22 @@ export function PassportPanel({
     </section>;
   }
 
-  const confirmedCount = passport.facts.filter((fact) => fact.status === 'CONFIRMED').length;
-  const missingCount = passport.facts.filter((fact) => fact.status === 'MISSING').length;
+  const visibleFacts = passport.facts.filter((fact) => fact.status !== 'MISSING');
+  const confirmedCount = visibleFacts.filter((fact) => fact.status === 'CONFIRMED').length;
   const openConflictCount = passport.conflicts.filter((conflict) => conflict.status === 'OPEN').length;
 
   return <section className="panel facts-panel">
     <div className="section-heading">
-      <div><span>PRODUCT PASSPORT</span><h2>统一商品档案</h2><p>所有资料都属于同一个商品。系统合并图片与文档属性，只把冲突和缺失内容交给你确认。</p></div>
+      <div><span>PRODUCT PASSPORT</span><h2>统一商品档案</h2><p>所有资料都属于同一个商品。系统开放式提取资料中实际出现的属性，并把图文冲突交给你确认。</p></div>
       <div className="passport-version"><b>v{passport.version}</b><small>{passport.status === 'OPEN' ? '可编辑' : passport.status}</small></div>
     </div>
 
     <ProductUnderstandingPanel task={task} passport={passport} onPassportUpdate={setPassport} onTaskUpdate={onTaskChange} />
 
     <div className="passport-metrics">
-      <article><b>{passport.facts.filter((fact) => fact.value !== null).length}</b><span>已识别属性</span></article>
+      <article><b>{visibleFacts.length}</b><span>已识别属性</span></article>
       <article className={openConflictCount > 0 ? 'warn' : ''}><b>{openConflictCount}</b><span>待确认冲突</span></article>
-      <article><b>{missingCount}</b><span>待补充属性</span></article>
+      <article><b>{passport.evidence.length}</b><span>可追溯证据</span></article>
       <article><b>{task.files.length}</b><span>商品资料</span></article>
     </div>
 
@@ -218,12 +186,8 @@ export function PassportPanel({
     </div>}
 
     <div className="passport-identity">
-      <div><span className="tiny-label">当前商品</span><h3>{task.productName}</h3><p>{TASK_STATUS_LABELS[task.status]} · 商品档案 v{passport.version}</p></div>
-      <div className="passport-editors">
-        <label><span>品牌</span><input value={brand} maxLength={120} placeholder="例如 BlendGo" onChange={(event) => setBrand(event.target.value)} /></label>
-        <label><span>候选类目</span><input value={category} maxLength={120} placeholder="例如 便携式搅拌机" onChange={(event) => setCategory(event.target.value)} /></label>
-        <button type="button" onClick={saveFacts} disabled={busy}>{busy ? '保存中…' : '保存基础事实'}</button>
-      </div>
+      <div><span className="tiny-label">当前商品 · 模型综合命名</span><h3>{task.productName}</h3><p>{TASK_STATUS_LABELS[task.status]} · 商品档案 v{passport.version}</p></div>
+      <p className="passport-open-note">这里不预设榨汁机、服装或其他类目的通用必填项；平台真正需要但资料中没有的字段，会在下一步由 Listing Agent 补写并标记。</p>
     </div>
 
     {error && <div className="form-error" role="alert">{error}</div>}
@@ -231,7 +195,7 @@ export function PassportPanel({
 
     <div className="fact-table">
       <div className="fact-head"><span>商品属性</span><span>当前值</span><span>来自哪份资料</span><span>状态</span></div>
-      {passport.facts.map((fact) => <div className="fact-row" key={fact.id}>
+      {visibleFacts.map((fact) => <div className="fact-row" key={fact.id}>
         <b>{fact.label}</b>
         <span>{displayFactValue(fact.value, fact.unit)}</span>
         <span className="source-link">{evidenceSource(fact, passport.evidence, task)}</span>
@@ -248,7 +212,7 @@ export function PassportPanel({
     </details>
 
     <div className="footer-actions">
-      <span>{confirmedCount} 项已确认 · {missingCount} 项待补充 · 数据版本 v{passport.version}</span>
+      <span>{visibleFacts.length} 项开放属性 · {confirmedCount} 项人工确认 · 数据版本 v{passport.version}</span>
       <button className="primary" type="button" onClick={onNext}>查看平台内容预览 →</button>
     </div>
   </section>;

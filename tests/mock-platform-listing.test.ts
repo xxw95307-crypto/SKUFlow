@@ -14,19 +14,23 @@ function productPassport() {
     now: '2026-09-04T00:00:00.000Z',
     idFactory: () => `id-${++sequence}`,
   });
-  const name = passport.facts.find((fact) => fact.key === 'product.name')!;
-  name.value = 'BlendGo Mini 便携榨汁杯';
-  name.status = 'EXTRACTED';
-  name.sourceKind = 'VISION';
-  name.confidence = 0.99;
-  const brand = passport.facts.find((fact) => fact.key === 'product.brand')!;
-  brand.value = 'BlendGo';
-  brand.status = 'EXTRACTED';
-  brand.confidence = 0.98;
-  const category = passport.facts.find((fact) => fact.key === 'product.category_hint')!;
-  category.value = '便携榨汁杯';
-  category.status = 'EXTRACTED';
-  category.confidence = 0.96;
+  passport.facts.push(
+    {
+      id: 'fact_name', key: 'product.name', label: '商品名称', value: 'BlendGo Mini 便携榨汁杯', unit: null,
+      status: 'EXTRACTED', sourceKind: 'VISION', confidence: 0.99, evidenceIds: [],
+      createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
+    },
+    {
+      id: 'fact_brand', key: 'product.brand', label: '品牌', value: 'BlendGo', unit: null,
+      status: 'EXTRACTED', sourceKind: 'FILE_TEXT', confidence: 0.98, evidenceIds: [],
+      createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
+    },
+    {
+      id: 'fact_category', key: 'product.category_hint', label: '候选类目', value: '便携榨汁杯', unit: null,
+      status: 'EXTRACTED', sourceKind: 'FILE_TEXT', confidence: 0.96, evidenceIds: [],
+      createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
+    },
+  );
   return passport;
 }
 
@@ -50,7 +54,7 @@ test('registered long-tail platforms receive a generic Mock Schema', () => {
   assert.ok(schema.fields.some((field) => field.key === 'selling_points'));
 });
 
-test('Listing Agent parser only accepts AI-owned fields', () => {
+test('Listing Agent parser accepts copy and inferred platform facts, but rejects seller inputs', () => {
   const schema = resolveMockListingSchema({ platformId: 'amazon', market: '美国' });
   const result = parseListingGenerationOutput(JSON.stringify({
     drafts: [{
@@ -58,13 +62,14 @@ test('Listing Agent parser only accepts AI-owned fields', () => {
       fields: {
         item_name: 'Portable Blender for Smoothies',
         bullet_points: ['One', 'Two', 'Three', 'Four', 'Five'],
+        color_name: 'Pink',
         brand_name: 'Invented Brand',
         standard_price: 1,
       },
     }],
   }), { productName: 'BlendGo Mini', facts: [], drafts: [{ draftId: 'draft_amazon', schema }] });
 
-  assert.deepEqual(Object.keys(result.drafts[0].fields).sort(), ['bullet_points', 'item_name']);
+  assert.deepEqual(Object.keys(result.drafts[0].fields).sort(), ['brand_name', 'bullet_points', 'color_name', 'item_name']);
 });
 
 test('compiler maps passport facts and leaves operational fields to the seller', () => {
@@ -83,7 +88,34 @@ test('compiler maps passport facts and leaves operational fields to the seller',
   });
 
   assert.equal(compiled.payload.fields.brand_name, 'BlendGo');
+  assert.equal(compiled.payload.fieldSources.brand_name, 'PRODUCT_FACT');
   assert.equal(compiled.payload.fields.standard_price, undefined);
   assert.ok(compiled.validationIssues.some((issue) => issue.path === 'seller_sku' && issue.code === 'seller_input_required'));
-  assert.equal(validateMockListing(schema, compiled.payload.fields).length, compiled.validationIssues.length);
+  assert.equal(validateMockListing(
+    schema,
+    compiled.payload.fields,
+    compiled.payload.fieldSources,
+    compiled.payload.confirmedInferredFields,
+  ).length, compiled.validationIssues.length);
+});
+
+test('AI-inferred platform fields are editable but require seller confirmation', () => {
+  const passport = productPassport();
+  const schema = resolveMockListingSchema({ platformId: 'amazon', market: '美国', categoryLabel: '便携榨汁杯' });
+  const compiled = compileMockListingDraft({
+    passport,
+    draft: passport.platformDrafts[0],
+    schema,
+    generatedFields: {
+      item_name: 'BlendGo Mini Portable Blender',
+      bullet_points: ['Portable', 'Simple', 'Compact', 'Easy to clean', 'For daily drinks'],
+      product_description: 'A compact blender for everyday drinks.',
+      color_name: 'Pink',
+    },
+  });
+
+  assert.equal(compiled.payload.fieldSources.color_name, 'AI_INFERRED');
+  assert.ok(compiled.validationIssues.some((issue) => issue.path === 'color_name' && issue.code === 'ai_inference_confirmation_required'));
+  const afterConfirmation = validateMockListing(schema, compiled.payload.fields, compiled.payload.fieldSources, ['color_name']);
+  assert.equal(afterConfirmation.some((issue) => issue.path === 'color_name' && issue.code === 'ai_inference_confirmation_required'), false);
 });

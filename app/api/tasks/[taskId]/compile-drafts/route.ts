@@ -63,13 +63,13 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const summaries: DraftCompileSummary[] = [];
     for (const draft of passport.platformDrafts) {
       const target = targets.find((item) => item.draftId === draft.id)!;
-      const existingFields = isListingDraftPayload(draft.payload) ? draft.payload.fields : undefined;
+      const existingPayload = isListingDraftPayload(draft.payload) ? draft.payload : undefined;
       const result = compileMockListingDraft({
         passport,
         draft,
         schema: target.schema,
         generatedFields: generatedByDraft.get(draft.id),
-        existingFields,
+        existingPayload,
       });
       const status = result.validationIssues.some((issue) => issue.severity === 'error') ? 'NEEDS_REVIEW' as const : 'VALIDATED' as const;
       writes.push({

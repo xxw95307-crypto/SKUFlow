@@ -89,7 +89,7 @@ export function parseVisionAnalysisOutput(content: string): VisionAnalysisOutput
     visibleText: typeof (root.visible_text ?? root.visibleText) === 'string'
       ? String(root.visible_text ?? root.visibleText).trim().slice(0, 20_000)
       : '',
-    facts: [...factsByKey.values()].slice(0, 40),
+    facts: [...factsByKey.values()].slice(0, 100),
     warnings: Array.isArray(root.warnings)
       ? root.warnings.filter((item): item is string => typeof item === 'string').map((item) => item.slice(0, 300)).slice(0, 10)
       : [],
@@ -106,8 +106,9 @@ export function buildVisionAnalysisPrompt(context: VisionPromptContext): string 
       : '当前没有预填商品名称。请根据图片中清晰可见的商品种类、款式和文字生成客观、简短的 product.name，不要加入促销词。',
     `源文件：${JSON.stringify(context.filename)}。`,
     '提取包装文字、品牌、型号、品名、颜色、材质、容量、功率、电压、尺寸、重量、电池、包装清单、认证标识以及清晰可见的物理结构。',
+    '这是开放式属性抽取：图片中出现多少个有依据的稳定属性，就尽量完整抽取多少个。类目特有属性可使用 apparel.neckline 等清晰的英文小写 key，不要受常用字段示例限制。',
     '例如刀片清晰可数时使用 product.blade_count；若有遮挡，只能描述可见数量并降低置信度，不能断言总数。没有证据的字段不要生成。',
-    `尽量使用以下规范字段名：${canonicalFields}`,
+    `以下只是常用规范字段示例，能表达时优先使用：${canonicalFields}`,
     'bbox 使用 [x1,y1,x2,y2]，坐标归一化到 0–1000；无法定位或依据为整张图时填 null。confidence 范围为 0–1。',
     '请输出标准 JSON，不要输出 Markdown。必须符合：',
     '{"summary":"图片整体描述","visible_text":"按阅读顺序记录可见文字","facts":[{"key":"product.brand","label":"品牌","value":"示例","unit":null,"confidence":0.95,"bbox":[100,100,400,220]}],"warnings":[]}',

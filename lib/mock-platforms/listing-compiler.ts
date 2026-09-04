@@ -1,4 +1,4 @@
-import type { ListingDraftPayload, ListingFieldDefinition, MockListingSchema } from '../domain/listing';
+import type { ListingDraftPayload, ListingFieldDefinition, ListingFieldSource, MockListingSchema } from '../domain/listing';
 import type { DraftValidationIssue, PlatformDraft, ProductFact, ProductPassport } from '../domain/product-passport';
 
 function usableFact(fact: ProductFact | undefined): fact is ProductFact {
@@ -50,8 +50,34 @@ function validateField(field: ListingFieldDefinition, value: unknown): DraftVali
   return issues;
 }
 
-export function validateMockListing(schema: MockListingSchema, fields: Record<string, unknown>): DraftValidationIssue[] {
-  return schema.fields.flatMap((field) => validateField(field, fields[field.key]));
+export function listingFieldSources(payload: ListingDraftPayload): Record<string, ListingFieldSource> {
+  return payload.fieldSources ?? Object.fromEntries(payload.schema.fields.map((field) => [field.key, field.source]));
+}
+
+export function confirmedInferredFields(payload: ListingDraftPayload): string[] {
+  return Array.isArray(payload.confirmedInferredFields) ? payload.confirmedInferredFields : [];
+}
+
+export function validateMockListing(
+  schema: MockListingSchema,
+  fields: Record<string, unknown>,
+  fieldSources: Record<string, ListingFieldSource> = {},
+  confirmedInferences: string[] = [],
+): DraftValidationIssue[] {
+  const confirmed = new Set(confirmedInferences);
+  return schema.fields.flatMap((field) => {
+    const actualSource = fieldSources[field.key] ?? field.source;
+    const issues = validateField({ ...field, source: actualSource }, fields[field.key]);
+    if (!isEmpty(fields[field.key]) && actualSource === 'AI_INFERRED' && !confirmed.has(field.key)) {
+      issues.push({
+        code: 'ai_inference_confirmation_required',
+        path: field.key,
+        severity: 'error',
+        message: `${field.label}由智能体根据现有资料推断，请卖家核对并确认。`,
+      });
+    }
+    return issues;
+  });
 }
 
 export function compileMockListingDraft(input: {
@@ -59,28 +85,48 @@ export function compileMockListingDraft(input: {
   draft: PlatformDraft;
   schema: MockListingSchema;
   generatedFields?: Record<string, unknown>;
-  existingFields?: Record<string, unknown>;
+  existingPayload?: ListingDraftPayload;
 }): { payload: ListingDraftPayload; validationIssues: DraftValidationIssue[]; mappedFields: number } {
   const factByKey = new Map(input.passport.facts.map((fact) => [fact.key, fact]));
-  const fields: Record<string, unknown> = { ...(input.existingFields ?? {}) };
+  const fields: Record<string, unknown> = { ...(input.existingPayload?.fields ?? {}) };
+  const fieldSources: Record<string, ListingFieldSource> = input.existingPayload
+    ? { ...listingFieldSources(input.existingPayload) }
+    : {};
+  const confirmed = new Set(input.existingPayload ? confirmedInferredFields(input.existingPayload) : []);
   for (const field of input.schema.fields) {
     if (field.source === 'PRODUCT_FACT' && field.factKey) {
       const fact = factByKey.get(field.factKey);
-      if (usableFact(fact)) fields[field.key] = renderFact(fact);
+      if (usableFact(fact)) {
+        fields[field.key] = renderFact(fact);
+        fieldSources[field.key] = 'PRODUCT_FACT';
+        confirmed.delete(field.key);
+      } else if (field.allowAiInference && input.generatedFields && field.key in input.generatedFields) {
+        fields[field.key] = input.generatedFields[field.key];
+        fieldSources[field.key] = 'AI_INFERRED';
+        confirmed.delete(field.key);
+      } else if (isEmpty(fields[field.key])) {
+        fieldSources[field.key] = 'SELLER_INPUT';
+      }
     }
     if (field.source === 'AI_GENERATED' && input.generatedFields && field.key in input.generatedFields) {
       fields[field.key] = input.generatedFields[field.key];
+      fieldSources[field.key] = 'AI_GENERATED';
+    }
+    if (field.source === 'SELLER_INPUT' && !fieldSources[field.key]) {
+      fieldSources[field.key] = 'SELLER_INPUT';
     }
   }
   const payload: ListingDraftPayload = {
     mode: 'MOCK',
     schema: input.schema,
     fields,
+    fieldSources,
+    confirmedInferredFields: [...confirmed],
     source: { passportId: input.passport.id, passportVersion: input.passport.version },
   };
   return {
     payload,
-    validationIssues: validateMockListing(input.schema, fields),
+    validationIssues: validateMockListing(input.schema, fields, fieldSources, [...confirmed]),
     mappedFields: Object.keys(fields).filter((key) => !isEmpty(fields[key])).length,
   };
 }

@@ -59,6 +59,25 @@ test('normalizes model facts, evidence refs and conflict candidates', () => {
   assert.equal(output.facts[0].alternatives[0].value, 400);
 });
 
+test('keeps category-specific attributes outside the common field examples', () => {
+  const context = buildFactExtractionContext([parseResult()]);
+  const output = parseFactExtractionOutput(JSON.stringify({
+    facts: [{
+      key: 'apparel.neckline',
+      label: '领型',
+      value: '圆领',
+      unit: null,
+      confidence: 0.96,
+      evidence_refs: ['E1'],
+      alternatives: [],
+    }],
+    notes: [],
+  }), context.items);
+  assert.equal(output.facts[0].key, 'apparel.neckline');
+  assert.equal(output.facts[0].value, '圆领');
+  assert.match(buildFactExtractionMessages(context)[0].content, /开放式商品档案/);
+});
+
 test('normalizes blade aliases and requires image-document conflicts to remain separate', () => {
   const context = buildFactExtractionContext([parseResult()]);
   const output = parseFactExtractionOutput(JSON.stringify({

@@ -35,11 +35,11 @@ test('validates the versioned rule configuration format', () => {
 
 test('compiles model-extracted product names and reports required missing facts', () => {
   const passport = createPassport();
-  const name = passport.facts.find((fact) => fact.key === 'product.name')!;
-  name.value = '  BlendGo Mini  ';
-  name.status = 'EXTRACTED';
-  name.sourceKind = 'FILE_TEXT';
-  name.confidence = 0.98;
+  passport.facts.push({
+    id: 'fact_name', key: 'product.name', label: '商品名称', value: '  BlendGo Mini  ', unit: null,
+    status: 'EXTRACTED', sourceKind: 'FILE_TEXT', confidence: 0.98, evidenceIds: [],
+    createdAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:00.000Z',
+  });
   const draft = passport.platformDrafts[0];
   const result = compileWithRules({
     passport,

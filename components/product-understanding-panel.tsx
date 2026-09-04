@@ -118,7 +118,7 @@ export function ProductUnderstandingPanel({
   };
 
   const openConflicts = passport.conflicts.filter((conflict) => conflict.status === 'OPEN').length;
-  const missingFacts = passport.facts.filter((fact) => fact.status === 'MISSING').length;
+  const extractedFacts = passport.facts.filter((fact) => fact.status !== 'MISSING').length;
   const completed = state.run?.status === 'COMPLETED';
   const modelReady = state.provider?.configured === true;
 
@@ -147,7 +147,7 @@ export function ProductUnderstandingPanel({
 
     {completed && <div className={`understanding-result ${openConflicts > 0 ? 'has-conflicts' : ''}`}>
       <span>{openConflicts > 0 ? '!' : '✓'}</span>
-      <div><b>{openConflicts > 0 ? `发现 ${openConflicts} 项资料冲突，需要确认` : '商品属性已完成合并'}</b><small>{passport.facts.length} 项属性 · {missingFacts} 项待补充{lastSummary ? ` · ${lastSummary.evidenceCreated} 条本次证据` : ''}</small></div>
+      <div><b>{openConflicts > 0 ? `发现 ${openConflicts} 项资料冲突，需要确认` : '商品属性已完成开放式提取'}</b><small>{extractedFacts} 项有证据属性{lastSummary ? ` · ${lastSummary.evidenceCreated} 条本次证据` : ''}</small></div>
     </div>}
 
     <details className="understanding-details">

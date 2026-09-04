@@ -14,11 +14,9 @@ import {
 } from '../domain/product-attributes.ts';
 import type { VisionAgentRun } from '../domain/vision-analysis';
 
-export const FACT_EXTRACTION_PROMPT_VERSION = 'day4-v2';
+export const FACT_EXTRACTION_PROMPT_VERSION = 'day4-open-passport-v3';
 const MAX_EVIDENCE_ITEMS = 120;
 const MAX_EVIDENCE_CHARACTERS = 60_000;
-
-export const REQUIRED_FACT_DEFINITIONS = PRODUCT_ATTRIBUTE_DEFINITIONS.filter((definition) => definition.required);
 
 export interface ExtractionContext {
   items: ExtractionEvidenceItem[];
@@ -212,7 +210,7 @@ export function parseFactExtractionOutput(content: string, evidenceItems: Extrac
   const knownRefs = new Set(evidenceItems.map((item) => item.ref));
   const factsByKey = new Map<string, ExtractedFact>();
 
-  for (const rawFact of root.facts.slice(0, 60)) {
+  for (const rawFact of root.facts.slice(0, 120)) {
     if (!rawFact || typeof rawFact !== 'object') continue;
     const record = rawFact as Record<string, unknown>;
     const key = typeof record.key === 'string' ? normalizeProductAttributeKey(record.key) : '';
@@ -234,7 +232,7 @@ export function parseFactExtractionOutput(content: string, evidenceItems: Extrac
   }
 
   return {
-    facts: [...factsByKey.values()].slice(0, 40),
+    facts: [...factsByKey.values()].slice(0, 120),
     notes: Array.isArray(root.notes)
       ? root.notes.filter((item): item is string => typeof item === 'string').map((item) => item.slice(0, 300)).slice(0, 10)
       : [],
@@ -264,6 +262,8 @@ export function buildFactExtractionMessages(context: ExtractionContext): Array<{
       content: [
         '你是跨境电商多源商品属性抽取 Agent。本任务中的全部图片、PDF、表格和文本都属于同一个商品，不需要判断文件属于哪个商品。',
         '只根据用户提供的证据片段抽取稳定商品属性，不得补充常识，不得猜测。价格、折扣、销量、店铺名称和页面按钮不是稳定商品属性，不要输出。',
+        '这是开放式商品档案：资料中出现多少个有证据的稳定属性，就尽量完整抽取多少个，不要因为规范字段清单里没有某个属性就忽略它。',
+        '规范字段能表达时优先使用规范 key；类目特有属性请创建清晰、稳定的英文小写 key，例如 apparel.neckline、apparel.sleeve_length、appliance.blade_count，并提供准确中文 label。',
         '必须综合图片与文档证据生成一个简短、客观的 product.name（商品名称），例如“浅粉色圆领短袖 T 恤”；不要加入促销词、平台关键词或没有证据的规格。',
         '每个非空事实必须引用至少一个真实 evidence_ref。必须比较 source=VISION 的图片证据与 source=FILE_TEXT 的文档证据。',
         '同一字段出现不同值时，必须把各自值及各自 evidence_ref 分别保留：将一个候选放 value，其余全部放 alternatives，绝对不要自行裁决或平均。',
@@ -271,7 +271,7 @@ export function buildFactExtractionMessages(context: ExtractionContext): Array<{
         'confidence 取 0 到 1；直接、清晰、同源一致可高，OCR 模糊或上下文间接应低。单位与数值分开。',
         '输出标准 JSON，不要输出 Markdown。结构：',
         '{"facts":[{"key":"product.capacity","label":"容量","value":380,"unit":"ml","confidence":0.96,"evidence_refs":["E1"],"alternatives":[{"value":400,"unit":"ml","confidence":0.7,"evidence_refs":["E2"]}]}],"notes":[]}',
-        `优先使用以下规范字段名；没有证据时不要生成：${canonicalFields}`,
+        `以下只是常用规范字段，不是必填清单，也不是属性上限；没有证据时不要生成：${canonicalFields}`,
       ].join('\n'),
     },
     {

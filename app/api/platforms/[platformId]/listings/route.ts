@@ -1,6 +1,11 @@
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import { platformRegistry } from '@/lib/platforms/registry';
-import { isListingDraftPayload, validateMockListing } from '@/lib/mock-platforms/listing-compiler';
+import {
+  confirmedInferredFields,
+  isListingDraftPayload,
+  listingFieldSources,
+  validateMockListing,
+} from '@/lib/mock-platforms/listing-compiler';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +19,12 @@ export async function POST(request: Request, context: { params: Promise<{ platfo
     if (!isListingDraftPayload(body.listing)) return Response.json({ error: 'listing 格式无效' }, { status: 400 });
     const listing = body.listing as ListingDraftPayload;
     if (listing.schema.platformId !== platformId) return Response.json({ error: '平台与 Listing Schema 不一致' }, { status: 400 });
-    const issues = validateMockListing(listing.schema, listing.fields);
+    const issues = validateMockListing(
+      listing.schema,
+      listing.fields,
+      listingFieldSources(listing),
+      confirmedInferredFields(listing),
+    );
     if (body.action === 'validate') return Response.json({ mode: 'MOCK', valid: !issues.some((issue) => issue.severity === 'error'), issues });
     if (body.action !== 'create_draft') return Response.json({ error: 'action must be validate or create_draft' }, { status: 400 });
     if (issues.some((issue) => issue.severity === 'error')) {

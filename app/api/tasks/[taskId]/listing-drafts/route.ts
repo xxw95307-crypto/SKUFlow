@@ -1,7 +1,12 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingFieldDefinition } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
-import { isListingDraftPayload, validateMockListing } from '@/lib/mock-platforms/listing-compiler';
+import {
+  confirmedInferredFields,
+  isListingDraftPayload,
+  listingFieldSources,
+  validateMockListing,
+} from '@/lib/mock-platforms/listing-compiler';
 import { getProductPassport } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +28,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
   try {
     await ensureSchema();
     const { taskId } = await context.params;
-    const body = await request.json() as { draftId?: unknown; action?: unknown; fields?: unknown };
+    const body = await request.json() as {
+      draftId?: unknown;
+      action?: unknown;
+      fields?: unknown;
+      confirmedInferredFields?: unknown;
+    };
     const draftId = typeof body.draftId === 'string' ? body.draftId : '';
     const action = body.action === 'approve' ? 'approve' : 'save';
     if (!draftId || !body.fields || typeof body.fields !== 'object' || Array.isArray(body.fields)) {
@@ -37,19 +47,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
     if (!isListingDraftPayload(draft.payload)) return Response.json({ error: '请先生成该平台的 Listing' }, { status: 409 });
 
     const incoming = body.fields as Record<string, unknown>;
+    const fieldSources = listingFieldSources(draft.payload);
     const fields: Record<string, unknown> = {};
     for (const field of draft.payload.schema.fields) {
+      const actualSource = fieldSources[field.key] ?? field.source;
       const value = normalizeFieldValue(
         field,
-        field.source === 'PRODUCT_FACT' ? draft.payload.fields[field.key] : incoming[field.key],
+        actualSource === 'PRODUCT_FACT' ? draft.payload.fields[field.key] : incoming[field.key],
       );
       if (value !== undefined) fields[field.key] = value;
     }
-    const issues = validateMockListing(draft.payload.schema, fields);
+    const requestedConfirmations = Array.isArray(body.confirmedInferredFields)
+      ? body.confirmedInferredFields.filter((key): key is string => typeof key === 'string' && fieldSources[key] === 'AI_INFERRED')
+      : confirmedInferredFields(draft.payload);
+    const issues = validateMockListing(draft.payload.schema, fields, fieldSources, requestedConfirmations);
     if (action === 'approve' && issues.some((issue) => issue.severity === 'error')) {
       return Response.json({ error: '请先补齐必填字段并修正校验问题', issues }, { status: 409 });
     }
-    const payload = { ...draft.payload, fields };
+    const payload = { ...draft.payload, fields, fieldSources, confirmedInferredFields: requestedConfirmations };
     delete payload.mockPublication;
     const status = action === 'approve' ? 'APPROVED' : issues.some((issue) => issue.severity === 'error') ? 'NEEDS_REVIEW' : 'VALIDATED';
     const now = new Date().toISOString();

@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import type { ListingFieldDefinition } from '@/lib/domain/listing';
+import type { ListingFieldDefinition, ListingFieldSource } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
 import type { TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
-import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
+import { confirmedInferredFields, isListingDraftPayload, listingFieldSources } from '@/lib/mock-platforms/listing-compiler';
 
 const sourceLabels = {
   PRODUCT_FACT: '来自商品资料',
   AI_GENERATED: '智能体创作',
+  AI_INFERRED: '智能体推断',
   SELLER_INPUT: '需要卖家填写',
 } as const;
 
@@ -18,25 +19,29 @@ function editableValue(field: ListingFieldDefinition, value: unknown): string {
   return value === undefined || value === null ? '' : String(value);
 }
 
-function ListingFieldEditor({ field, value, issue, onChange }: {
+function ListingFieldEditor({ field, value, source, confirmed, issue, onChange, onConfirm }: {
   field: ListingFieldDefinition;
   value: unknown;
+  source: ListingFieldSource;
+  confirmed: boolean;
   issue?: string;
   onChange: (value: string) => void;
+  onConfirm: (confirmed: boolean) => void;
 }) {
-  const readOnly = field.source === 'PRODUCT_FACT';
+  const readOnly = source === 'PRODUCT_FACT';
   const common = {
     value: editableValue(field, value),
     readOnly,
-    placeholder: field.placeholder ?? (field.source === 'AI_GENERATED' ? '由 Listing Agent 生成' : ''),
+    placeholder: field.placeholder ?? (source === 'AI_GENERATED' || source === 'AI_INFERRED' ? '由 Listing Agent 生成' : ''),
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),
   };
   return <label className={`listing-field ${issue ? 'has-error' : ''}`}>
-    <span><b>{field.label}{field.required && <i>*</i>}</b><em className={field.source.toLowerCase()}>{sourceLabels[field.source]}</em></span>
+    <span><b>{field.label}{field.required && <i>*</i>}</b><em className={source.toLowerCase()}>{source === 'AI_INFERRED' && !confirmed ? 'AI 推断·待确认' : sourceLabels[source]}</em></span>
     {field.type === 'text' || field.type === 'string_array'
       ? <textarea {...common} rows={field.type === 'string_array' ? 5 : 6} />
       : <input {...common} inputMode={field.type === 'number' ? 'decimal' : 'text'} />}
     <small>{issue ?? field.helpText ?? (field.type === 'string_array' ? '每行一条' : field.maxLength ? `最多 ${field.maxLength} 个字符` : ' ')}</small>
+    {source === 'AI_INFERRED' && <span className="inference-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirm(event.target.checked)} />我已核对该推断值</span>}
   </label>;
 }
 
@@ -44,6 +49,7 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
   const [passport, setPassport] = useState<ProductPassport | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState('');
   const [draftEdits, setDraftEdits] = useState<Record<string, Record<string, unknown>>>({});
+  const [draftConfirmations, setDraftConfirmations] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -68,6 +74,10 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
   const selectedDraft = passport?.platformDrafts.find((draft) => draft.id === selectedDraftId) ?? passport?.platformDrafts[0];
   const listing = selectedDraft && isListingDraftPayload(selectedDraft.payload) ? selectedDraft.payload : null;
   const fields = selectedDraft ? draftEdits[selectedDraft.id] ?? listing?.fields ?? {} : {};
+  const fieldSources = listing ? listingFieldSources(listing) : {};
+  const confirmations = selectedDraft && listing
+    ? draftConfirmations[selectedDraft.id] ?? confirmedInferredFields(listing)
+    : [];
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((platform) => [platform.id, platform.shortName])), []);
   const generatedCount = passport?.platformDrafts.filter((draft) => isListingDraftPayload(draft.payload)).length ?? 0;
@@ -84,6 +94,7 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
       setPassport(payload.passport);
       setSelectedDraftId(payload.passport.platformDrafts[0]?.id ?? '');
       setDraftEdits({});
+      setDraftConfirmations({});
       setMessage(`已生成 ${payload.passport.platformDrafts.length} 个平台/站点版本，请逐个确认。`);
     } catch (caught) {
       setMessage('');
@@ -97,12 +108,17 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
     try {
       const response = await fetch(`/api/tasks/${task.id}/listing-drafts`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftId: selectedDraft.id, action, fields }),
+        body: JSON.stringify({ draftId: selectedDraft.id, action, fields, confirmedInferredFields: confirmations }),
       });
       const payload = await response.json() as { passport?: ProductPassport; error?: string };
       if (!response.ok || !payload.passport) throw new Error(payload.error || 'Listing 保存失败');
       setPassport(payload.passport);
       setDraftEdits((current) => {
+        const next = { ...current };
+        delete next[selectedDraft.id];
+        return next;
+      });
+      setDraftConfirmations((current) => {
         const next = { ...current };
         delete next[selectedDraft.id];
         return next;
@@ -116,7 +132,7 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
   if (!task) return <section className="panel listing-panel"><h2>请先创建商品任务</h2><p>完成商品资料处理后，才能生成平台 Listing。</p></section>;
 
   return <section className="panel listing-panel">
-    <div className="section-heading"><div><span>STEP 03 · MOCK PLATFORM LISTING</span><h2>生成并确认各平台 Listing</h2><p>系统按平台、站点和类目获取 Mock 字段；客观参数来自资料，营销内容由智能体创作。</p></div><button className="primary" type="button" onClick={generate} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成全部版本' : '生成全部平台版本'}</button></div>
+    <div className="section-heading"><div><span>STEP 03 · MOCK PLATFORM LISTING</span><h2>生成并确认各平台 Listing</h2><p>系统按平台、站点和类目获取 Mock 字段；资料有值就直接映射，缺少的可创作字段由智能体补写并标明来源。</p></div><button className="primary" type="button" onClick={generate} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成全部版本' : '生成全部平台版本'}</button></div>
     <div className="mock-mode-note"><b>Mock 平台服务器</b><span>当前字段校验和草稿创建都在模拟环境中执行，不会把商品发送到真实平台。</span></div>
     {error && <div className="form-error" role="alert">{error}</div>}
     {message && <div className="form-success" role="status">{message}</div>}
@@ -128,13 +144,31 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
         key={field.key}
         field={field}
         value={fields[field.key]}
+        source={fieldSources[field.key] ?? field.source}
+        confirmed={confirmations.includes(field.key)}
         issue={selectedDraft.validationIssues.find((issue) => issue.path === field.key)?.message}
-        onChange={(value) => selectedDraft && setDraftEdits((current) => ({
-          ...current,
-          [selectedDraft.id]: { ...(current[selectedDraft.id] ?? listing.fields), [field.key]: value },
-        }))}
+        onChange={(value) => {
+          if (!selectedDraft) return;
+          setDraftEdits((current) => ({
+            ...current,
+            [selectedDraft.id]: { ...(current[selectedDraft.id] ?? listing.fields), [field.key]: value },
+          }));
+          if ((fieldSources[field.key] ?? field.source) === 'AI_INFERRED') {
+            setDraftConfirmations((current) => ({
+              ...current,
+              [selectedDraft.id]: (current[selectedDraft.id] ?? confirmedInferredFields(listing)).filter((key) => key !== field.key),
+            }));
+          }
+        }}
+        onConfirm={(checked) => selectedDraft && setDraftConfirmations((current) => {
+          const existing = current[selectedDraft.id] ?? confirmedInferredFields(listing);
+          return {
+            ...current,
+            [selectedDraft.id]: checked ? [...new Set([...existing, field.key])] : existing.filter((key) => key !== field.key),
+          };
+        })}
       />)}</div>
-      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? `${selectedDraft.validationIssues.length} 项需要处理` : '字段校验通过'} · {sourceLabels.AI_GENERATED}内容可以直接修改</span><div><button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button><button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认此平台 Listing'}</button></div></div>
+      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? `${selectedDraft.validationIssues.length} 项需要处理` : '字段校验通过'} · 智能体推断值需勾选核对，营销内容可直接修改</span><div><button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button><button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认此平台 Listing'}</button></div></div>
     </>}
 
     <div className="footer-actions"><span>{generatedCount}/{passport?.platformDrafts.length ?? 0} 已生成 · {approvedCount} 已确认</span><button className="primary" type="button" onClick={onAssets} disabled={!allApproved}>全部确认后进入视觉素材 →</button></div>

@@ -1,7 +1,7 @@
 import type { PlatformId } from './platform';
 
 export type ListingFieldType = 'string' | 'text' | 'number' | 'string_array';
-export type ListingFieldSource = 'PRODUCT_FACT' | 'AI_GENERATED' | 'SELLER_INPUT';
+export type ListingFieldSource = 'PRODUCT_FACT' | 'AI_GENERATED' | 'AI_INFERRED' | 'SELLER_INPUT';
 
 export interface ListingFieldDefinition {
   key: string;
@@ -10,6 +10,7 @@ export interface ListingFieldDefinition {
   source: ListingFieldSource;
   required: boolean;
   factKey?: string;
+  allowAiInference?: boolean;
   maxLength?: number;
   minItems?: number;
   maxItems?: number;
@@ -35,6 +36,8 @@ export interface ListingDraftPayload {
   mode: 'MOCK';
   schema: MockListingSchema;
   fields: Record<string, unknown>;
+  fieldSources: Record<string, ListingFieldSource>;
+  confirmedInferredFields: string[];
   source: {
     passportId: string;
     passportVersion: number;

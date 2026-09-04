@@ -33,11 +33,19 @@ test('model-generated product name replaces legacy user input without a missing 
     now: '2026-09-04T00:00:00.000Z',
     idFactory: () => `auto-name-${++sequence}`,
   });
-  const legacyName = passport.facts.find((fact) => fact.key === 'product.name')!;
-  legacyName.value = '用户旧名称';
-  legacyName.status = 'CONFIRMED';
-  legacyName.sourceKind = 'USER_INPUT';
-  legacyName.confidence = 1;
+  passport.facts.push({
+    id: 'fact_legacy_name',
+    key: 'product.name',
+    label: '商品名称',
+    value: '用户旧名称',
+    unit: null,
+    status: 'CONFIRMED',
+    confidence: 1,
+    sourceKind: 'USER_INPUT',
+    evidenceIds: [],
+    createdAt: '2026-09-04T00:00:00.000Z',
+    updatedAt: '2026-09-04T00:00:00.000Z',
+  });
 
   const captured: CapturedStatement[] = [];
   const summary = await applyFactExtraction(recordingDatabase(captured), {
@@ -77,6 +85,8 @@ test('model-generated product name replaces legacy user input without a missing 
 
   assert.equal(summary.factsExtracted, 1);
   assert.equal(summary.conflicts, 0);
+  assert.equal(summary.missing, 0);
+  assert.equal(captured.some((statement) => statement.sql.includes("'MISSING'")), false);
   const taskNameUpdate = captured.find((statement) => statement.sql.includes('UPDATE tasks SET product_name'));
   assert.deepEqual(taskNameUpdate?.values, ['浅粉色圆领短袖 T 恤', '2026-09-04T01:00:00.000Z', 'task_auto_name']);
 });
