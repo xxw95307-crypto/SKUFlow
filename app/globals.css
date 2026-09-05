@@ -295,10 +295,6 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .rich-file img,.rich-file-icon { width:58px; height:58px; display:grid; place-items:center; border-radius:8px; background:#dcefeb; color:#17645e; object-fit:cover; font-size:11px; font-weight:900; }
 .rich-file div { min-width:0; } .rich-file b,.rich-file small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rich-file b { font-size:13px; } .rich-file small { margin-top:5px; font-size:11px; } .rich-file>em { color:#338466; font-size:14px; font-style:normal; font-weight:900; }
-.rich-tool-message { display:flex; align-items:center; gap:10px; min-width:260px; }
-.rich-tool-message>span { width:30px; height:30px; flex:none; display:grid; place-items:center; border-radius:9px; background:#e2f3ed; color:#28785d; font-size:12px; font-weight:900; }
-.rich-tool-message b,.rich-tool-message small { display:block; } .rich-tool-message b { font-size:13px; } .rich-tool-message small { margin-top:3px; font-size:11px; }
-.rich-tool-message.running>span { animation:agent-spin .8s linear infinite; } .rich-tool-message.failed>span { background:#f8dfda; color:#a84c3c; }
 .rich-item-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:11px; }
 .rich-item-list article { min-width:0; padding:10px 11px; border:1px solid #dfe8e6; border-radius:10px; background:#f8fbfa; }
 .chat-message.user .rich-item-list article { border-color:#ded7f2; background:#fff; }

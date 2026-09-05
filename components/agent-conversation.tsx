@@ -33,19 +33,6 @@ interface ToolRun {
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
 }
 
-const toolLabels: Record<AgentToolName, string> = {
-  start_listing_workflow: '启动商品上新',
-  parse_product_sources: '解析原始资料',
-  analyze_product_images: '理解商品图片',
-  merge_product_facts: '合并商品事实',
-  generate_platform_listings: '生成平台 Listing',
-  open_conflict_review: '请求冲突确认',
-  open_listing_review: '请求 Listing 审核',
-  open_asset_selection: '请求素材选择',
-  open_publish_confirmation: '请求发布确认',
-  publish_mock_drafts: '创建 Mock 平台草稿',
-};
-
 const assetCandidates = [
   { id: 'main-square', type: '主图 · 1:1', title: '平台白底主图', note: '适用于商品列表和搜索入口' },
   { id: 'lifestyle', type: '场景图 · 4:5', title: '生活方式场景', note: '用于表达使用情境和商品氛围' },
@@ -71,10 +58,6 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
           <div><b>{file.name}</b><small>{formatBytes(file.size)} · 已安全上传</small></div><em>✓</em>
         </article>;
       })}
-    </div>}
-    {message.tool && <div className={`rich-tool-message ${message.tool.status.toLowerCase()}`}>
-      <span>{message.tool.status === 'COMPLETED' ? '✓' : message.tool.status === 'FAILED' ? '!' : '↻'}</span>
-      <div><b>{toolLabels[message.tool.name]}</b><small>{message.tool.status === 'COMPLETED' ? '工具执行完成' : message.tool.status === 'FAILED' ? '工具执行失败' : 'Agent 正在调用工具'}</small></div>
     </div>}
     {message.items && message.items.length > 0 && <div className={`rich-item-list ${message.kind ?? 'text'}`}>
       {message.items.map((item) => <article key={item.id}><div><span>{item.label}</span>{item.status && <em>{item.status}</em>}</div><b>{item.value}</b>{item.detail && <small>{item.detail}</small>}</article>)}
@@ -221,7 +204,6 @@ export function AgentConversation() {
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
-  const [, setToolRuns] = useState<ToolRun[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
@@ -238,26 +220,9 @@ export function AgentConversation() {
     role: ChatMessage['role'],
     text: string,
     meta?: string,
-    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items' | 'tool'>> = {},
+    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items'>> = {},
   ) => {
     const next = [...messagesRef.current, { id: messageId(), role, text, ...(meta ? { meta } : {}), ...rich }].slice(-200);
-    messagesRef.current = next;
-    setMessages(next);
-  };
-
-  const syncToolMessage = (call: AgentToolCall, status: ToolRun['status']) => {
-    const id = `tool_${call.id}`;
-    const message: ChatMessage = {
-      id,
-      role: 'agent',
-      text: '',
-      kind: 'tool',
-      tool: { name: call.function.name, status },
-    };
-    const found = messagesRef.current.some((item) => item.id === id);
-    const next = found
-      ? messagesRef.current.map((item) => item.id === id ? message : item)
-      : [...messagesRef.current, message].slice(-200);
     messagesRef.current = next;
     setMessages(next);
   };
@@ -279,11 +244,12 @@ export function AgentConversation() {
   const applyConversation = async (conversation: AgentConversationRecord) => {
     conversationIdRef.current = conversation.id;
     setConversationId(conversation.id);
-    messagesRef.current = conversation.messages.length ? conversation.messages : initialMessages;
+    const storedMessages = conversation.messages.length ? conversation.messages : initialMessages;
+    messagesRef.current = storedMessages.filter((message) => message.kind !== 'tool');
+    const removedInternalLogs = messagesRef.current.length !== storedMessages.length;
     setMessages(messagesRef.current);
     modelHistory.current = conversation.modelHistory;
     toolRunsRef.current = conversation.toolRuns;
-    setToolRuns(conversation.toolRuns);
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
     setError(''); setComposer('');
@@ -292,23 +258,26 @@ export function AgentConversation() {
     if (!conversation.taskId) {
       const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
       setTask(null); setPassport(null); setPhase(intakeStarted ? 'intake' : 'idle'); setProgressStep(0);
+      if (removedInternalLogs) await persistConversation(null, conversation.status);
       return;
     }
     const [loadedTask, loadedPassport] = await Promise.all([fetchTask(conversation.taskId), fetchPassport(conversation.taskId)]);
     setTask(loadedTask); setPassport(loadedPassport);
+    let conversationUpgraded = removedInternalLogs;
     if (loadedTask.files.length > 0 && !messagesRef.current.some((message) => message.attachments?.some((file) => file.taskId === loadedTask.id))) {
       messagesRef.current = [...messagesRef.current, {
         id: messageId(), role: 'user', text: `本会话已提交 ${loadedTask.files.length} 份商品资料`, meta: '历史资料记录',
         kind: 'files', attachments: taskAttachments(loadedTask),
       }].slice(-200);
       setMessages(messagesRef.current);
-      await persistConversation(loadedTask.id, conversation.status);
+      conversationUpgraded = true;
     }
     const openConflicts = loadedPassport.conflicts.some((item) => item.status === 'OPEN');
     const published = loadedPassport.platformDrafts.some((draft) => draft.status === 'DRAFT_CREATED');
     const generated = loadedPassport.platformDrafts.some((draft) => isListingDraftPayload(draft.payload));
     const allApproved = loadedPassport.platformDrafts.length > 0 && loadedPassport.platformDrafts.every((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
     setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (conversation.selectedAssetIds.length ? 'publish' : 'assets') : generated ? 'listing' : 'resume');
+    if (conversationUpgraded) await persistConversation(loadedTask.id, conversation.status);
   };
 
   const persistConversation = async (taskIdOverride?: string | null, statusOverride?: 'ACTIVE' | 'COMPLETED') => {
@@ -398,8 +367,6 @@ export function AgentConversation() {
       ? toolRunsRef.current.map((item) => item.id === call.id ? { ...item, status } : item)
       : [...toolRunsRef.current, { id: call.id, name: call.function.name, status }].slice(-12);
     toolRunsRef.current = next;
-    setToolRuns(next);
-    syncToolMessage(call, status);
   };
 
   const executeTool = async (
@@ -588,7 +555,7 @@ export function AgentConversation() {
   const handleIntakeComplete = async (createdTask: TaskSnapshot) => {
     setTask(createdTask);
     setPassport(await fetchPassport(createdTask.id));
-    toolRunsRef.current = []; setToolRuns([]);
+    toolRunsRef.current = [];
     append('user', `已上传 ${createdTask.files.length} 份同一商品资料`, `${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · ${createdTask.markets.join('、')}`, {
       kind: 'files',
       attachments: taskAttachments(createdTask),
