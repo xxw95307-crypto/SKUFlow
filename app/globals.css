@@ -405,11 +405,16 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .context-safety>span { width:28px; height:28px; display:grid; place-items:center; border-radius:8px; background:#254850; color:#8fe0d2; }
 .context-safety b,.context-safety small { display:block; } .context-safety b { font-size:12px; } .context-safety small { margin-top:3px; color:#8da8a9; font-size:10px; }
 
-.agent-composer { min-height:104px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:17px clamp(22px,5vw,70px); border-top:1px solid #d9e3e1; background:#f8faf9; }
-.agent-composer input { width:100%; min-height:68px; padding:16px 18px; border:1px solid #cad8d5; border-radius:16px; background:#fff; color:#1a3032; font-size:16px; outline:none; box-shadow:0 5px 18px #183b3708; }
-.agent-composer input:focus { border-color:#66aea4; box-shadow:0 0 0 3px #087f7a12; }
+.agent-composer { min-height:104px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:"attachments attachments attachments" "attach message send"; align-items:center; gap:12px; padding:17px clamp(22px,5vw,70px); border-top:1px solid #d9e3e1; background:#f8faf9; }
+.agent-composer-input { grid-area:message; width:100%; min-height:68px; padding:16px 18px; border:1px solid #cad8d5; border-radius:16px; background:#fff; color:#1a3032; font-size:16px; outline:none; box-shadow:0 5px 18px #183b3708; }
+.agent-composer-input:focus { border-color:#66aea4; box-shadow:0 0 0 3px #087f7a12; }
 .agent-composer>button { width:52px; height:52px; border:1px solid #d0dcda; border-radius:14px; background:#fff; color:#56706d; font-size:23px; }
-.agent-composer>button.send { border-color:#0c716c; background:#0c716c; color:#fff; font-weight:900; } .agent-composer>button:disabled { cursor:not-allowed; opacity:.45; }
+.agent-composer>button.composer-attach { grid-area:attach; } .agent-composer>button.send { grid-area:send; border-color:#0c716c; background:#0c716c; color:#fff; font-weight:900; } .agent-composer>button:disabled { cursor:not-allowed; opacity:.45; }
+.composer-attachments { grid-area:attachments; display:flex; gap:8px; max-width:100%; overflow-x:auto; padding:1px 0 3px; }
+.composer-attachment { min-width:220px; max-width:310px; display:grid; grid-template-columns:38px minmax(0,1fr) 25px; align-items:center; gap:9px; padding:8px 9px; border:1px solid #cddedb; border-radius:11px; background:#fff; box-shadow:0 5px 16px #173b3708; }
+.composer-attachment>span { width:38px; height:38px; display:grid; place-items:center; border-radius:9px; background:#e3f3ef; color:#176b64; font-size:10px; font-weight:900; }
+.composer-attachment b,.composer-attachment small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .composer-attachment b { font-size:12px; } .composer-attachment small { margin-top:3px; color:#7b8b89; font-size:11px; }
+.composer-attachment>button { width:25px; height:25px; border:0; border-radius:7px; background:transparent; color:#8a9997; font-size:18px; } .composer-attachment>button:hover { background:#fff0ed; color:#a8483d; }
 
 .agent-dialog-backdrop { position:fixed; z-index:100; inset:0; display:grid; place-items:center; padding:24px; background:#071417b8; backdrop-filter:blur(7px); animation:agent-fade-in .16s ease-out; }
 .agent-dialog { width:min(690px,100%); max-height:calc(100vh - 48px); display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; border:1px solid #cbdad7; border-radius:17px; background:#fff; box-shadow:0 28px 80px #07171973; }
@@ -484,5 +489,5 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
   .embedded-intake .platform-choice-grid { grid-template-columns:1fr 1fr; } .embedded-intake .wide-action span { display:none; }
   .decision-options,.agent-asset-grid { grid-template-columns:1fr; } .agent-asset-preview { height:130px; }
   .decision-manual>div,.publish-confirm-list>div { grid-template-columns:1fr; } .dialog-footer { align-items:stretch; flex-direction:column; } .dialog-footer button { width:100%; }
-  .agent-composer { min-height:92px; gap:8px; padding:12px 14px; } .agent-composer input { min-height:60px; padding:13px 14px; } .agent-composer>button { width:46px; height:46px; }
+  .agent-composer { min-height:92px; gap:8px; padding:12px 14px; } .agent-composer-input { min-height:60px; padding:13px 14px; } .agent-composer>button { width:46px; height:46px; } .composer-attachment { min-width:190px; }
 }

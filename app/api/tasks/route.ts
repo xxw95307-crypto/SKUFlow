@@ -1,4 +1,5 @@
 import { ensureSchema, getBindings } from '@/db/client';
+import { inferIntakeTargets } from '@/lib/agents/intake-targets';
 import type { PlatformId } from '@/lib/domain/platform';
 import { createInitialProductPassport } from '@/lib/domain/product-passport';
 import { PENDING_PRODUCT_NAME, type TaskFile, type TaskSnapshot, type TaskStatus } from '@/lib/domain/task';
@@ -91,8 +92,12 @@ export async function POST(request: Request) {
     await ensureSchema();
     const { DB, UPLOADS } = getBindings();
     const form = await request.formData();
-    const markets = parseStringArray(form.get('markets'), 'markets');
-    const platforms = parseStringArray(form.get('platforms'), 'platforms') as PlatformId[];
+    const requestText = typeof form.get('request') === 'string' ? String(form.get('request')).slice(0, 4_000) : '';
+    const inferredTargets = inferIntakeTargets(requestText);
+    const marketField = form.get('markets');
+    const platformField = form.get('platforms');
+    const markets = marketField === null ? inferredTargets.markets : parseStringArray(marketField, 'markets');
+    const platforms = (platformField === null ? inferredTargets.platforms : parseStringArray(platformField, 'platforms')) as PlatformId[];
     const files = form.getAll('files').filter((entry): entry is File => entry instanceof File);
 
     if (markets.length === 0 || markets.length > 8) throw new Error('请选择 1–8 个目标市场');
@@ -163,7 +168,15 @@ export async function POST(request: Request) {
       updatedAt: now,
     };
 
-    return Response.json({ task }, { status: 201 });
+    return Response.json({
+      task,
+      targeting: {
+        platforms,
+        markets,
+        platformSource: platformField === null ? inferredTargets.platformSource : 'explicit',
+        marketSource: marketField === null ? inferredTargets.marketSource : 'explicit',
+      },
+    }, { status: 201 });
   } catch (error) {
     if (storedObjectKeys.length > 0) {
       const { UPLOADS } = getBindings();

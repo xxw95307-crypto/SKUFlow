@@ -32,6 +32,9 @@ const DEFAULT_RAIL_WIDTH = 272;
 const MIN_RAIL_WIDTH = 220;
 const MAX_RAIL_WIDTH = 420;
 const RAIL_WIDTH_STORAGE_KEY = 'skuflow-agent-rail-width';
+const COMPOSER_FILE_ACCEPT = '.jpg,.jpeg,.png,.webp,.pdf,.xlsx,.xls,.csv,.txt,.docx';
+const MAX_COMPOSER_FILES = 12;
+const MAX_COMPOSER_TOTAL_SIZE = 40 * 1024 * 1024;
 
 interface ToolRun {
   id: string;
@@ -75,7 +78,7 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，我是 SKUFlow Agent。你可以直接告诉我今天想做什么，例如“我要上新一款商品”，也可以先问我有关平台 Listing 的问题。',
+  text: '你好，我是 SKUFlow Agent。你可以点击左下角“＋”附上商品图片、表格和说明文档，再直接告诉我想上新到哪些平台；也可以先问我有关平台 Listing 的问题。',
   meta: '等待你的消息',
 }];
 
@@ -230,7 +233,9 @@ export function AgentConversation() {
   const [deleteCandidate, setDeleteCandidate] = useState<ConversationSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [railWidth, setRailWidth] = useState(DEFAULT_RAIL_WIDTH);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const threadEnd = useRef<HTMLDivElement>(null);
+  const composerFileInput = useRef<HTMLInputElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
   const messagesRef = useRef<ChatMessage[]>(initialMessages);
   const toolRunsRef = useRef<ToolRun[]>([]);
@@ -280,6 +285,8 @@ export function AgentConversation() {
     toolRunsRef.current = conversation.toolRuns;
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
+    setPendingFiles([]);
+    if (composerFileInput.current) composerFileInput.current.value = '';
     setError(''); setComposer('');
     setConflictOpen(false); setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
     updateConversationList(conversation);
@@ -386,6 +393,20 @@ export function AgentConversation() {
     railWidthRef.current = width;
     setRailWidth(width);
     if (remember) window.localStorage.setItem(RAIL_WIDTH_STORAGE_KEY, String(width));
+  };
+
+  const addComposerFiles = (incoming: FileList) => {
+    const supported = new Set(COMPOSER_FILE_ACCEPT.split(',').map((item) => item.slice(1)));
+    const candidates = Array.from(incoming);
+    const unsupported = candidates.find((file) => !supported.has(file.name.split('.').pop()?.toLowerCase() ?? ''));
+    if (unsupported) return setError(`不支持的文件类型：${unsupported.name}`);
+    const known = new Set(pendingFiles.map((file) => `${file.name}:${file.size}`));
+    const merged = [...pendingFiles, ...candidates.filter((file) => !known.has(`${file.name}:${file.size}`))].slice(0, MAX_COMPOSER_FILES);
+    if (merged.reduce((sum, file) => sum + file.size, 0) > MAX_COMPOSER_TOTAL_SIZE) {
+      return setError('全部附件总大小不能超过 40 MB');
+    }
+    setPendingFiles(merged);
+    setError(candidates.length + pendingFiles.length > MAX_COMPOSER_FILES ? `一次最多上传 ${MAX_COMPOSER_FILES} 个文件` : '');
   };
 
   const refreshTaskState = async (taskId: string) => {
@@ -723,7 +744,45 @@ export function AgentConversation() {
 
   const sendMessage = async () => {
     const text = composer.trim();
-    if (!text) return;
+    if (!text && pendingFiles.length === 0) return;
+    if (pendingFiles.length > 0) {
+      if (task) return setError('当前会话已经绑定一个商品任务；如需处理另一个商品，请新建上新对话。');
+      const requestText = text || '请根据这些资料上新这款商品。';
+      const previousPhase = phase;
+      setPhase('processing'); setBusyLabel('正在安全接收商品资料…'); setError('');
+      try {
+        const body = new FormData();
+        body.set('request', requestText);
+        pendingFiles.forEach((file) => body.append('files', file));
+        const payload = await responseJson<{
+          task: TaskSnapshot;
+          targeting: { platformSource: 'message' | 'default' | 'explicit'; marketSource: 'message' | 'default' | 'explicit' };
+        }>(await fetch('/api/tasks', { method: 'POST', body }), '商品资料上传失败');
+        const createdTask = payload.task;
+        setComposer(''); setPendingFiles([]);
+        if (composerFileInput.current) composerFileInput.current.value = '';
+        setTask(createdTask);
+        setPassport(await fetchPassport(createdTask.id));
+        toolRunsRef.current = [];
+        append('user', requestText, `${createdTask.files.length} 份资料 · 已安全上传`, {
+          kind: 'files',
+          attachments: taskAttachments(createdTask),
+        });
+        const targetSummary = `${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · ${createdTask.markets.join('、')}`;
+        const usedDefaults = payload.targeting.platformSource === 'default' || payload.targeting.marketSource === 'default';
+        append('agent', `资料已经接收，我会按 ${targetSummary} 自动处理。${usedDefaults ? '你没有明确写出的目标已按当前默认配置补齐。' : ''}`, '后台任务已建立');
+        await persistConversation(createdTask.id);
+        await runAgentTurn(
+          createdTask,
+          `${requestText}\n系统已接收 ${createdTask.files.length} 份同一商品资料，目标为 ${targetSummary}。请直接推进后台处理，只在事实冲突、素材选择和发布确认时暂停。`,
+          { resetHistory: true, appendUser: false },
+        );
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : '商品资料上传失败');
+        setPhase(previousPhase);
+      }
+      return;
+    }
     setComposer('');
     await runAgentTurn(task, text);
   };
@@ -834,7 +893,13 @@ export function AgentConversation() {
         </aside>}
       </div>
 
-      <footer className="agent-composer"><button type="button" aria-label="新建上新会话" onClick={() => { if (phase !== 'idle') void newConversation(); }}>+</button><input value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : phase === 'idle' ? '告诉 Agent 你想做什么…' : '直接告诉 Agent 你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim() || phase === 'processing'}>↑</button></footer>
+      <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''}`}>
+        <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
+        {pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
+        <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务' : '添加图片、表格或文档'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>
+        <input className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : pendingFiles.length ? '说明要上新到哪些平台和市场，然后发送…' : phase === 'idle' ? '输入要求，或点击左侧＋直接添加商品资料…' : '直接告诉 Agent 你的要求…'} />
+        <button className="send" type="button" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
+      </footer>
     </section>
 
     {conflictOpen && passport && <ConflictDialog passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} onClose={() => setConflictOpen(false)} />}

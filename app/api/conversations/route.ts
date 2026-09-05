@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 const welcomeMessages: ConversationMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，我是 SKUFlow Agent。你可以直接告诉我今天想做什么，例如“我要上新一款商品”，也可以先问我有关平台 Listing 的问题。',
+  text: '你好，我是 SKUFlow Agent。你可以点击左下角“＋”附上商品图片、表格和说明文档，再直接告诉我想上新到哪些平台；也可以先问我有关平台 Listing 的问题。',
   meta: '等待你的消息',
 }];
 
