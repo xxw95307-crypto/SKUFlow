@@ -405,10 +405,10 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .context-safety>span { width:28px; height:28px; display:grid; place-items:center; border-radius:8px; background:#254850; color:#8fe0d2; }
 .context-safety b,.context-safety small { display:block; } .context-safety b { font-size:12px; } .context-safety small { margin-top:3px; color:#8da8a9; font-size:10px; }
 
-.agent-composer { min-height:76px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:9px; padding:12px clamp(22px,5vw,70px); border-top:1px solid #d9e3e1; background:#f8faf9; }
-.agent-composer input { width:100%; min-height:46px; padding:11px 14px; border:1px solid #cad8d5; border-radius:13px; background:#fff; color:#1a3032; font-size:14px; outline:none; box-shadow:0 5px 18px #183b3708; }
+.agent-composer { min-height:104px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:17px clamp(22px,5vw,70px); border-top:1px solid #d9e3e1; background:#f8faf9; }
+.agent-composer input { width:100%; min-height:68px; padding:16px 18px; border:1px solid #cad8d5; border-radius:16px; background:#fff; color:#1a3032; font-size:16px; outline:none; box-shadow:0 5px 18px #183b3708; }
 .agent-composer input:focus { border-color:#66aea4; box-shadow:0 0 0 3px #087f7a12; }
-.agent-composer>button { width:40px; height:40px; border:1px solid #d0dcda; border-radius:11px; background:#fff; color:#56706d; font-size:21px; }
+.agent-composer>button { width:52px; height:52px; border:1px solid #d0dcda; border-radius:14px; background:#fff; color:#56706d; font-size:23px; }
 .agent-composer>button.send { border-color:#0c716c; background:#0c716c; color:#fff; font-weight:900; } .agent-composer>button:disabled { cursor:not-allowed; opacity:.45; }
 
 .agent-dialog-backdrop { position:fixed; z-index:100; inset:0; display:grid; place-items:center; padding:24px; background:#071417b8; backdrop-filter:blur(7px); animation:agent-fade-in .16s ease-out; }
@@ -484,4 +484,5 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
   .embedded-intake .platform-choice-grid { grid-template-columns:1fr 1fr; } .embedded-intake .wide-action span { display:none; }
   .decision-options,.agent-asset-grid { grid-template-columns:1fr; } .agent-asset-preview { height:130px; }
   .decision-manual>div,.publish-confirm-list>div { grid-template-columns:1fr; } .dialog-footer { align-items:stretch; flex-direction:column; } .dialog-footer button { width:100%; }
+  .agent-composer { min-height:92px; gap:8px; padding:12px 14px; } .agent-composer input { min-height:60px; padding:13px 14px; } .agent-composer>button { width:46px; height:46px; }
 }
