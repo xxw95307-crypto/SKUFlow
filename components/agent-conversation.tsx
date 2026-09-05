@@ -4,6 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
+import type {
+  AgentModelMessage,
+  AgentOrchestratorResponse,
+  AgentToolCall,
+  AgentToolName,
+  AgentWorkflowState,
+} from '@/lib/domain/agent-orchestrator';
 import type { FactConflict, FactValue, ProductPassport } from '@/lib/domain/product-passport';
 import { PENDING_PRODUCT_NAME, TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
@@ -17,6 +24,24 @@ interface ChatMessage {
   text: string;
   meta?: string;
 }
+
+interface ToolRun {
+  id: string;
+  name: AgentToolName;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+}
+
+const toolLabels: Record<AgentToolName, string> = {
+  parse_product_sources: '解析原始资料',
+  analyze_product_images: '理解商品图片',
+  merge_product_facts: '合并商品事实',
+  generate_platform_listings: '生成平台 Listing',
+  open_conflict_review: '请求冲突确认',
+  open_listing_review: '请求 Listing 审核',
+  open_asset_selection: '请求素材选择',
+  open_publish_confirmation: '请求发布确认',
+  publish_mock_drafts: '创建 Mock 平台草稿',
+};
 
 const assetCandidates = [
   { id: 'main-square', type: '主图 · 1:1', title: '平台白底主图', note: '适用于商品列表和搜索入口' },
@@ -153,7 +178,9 @@ export function AgentConversation() {
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
+  const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
   const threadEnd = useRef<HTMLDivElement>(null);
+  const modelHistory = useRef<AgentModelMessage[]>([]);
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
@@ -165,6 +192,11 @@ export function AgentConversation() {
   const fetchPassport = async (taskId: string): Promise<ProductPassport> => {
     const payload = await responseJson<{ passport: ProductPassport }>(await fetch(`/api/tasks/${taskId}/passport`), '商品档案读取失败');
     return payload.passport;
+  };
+
+  const fetchTask = async (taskId: string): Promise<TaskSnapshot> => {
+    const payload = await responseJson<{ task: TaskSnapshot }>(await fetch(`/api/tasks/${taskId}`), '任务状态读取失败');
+    return payload.task;
   };
 
   useEffect(() => {
@@ -191,65 +223,179 @@ export function AgentConversation() {
 
   useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, phase, busyLabel]);
 
-  const compileListings = async (currentTask: TaskSnapshot) => {
-    setPhase('processing');
-    setProgressStep(2);
-    setBusyLabel('正在读取各平台字段，并生成中文审校稿…');
-    setError('');
+  const refreshTaskState = async (taskId: string) => {
+    const [nextTask, nextPassport] = await Promise.all([fetchTask(taskId), fetchPassport(taskId)]);
+    setTask(nextTask);
+    setPassport(nextPassport);
+    return { task: nextTask, passport: nextPassport };
+  };
+
+  const phaseFromState = (state: AgentWorkflowState) => {
+    if (!state.taskId) return setPhase('intake');
+    if (state.publishedDraftCount > 0) return setPhase('complete');
+    if (state.openConflictCount > 0) return setPhase('conflict');
+    if (state.generatedDraftCount > 0 && state.approvedDraftCount < state.draftCount) return setPhase('listing');
+    if (state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
+      return setPhase(state.selectedAssetCount > 0 ? 'publish' : 'assets');
+    }
+    setPhase('resume');
+  };
+
+  const markToolRun = (call: AgentToolCall, status: ToolRun['status']) => {
+    setToolRuns((current) => {
+      const existing = current.find((item) => item.id === call.id);
+      if (existing) return current.map((item) => item.id === call.id ? { ...item, status } : item);
+      return [...current, { id: call.id, name: call.function.name, status }].slice(-12);
+    });
+  };
+
+  const executeTool = async (
+    call: AgentToolCall,
+    currentTask: TaskSnapshot,
+    publishApproved: boolean,
+  ): Promise<{ result: Record<string, unknown>; checkpoint: boolean }> => {
+    const name = call.function.name;
+    markToolRun(call, 'RUNNING');
     try {
-      const payload = await responseJson<{ passport: ProductPassport }>(await fetch(`/api/tasks/${currentTask.id}/compile-drafts`, { method: 'POST' }), '多平台 Listing 生成失败');
-      setPassport(payload.passport);
-      setPhase('listing');
-      append('agent', `我已经按平台生成 ${payload.passport.platformDrafts.length} 份中文 Listing 审校稿。请集中审核一次，需要你提供的 SKU、价格和库存也会在这里统一询问。`, '平台稿已就绪');
-      setListingOpen(true);
+      if (name === 'parse_product_sources') {
+        setProgressStep(0); setBusyLabel('Agent 正在解析图片、表格和文档…');
+        const payload = await responseJson<{ summary: Record<string, unknown> }>(await fetch(`/api/tasks/${currentTask.id}/parse`, { method: 'POST' }), '资料解析失败');
+        await refreshTaskState(currentTask.id);
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary }, checkpoint: false };
+      }
+      if (name === 'analyze_product_images') {
+        setProgressStep(1); setBusyLabel('Agent 正在调用百炼理解商品实物图…');
+        const payload = await responseJson<{ summary: { completed: number; failed: number } }>(await fetch(`/api/tasks/${currentTask.id}/analyze-images`, { method: 'POST' }), '图片理解失败');
+        if (payload.summary.completed === 0) throw new Error(`图片理解未得到有效结果（失败 ${payload.summary.failed} 张）`);
+        await refreshTaskState(currentTask.id);
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary }, checkpoint: false };
+      }
+      if (name === 'merge_product_facts') {
+        setProgressStep(1); setBusyLabel('Agent 正在合并图文证据并检查冲突…');
+        const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport; task: TaskSnapshot }>(await fetch(`/api/tasks/${currentTask.id}/extract-facts`, { method: 'POST' }), '商品事实合并失败');
+        setPassport(payload.passport); setTask(payload.task);
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary }, checkpoint: false };
+      }
+      if (name === 'generate_platform_listings') {
+        setProgressStep(2); setBusyLabel('Agent 正在读取平台字段并创作中文 Listing…');
+        const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport }>(await fetch(`/api/tasks/${currentTask.id}/compile-drafts`, { method: 'POST' }), '多平台 Listing 生成失败');
+        setPassport(payload.passport);
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary }, checkpoint: false };
+      }
+      if (name === 'open_conflict_review') {
+        const refreshed = await refreshTaskState(currentTask.id);
+        const count = refreshed.passport.conflicts.filter((item) => item.status === 'OPEN').length;
+        if (count === 0) throw new Error('当前没有待确认的商品属性冲突');
+        setPhase('conflict'); setConflictOpen(true);
+        append('agent', `我发现 ${count} 处图文冲突，已经暂停自动执行。请确认真实信息后我再继续。`, '等待人工决策');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, presented: true, openConflicts: count }, checkpoint: true };
+      }
+      if (name === 'open_listing_review') {
+        const refreshed = await refreshTaskState(currentTask.id);
+        setPhase('listing'); setListingOpen(true);
+        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份平台中文审校稿。请集中审核，确认后我会继续。`, '等待 Listing 审核');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
+      }
+      if (name === 'open_asset_selection') {
+        setPhase('assets'); setAssetOpen(true);
+        append('agent', '平台 Listing 已全部确认。请选择要进入交付包的视觉方案。', '等待素材选择');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, presented: true }, checkpoint: true };
+      }
+      if (name === 'open_publish_confirmation') {
+        setPhase('publish'); setPublishOpen(true);
+        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用发布工具。', '等待最终确认');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, presented: true }, checkpoint: true };
+      }
+      if (name === 'publish_mock_drafts') {
+        if (!publishApproved) throw new Error('发布工具缺少本轮商家明确授权');
+        setProgressStep(4); setBusyLabel('Agent 正在创建 Mock 平台草稿…');
+        const payload = await responseJson<{ passport: ProductPassport; message?: string; results: unknown[] }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), 'Mock 草稿创建失败');
+        setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false };
+      }
+      throw new Error(`不支持的 Agent 工具：${name}`);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : '多平台 Listing 生成失败';
-      setError(message); setPhase('error'); append('agent', `我在生成平台稿时遇到了问题：${message}`, '任务已暂停');
+      markToolRun(call, 'FAILED');
+      throw caught;
     }
   };
 
-  const continueFromPassport = async (currentTask: TaskSnapshot, currentPassport: ProductPassport) => {
-    setPassport(currentPassport);
-    const openConflicts = currentPassport.conflicts.filter((item) => item.status === 'OPEN');
-    if (openConflicts.length > 0) {
-      setPhase('conflict');
-      append('agent', `商品资料已理解完成，共提取 ${currentPassport.facts.filter((fact) => fact.status !== 'MISSING').length} 项属性。我发现 ${openConflicts.length} 处图文冲突，需要你决定后才能继续。`, '等待人工决策');
-      setConflictOpen(true);
-      return;
+  const runAgentTurn = async (
+    currentTask: TaskSnapshot | null,
+    userText: string,
+    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean } = {},
+  ) => {
+    if (options.resetHistory) modelHistory.current = [];
+    if (options.appendUser !== false) append('user', userText);
+    let history: AgentModelMessage[] = [...modelHistory.current, { role: 'user', content: userText }];
+    setPhase('processing'); setBusyLabel('中央 Agent 正在判断下一步…'); setError('');
+    try {
+      for (let step = 0; step < 10; step += 1) {
+        const payload = await responseJson<AgentOrchestratorResponse>(await fetch('/api/agent/orchestrate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            taskId: currentTask?.id,
+            messages: history,
+            selectedAssetIds: selectedAssets,
+            publishApproved: options.publishApproved === true,
+            requireAction: currentTask !== null,
+          }),
+        }), 'Agent 无法决定下一步');
+        history = [...history, {
+          role: 'assistant',
+          content: payload.message.content,
+          ...(payload.message.toolCalls.length ? { toolCalls: payload.message.toolCalls } : {}),
+        }];
+        if (payload.message.content) append('agent', payload.message.content, payload.message.toolCalls.length ? '正在调用工具' : undefined);
+        const call = payload.message.toolCalls[0];
+        if (!call) {
+          modelHistory.current = history;
+          phaseFromState(payload.state);
+          return;
+        }
+        if (!currentTask) throw new Error('Agent 在没有任务时请求了业务工具');
+        const execution = await executeTool(call, currentTask, options.publishApproved === true);
+        history = [...history, {
+          role: 'tool',
+          toolCallId: call.id,
+          name: call.function.name,
+          content: JSON.stringify(execution.result),
+        }];
+        modelHistory.current = history;
+        if (execution.checkpoint) return;
+      }
+      throw new Error('Agent 连续执行步骤过多，已安全暂停');
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Agent 执行失败';
+      setError(message); setPhase('error');
+      append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
     }
-    append('agent', `商品理解已完成，${currentPassport.facts.filter((fact) => fact.status !== 'MISSING').length} 项属性已合并，没有需要你处理的冲突。`, '已自动继续');
-    await compileListings(currentTask);
   };
 
   const handleIntakeComplete = async (createdTask: TaskSnapshot) => {
     setTask(createdTask);
-    setPhase('processing');
-    setProgressStep(1);
-    setBusyLabel('正在整理商品档案…');
-    append('user', `已提交 ${createdTask.files.length} 份商品资料，目标平台：${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')}。`);
-    try {
-      const currentPassport = await fetchPassport(createdTask.id);
-      await continueFromPassport(createdTask, currentPassport);
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : '商品档案读取失败';
-      setError(message); setPhase('error');
-    }
+    setPassport(await fetchPassport(createdTask.id));
+    setToolRuns([]);
+    await runAgentTurn(
+      createdTask,
+      `已提交 ${createdTask.files.length} 份同一商品资料，目标平台：${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')}。请自主完成内部步骤，只在需要我决定时暂停。`,
+      { resetHistory: true },
+    );
   };
 
   const resumeTask = async () => {
-    if (!task || !passport) return;
-    append('user', `继续任务：${task.productName}`);
-    const openConflicts = passport.conflicts.filter((item) => item.status === 'OPEN');
-    if (openConflicts.length > 0) { setPhase('conflict'); setConflictOpen(true); return; }
-    const generated = passport.platformDrafts.filter((draft) => isListingDraftPayload(draft.payload));
-    const published = passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED');
-    const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED');
-    if (published.length > 0) { setPhase('complete'); return; }
-    if (approved.length === passport.platformDrafts.length && approved.length > 0) { setPhase('assets'); setAssetOpen(true); return; }
-    if (generated.length > 0) { setPhase('listing'); setListingOpen(true); return; }
-    if (passport.facts.some((fact) => fact.status !== 'MISSING')) { await compileListings(task); return; }
-    setPhase('intake');
-    append('agent', '这个历史任务还没有形成商品档案。请新建任务并重新上传原始资料。');
+    if (!task) return;
+    await runAgentTurn(task, `继续处理当前商品任务：${task.productName}。请根据真实任务状态自主选择下一步工具。`);
   };
 
   const resolveConflict = async (conflict: FactConflict, candidateId?: string) => {
@@ -268,8 +414,7 @@ export function AgentConversation() {
       const remaining = payload.passport.conflicts.filter((item) => item.status === 'OPEN');
       if (remaining.length === 0) {
         setConflictOpen(false);
-        append('agent', '所有冲突都已确认。我会继续获取平台字段并生成 Listing，你不需要手动跳转。', '流程继续运行');
-        await compileListings(task);
+        await runAgentTurn(task, '商品属性冲突已经全部由我确认，请继续自动处理。', { appendUser: false });
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : '冲突确认失败'); }
     finally { setActionBusy(false); }
@@ -288,51 +433,35 @@ export function AgentConversation() {
   const proceedToAssets = async () => {
     setListingOpen(false);
     await refreshAfterListing();
-    setPhase('assets');
-    append('agent', '所有平台 Listing 都已确认。我已经根据实物图和商品卖点准备了视觉候选，请选择要交付的版本。', '等待选图');
-    setAssetOpen(true);
+    if (task) await runAgentTurn(task, '我已确认所有平台 Listing，请继续。', { appendUser: false });
   };
 
-  const confirmAssets = () => {
-    setAssetOpen(false); setPhase('publish');
-    append('user', `已选择 ${selectedAssets.length} 个视觉方案。`);
-    append('agent', '上架包已准备完成。这是最后一个必须由你确认的节点：请检查平台、市场和交付范围后再发布。', '等待最终确认');
-    setPublishOpen(true);
+  const confirmAssets = async () => {
+    setAssetOpen(false);
+    if (task) await runAgentTurn(task, `我已选择 ${selectedAssets.length} 个视觉方案，请继续。`);
   };
 
   const publish = async () => {
     if (!task) return;
     setActionBusy(true); setError('');
     try {
-      const payload = await responseJson<{ passport: ProductPassport; message?: string }>(await fetch(`/api/tasks/${task.id}/publish-mock`, { method: 'POST' }), 'Mock 草稿创建失败');
-      setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
-      append('user', '确认发布。');
-      append('agent', `交付完成。${payload.message ?? '已为确认的平台创建 Mock 草稿。'}`, '任务完成');
+      await runAgentTurn(task, '我已检查并明确确认发布，请调用发布工具。', { publishApproved: true });
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Mock 草稿创建失败'); }
     finally { setActionBusy(false); }
   };
 
   const newConversation = () => {
     setTask(null); setPassport(null); setPhase('intake'); setProgressStep(0); setMessages(initialMessages); setError(''); setComposer(''); setSelectedAssets([]);
+    setToolRuns([]); modelHistory.current = [];
     setConflictOpen(false); setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
   };
 
   const sendMessage = async () => {
     const text = composer.trim();
     if (!text) return;
-    setComposer(''); append('user', text);
+    setComposer('');
     if (/新建|重新开始/.test(text)) { newConversation(); return; }
-    if (phase === 'resume') { await resumeTask(); return; }
-    if (phase === 'conflict') { setConflictOpen(true); append('agent', '我已重新打开冲突确认卡片。'); return; }
-    if (phase === 'listing' && task) {
-      if (/重新生成|再生成/.test(text)) await compileListings(task);
-      else setListingOpen(true);
-      return;
-    }
-    if (phase === 'assets') { setAssetOpen(true); return; }
-    if (phase === 'publish') { setPublishOpen(true); return; }
-    if (phase === 'complete') { append('agent', '这个商品的 Mock 交付已完成。如果要处理下一个商品，可以说“新建任务”。'); return; }
-    append('agent', '请在上方上传同一商品的全部资料并选择目标平台。提交后，我会自动开始处理。');
+    await runAgentTurn(task, text);
   };
 
   const visibleFacts = passport?.facts.filter((fact) => fact.status !== 'MISSING') ?? [];
@@ -351,7 +480,7 @@ export function AgentConversation() {
     </aside>
 
     <section className="agent-main">
-      <header className="agent-topbar"><div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : '创建商品上新任务'}</h1></div><div className="agent-model"><span>阿里云百炼</span><b>qwen3.8-max</b></div></header>
+      <header className="agent-topbar"><div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : '创建商品上新任务'}</h1></div><div className="agent-model"><span>百炼 Function Calling</span><b>qwen3.8-max · 工具已开启</b></div></header>
 
       <div className="agent-chat-layout">
         <section className="agent-thread" aria-label="Agent 对话">
@@ -363,11 +492,13 @@ export function AgentConversation() {
 
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
 
-          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} /></div></div>}
+          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} agentManaged /></div></div>}
 
           {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={newConversation}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 
           {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>Agent 正在调用商品理解和平台适配工具，完成后会主动通知你。</small></div><em>自动执行中</em></div>}
+
+          {toolRuns.length > 0 && <div className="agent-tool-trace"><div><span>实时工具调用</span><b>{toolRuns.filter((run) => run.status === 'COMPLETED').length}/{toolRuns.length} 已完成</b></div><ol>{toolRuns.map((run) => <li className={run.status.toLowerCase()} key={run.id}><i>{run.status === 'COMPLETED' ? '✓' : run.status === 'FAILED' ? '!' : '↻'}</i><span>{toolLabels[run.name]}</span><small>{run.status === 'COMPLETED' ? '执行完成' : run.status === 'FAILED' ? '执行失败' : '执行中'}</small></li>)}</ol></div>}
 
           {phase === 'conflict' && passport && <div className="chat-action-card checkpoint warning"><div className="checkpoint-icon">!</div><div><span>流程已暂停</span><h3>{openConflictCount} 项属性冲突需要你确认</h3><p>这些决定会同步影响各平台 Listing，Agent 不会自作主张。</p></div><button type="button" onClick={() => setConflictOpen(true)}>打开确认卡</button></div>}
 
@@ -395,7 +526,7 @@ export function AgentConversation() {
         </aside>
       </div>
 
-      <footer className="agent-composer"><button type="button" aria-label="添加附件" onClick={() => phase !== 'intake' && newConversation()}>+</button><input value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'intake' ? '可以先告诉 Agent 你想做什么…' : '输入“继续”、“重新生成”或说明你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim()}>↑</button></footer>
+      <footer className="agent-composer"><button type="button" aria-label="添加附件" onClick={() => phase !== 'intake' && newConversation()}>+</button><input value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : phase === 'intake' ? '可以先告诉 Agent 你想做什么…' : '直接告诉 Agent 你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim() || phase === 'processing'}>↑</button></footer>
     </section>
 
     {conflictOpen && passport && <ConflictDialog passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} onClose={() => setConflictOpen(false)} />}

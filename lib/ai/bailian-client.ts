@@ -5,6 +5,13 @@ import type { BailianConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
 import type { ListingGenerationOutput } from '../domain/listing';
+import {
+  isAgentToolName,
+  type AgentModelMessage,
+  type AgentOrchestratorResponse,
+  type AgentToolCall,
+  type AgentToolDefinition,
+} from '../domain/agent-orchestrator.ts';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
@@ -25,7 +32,14 @@ export interface BailianListingGenerationResponse {
 interface ChatCompletionResponse {
   id?: string;
   model?: string;
-  choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+  choices?: Array<{ message?: {
+    content?: string | Array<{ text?: string }> | null;
+    tool_calls?: Array<{
+      id?: string;
+      type?: string;
+      function?: { name?: string; arguments?: string };
+    }>;
+  } }>;
   usage?: Record<string, unknown>;
 }
 
@@ -45,10 +59,100 @@ function normalizeUsage(value: Record<string, unknown> | undefined): Record<stri
   return entries.length > 0 ? Object.fromEntries(entries) : null;
 }
 
-function responseText(content: string | Array<{ text?: string }> | undefined): string {
+function responseText(content: string | Array<{ text?: string }> | null | undefined): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((item) => item.text ?? '').join('');
   return '';
+}
+
+function toBailianMessages(messages: AgentModelMessage[]): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    if (message.role === 'assistant') {
+      return {
+        role: 'assistant',
+        content: message.content,
+        ...(message.toolCalls?.length ? { tool_calls: message.toolCalls } : {}),
+      };
+    }
+    if (message.role === 'tool') {
+      return {
+        role: 'tool',
+        tool_call_id: message.toolCallId,
+        name: message.name,
+        content: message.content,
+      };
+    }
+    return message;
+  });
+}
+
+export async function callBailianOrchestrator(
+  config: BailianConfig,
+  input: {
+    systemPrompt: string;
+    messages: AgentModelMessage[];
+    tools: AgentToolDefinition[];
+    requireTool: boolean;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<Omit<AgentOrchestratorResponse, 'state'>> {
+  const apiKey = config.apiKey.trim();
+  if (!apiKey) throw new Error('百炼 API Key 尚未配置');
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const model = config.model.trim();
+  if (!model) throw new Error('BAILIAN_MODEL 尚未配置');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+
+  try {
+    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: input.systemPrompt }, ...toBailianMessages(input.messages)],
+        ...(input.tools.length ? {
+          tools: input.tools,
+          tool_choice: input.requireTool ? 'required' : 'auto',
+          parallel_tool_calls: false,
+        } : {}),
+        enable_thinking: false,
+        temperature: 0.1,
+        max_completion_tokens: 1_024,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
+      throw new Error(`百炼 Agent 编排失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+    }
+    const payload = await response.json() as ChatCompletionResponse;
+    const rawMessage = payload.choices?.[0]?.message;
+    if (!rawMessage) throw new Error('百炼 Agent 返回内容为空');
+    const toolCalls: AgentToolCall[] = (rawMessage.tool_calls ?? []).flatMap((call) => {
+      const name = call.function?.name;
+      if (!call.id || call.type !== 'function' || !isAgentToolName(name)) return [];
+      return [{
+        id: call.id,
+        type: 'function' as const,
+        function: { name, arguments: call.function?.arguments || '{}' },
+      }];
+    });
+    const content = responseText(rawMessage.content).trim() || null;
+    if (!content && toolCalls.length === 0) throw new Error('百炼 Agent 未返回回复或工具调用');
+    return {
+      message: { role: 'assistant', content, toolCalls },
+      model: payload.model || model,
+      usage: normalizeUsage(payload.usage),
+      requestId: payload.id || response.headers.get('x-request-id'),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼 Agent 编排超时');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function toBase64(bytes: Uint8Array): string {

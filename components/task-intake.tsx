@@ -15,7 +15,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void }) {
+export function TaskIntake({ onNext, agentManaged = false }: { onNext: (task: TaskSnapshot) => void; agentManaged?: boolean }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [markets, setMarkets] = useState<string[]>(['美国']);
   const [platforms, setPlatforms] = useState<PlatformId[]>(defaultPlatformIds);
@@ -81,7 +81,8 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
       const payload = await response.json() as { task?: TaskSnapshot; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || '任务创建失败');
       setTask(payload.task);
-      await generatePassport(payload.task);
+      if (agentManaged) onNext(payload.task);
+      else await generatePassport(payload.task);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '任务创建失败');
     } finally {
@@ -122,6 +123,6 @@ export function TaskIntake({ onNext }: { onNext: (task: TaskSnapshot) => void })
     <div className="file-list">{files.length === 0 ? <div className="empty-files"><b>尚未选择文件</b><span>建议至少包含商品主图与一份参数资料</span></div> : files.map((file, index) => <div className="file-row" key={`${file.name}:${file.size}`}><span className="file-icon image">{file.name.split('.').pop()?.slice(0, 3).toUpperCase()}</span><div><b>{file.name}</b><small>{formatBytes(file.size)} · 等待安全上传</small></div><button className="remove-file" type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>移除</button></div>)}</div>
 
     {error && <div className="form-error" role="alert">{error}</div>}
-    {task ? <div className="task-created"><div><span>✓</span><div><b>{busy ? progress : TASK_STATUS_LABELS[task.status]}</b><small>{task.files.length} 个文件属于同一个商品</small></div></div><button type="button" onClick={continueTask} disabled={busy}>{busy ? '处理中…' : '继续生成商品档案 →'}</button></div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? progress : '上传资料并生成商品档案'} <span>自动提取属性与检查冲突</span></button>}
+    {task ? <div className="task-created"><div><span>✓</span><div><b>{busy ? progress : TASK_STATUS_LABELS[task.status]}</b><small>{task.files.length} 个文件属于同一个商品</small></div></div>{!agentManaged && <button type="button" onClick={continueTask} disabled={busy}>{busy ? '处理中…' : '继续生成商品档案 →'}</button>}</div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? progress : agentManaged ? '上传资料并交给 Agent' : '上传资料并生成商品档案'} <span>{agentManaged ? '由 Agent 自主选择下一步工具' : '自动提取属性与检查冲突'}</span></button>}
   </section>;
 }

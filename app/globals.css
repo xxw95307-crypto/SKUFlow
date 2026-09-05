@@ -316,6 +316,19 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .agent-spinner { width:26px; height:26px; flex:none; border:3px solid #c3e3dd; border-top-color:#087f7a; border-radius:50%; animation:agent-spin .8s linear infinite; }
 @keyframes agent-spin { to { transform:rotate(360deg); } }
 
+.agent-tool-trace { max-width:830px; margin:0 auto 22px; padding:14px 16px; border:1px solid #cbded9; border-radius:13px; background:#f7fbfa; }
+.agent-tool-trace>div { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.agent-tool-trace>div span { color:#266c65; font-size:12px; font-weight:900; letter-spacing:.08em; }
+.agent-tool-trace>div b { color:#6b7f7b; font-size:12px; }
+.agent-tool-trace ol { display:flex; flex-wrap:wrap; gap:7px; margin:11px 0 0; padding:0; list-style:none; }
+.agent-tool-trace li { display:flex; align-items:center; gap:6px; padding:7px 9px; border:1px solid #d8e4e1; border-radius:9px; background:#fff; }
+.agent-tool-trace li i { width:18px; height:18px; display:grid; place-items:center; border-radius:50%; background:#e5f4ef; color:#26785e; font-size:10px; font-style:normal; font-weight:900; }
+.agent-tool-trace li span { color:#304b47; font-size:12px; font-weight:800; }
+.agent-tool-trace li small { color:#82918f; font-size:11px; }
+.agent-tool-trace li.running i { animation:agent-spin .8s linear infinite; }
+.agent-tool-trace li.failed { border-color:#edc3bb; background:#fff6f3; }
+.agent-tool-trace li.failed i { background:#f5d8d2; color:#a94b3b; }
+
 .chat-action-card.checkpoint { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:14px; }
 .checkpoint-icon { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:#fff0d6; color:#b57418; font-size:19px; font-weight:900; }
 .checkpoint.success .checkpoint-icon { background:#e6f5ef; color:#26795c; } .checkpoint.final .checkpoint-icon { background:#e9e5f8; color:#6a50be; }
