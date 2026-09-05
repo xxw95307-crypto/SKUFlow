@@ -179,6 +179,21 @@ function PublishDialog({ task, passport, selectedAssets, busy, onPublish, onClos
   </AgentDialog>;
 }
 
+function DeleteConversationDialog({ conversation, busy, onDelete, onClose }: {
+  conversation: ConversationSummary;
+  busy: boolean;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return <AgentDialog eyebrow="CONVERSATION" title="删除这个会话？" onClose={busy ? () => undefined : onClose}>
+    <div className="delete-conversation-copy">
+      <span>×</span>
+      <div><b>{conversation.title}</b><p>删除后，这条对话及其 Agent 记忆将不再显示；已经创建的商品任务和上传资料会继续保留。</p></div>
+    </div>
+    <div className="dialog-footer"><button className="ghost" type="button" disabled={busy} onClick={onClose}>取消</button><button className="danger" type="button" disabled={busy} onClick={onDelete}>{busy ? '正在删除…' : '确认删除会话'}</button></div>
+  </AgentDialog>;
+}
+
 function listingTitle(payload: ListingDraftPayload): string {
   const preferred = ['item_name', 'title', 'product_name'];
   for (const key of preferred) {
@@ -206,6 +221,8 @@ export function AgentConversation() {
   const [actionBusy, setActionBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<ConversationSummary | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const threadEnd = useRef<HTMLDivElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
   const messagesRef = useRef<ChatMessage[]>(initialMessages);
@@ -238,7 +255,9 @@ export function AgentConversation() {
   };
 
   const updateConversationList = (conversation: AgentConversationRecord | ConversationSummary) => {
-    setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
+    setConversations((current) => current.some((item) => item.id === conversation.id)
+      ? current.map((item) => item.id === conversation.id ? conversation : item)
+      : [conversation, ...current]);
   };
 
   const applyConversation = async (conversation: AgentConversationRecord) => {
@@ -647,6 +666,35 @@ export function AgentConversation() {
     }
   };
 
+  const removeConversation = async () => {
+    if (!deleteCandidate) return;
+    const target = deleteCandidate;
+    setDeleteBusy(true); setError('');
+    try {
+      await responseJson<{ deleted: true }>(await fetch(`/api/conversations/${target.id}`, { method: 'DELETE' }), '会话删除失败');
+      const targetIndex = conversations.findIndex((item) => item.id === target.id);
+      const remaining = conversations.filter((item) => item.id !== target.id);
+      setConversations(remaining);
+      setDeleteCandidate(null);
+      if (target.id === conversationIdRef.current) {
+        conversationIdRef.current = null;
+        setConversationId(null);
+        const replacement = remaining[Math.min(Math.max(targetIndex, 0), remaining.length - 1)];
+        if (replacement) {
+          setPhase('loading'); setBusyLabel('正在打开相邻会话…');
+          const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${replacement.id}`), '会话读取失败');
+          await applyConversation(payload.conversation);
+        } else {
+          await createConversation();
+        }
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '会话删除失败');
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   const sendMessage = async () => {
     const text = composer.trim();
     if (!text) return;
@@ -672,7 +720,10 @@ export function AgentConversation() {
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
       <button className="new-agent-task" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span>新建上新对话</button>
       <div className="agent-rail-label">上新会话</div>
-      <div className="conversation-list">{conversations.map((item) => <button className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)} key={item.id}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>)}</div>
+      <div className="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
+        <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
+        <button className="conversation-delete" type="button" disabled={phase === 'processing'} aria-label={`删除会话：${item.title}`} title="删除会话" onClick={() => setDeleteCandidate(item)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v6h2v-6h-2Zm4 0v6h2v-6h-2Z" /></svg></button>
+      </div>)}</div>
       <div className="agent-rail-note"><i /> <b>Agent 自动推进</b><p>只在事实冲突、主观选择和最终发布时向你提问。</p></div>
       <div className="agent-user"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div></div>
     </aside>
@@ -729,5 +780,6 @@ export function AgentConversation() {
     {listingOpen && task && <AgentDialog eyebrow="AGENT CHECKPOINT · LISTING REVIEW" title="审核各平台中文 Listing" onClose={() => { setListingOpen(false); void refreshAfterListing(); }} wide><div className="embedded-listing"><ListingWorkspace task={task} onAssets={proceedToAssets} /></div></AgentDialog>}
     {assetOpen && <AssetDialog selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
+    {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}
   </main>;
 }

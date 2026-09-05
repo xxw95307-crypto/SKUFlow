@@ -195,4 +195,5 @@ export const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_vision_runs_task_created ON vision_agent_runs(task_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_vision_runs_file_created ON vision_agent_runs(file_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_agent_conversations_updated ON agent_conversations(updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_conversations_created ON agent_conversations(created_at DESC)`,
 ] as const;

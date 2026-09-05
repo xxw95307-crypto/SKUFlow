@@ -49,7 +49,7 @@ const SELECT_COLUMNS = `id, task_id, title, status, messages_json, model_history
 
 export async function listConversations(DB: D1Database): Promise<ConversationSummary[]> {
   const result = await DB.prepare(
-    `SELECT ${SELECT_COLUMNS} FROM agent_conversations ORDER BY updated_at DESC LIMIT 50`,
+    `SELECT ${SELECT_COLUMNS} FROM agent_conversations ORDER BY created_at DESC, id DESC LIMIT 50`,
   ).all<ConversationRow>();
   return result.results.map(summary);
 }
@@ -58,6 +58,10 @@ export async function getConversation(DB: D1Database, id: string): Promise<Agent
   const row = await DB.prepare(`SELECT ${SELECT_COLUMNS} FROM agent_conversations WHERE id = ?`)
     .bind(id).first<ConversationRow>();
   return row ? record(row) : null;
+}
+
+export async function deleteConversation(DB: D1Database, id: string): Promise<void> {
+  await DB.prepare('DELETE FROM agent_conversations WHERE id = ?').bind(id).run();
 }
 
 export async function createConversation(DB: D1Database, input: {

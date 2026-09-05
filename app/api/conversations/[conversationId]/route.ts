@@ -8,7 +8,7 @@ import {
   type ConversationToolRun,
 } from '@/lib/domain/conversation';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
-import { getConversation, updateConversation } from '@/lib/server/conversation-store';
+import { deleteConversation, getConversation, updateConversation } from '@/lib/server/conversation-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 
 export const dynamic = 'force-dynamic';
@@ -136,5 +136,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ conve
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to update conversation';
     return Response.json({ error: message }, { status: /格式|过大/.test(message) ? 400 : 500 });
+  }
+}
+
+export async function DELETE(_request: Request, context: { params: Promise<{ conversationId: string }> }) {
+  try {
+    await ensureSchema();
+    const { conversationId } = await context.params;
+    const { DB } = getBindings();
+    const current = await getConversation(DB, conversationId);
+    if (!current) return Response.json({ error: 'Conversation not found' }, { status: 404 });
+    await deleteConversation(DB, conversationId);
+    return Response.json({ deleted: true });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : 'Unable to delete conversation' }, { status: 500 });
   }
 }
