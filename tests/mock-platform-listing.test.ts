@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseListingGenerationOutput } from '../lib/agents/listing-generation.ts';
+import { buildListingGenerationMessages, parseListingGenerationOutput } from '../lib/agents/listing-generation.ts';
 import { createInitialProductPassport } from '../lib/domain/product-passport.ts';
 import { compileMockListingDraft, validateMockListing } from '../lib/mock-platforms/listing-compiler.ts';
 import { resolveMockListingSchema } from '../lib/mock-platforms/schemas.ts';
@@ -72,6 +72,20 @@ test('Listing Agent parser accepts copy and inferred platform facts, but rejects
   assert.deepEqual(Object.keys(result.drafts[0].fields).sort(), ['brand_name', 'bullet_points', 'color_name', 'item_name']);
 });
 
+test('Listing Agent generates a Chinese review draft while preserving the target locale', () => {
+  const schema = resolveMockListingSchema({ platformId: 'amazon', market: '美国', categoryLabel: '便携榨汁杯' });
+  const messages = buildListingGenerationMessages({
+    productName: 'BlendGo Mini 便携榨汁杯',
+    facts: productPassport().facts,
+    drafts: [{ draftId: 'draft_amazon', schema }],
+  });
+  const target = JSON.parse(messages[1].content) as { targets: Array<{ reviewLocale: string; targetLocale: string }> };
+
+  assert.match(messages[0].content, /所有标题、卖点、描述、标签和搜索词.*简体中文/);
+  assert.equal(target.targets[0].reviewLocale, 'zh-CN');
+  assert.equal(target.targets[0].targetLocale, 'en-US');
+});
+
 test('compiler maps passport facts and leaves operational fields to the seller', () => {
   const passport = productPassport();
   const draft = passport.platformDrafts[0];
@@ -88,6 +102,7 @@ test('compiler maps passport facts and leaves operational fields to the seller',
   });
 
   assert.equal(compiled.payload.fields.brand_name, 'BlendGo');
+  assert.equal(compiled.payload.reviewLocale, 'zh-CN');
   assert.equal(compiled.payload.fieldSources.brand_name, 'PRODUCT_FACT');
   assert.equal(compiled.payload.fields.standard_price, undefined);
   assert.ok(compiled.validationIssues.some((issue) => issue.path === 'seller_sku' && issue.code === 'seller_input_required'));

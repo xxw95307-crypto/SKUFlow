@@ -34,6 +34,7 @@ export interface MockListingSchema {
 
 export interface ListingDraftPayload {
   mode: 'MOCK';
+  reviewLocale: 'zh-CN';
   schema: MockListingSchema;
   fields: Record<string, unknown>;
   fieldSources: Record<string, ListingFieldSource>;

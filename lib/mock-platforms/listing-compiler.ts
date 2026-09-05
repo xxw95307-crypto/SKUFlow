@@ -118,6 +118,7 @@ export function compileMockListingDraft(input: {
   }
   const payload: ListingDraftPayload = {
     mode: 'MOCK',
+    reviewLocale: 'zh-CN',
     schema: input.schema,
     fields,
     fieldSources,

@@ -95,7 +95,7 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
       setSelectedDraftId(payload.passport.platformDrafts[0]?.id ?? '');
       setDraftEdits({});
       setDraftConfirmations({});
-      setMessage(`已生成 ${payload.passport.platformDrafts.length} 个平台/站点版本，请逐个确认。`);
+      setMessage(`已生成 ${payload.passport.platformDrafts.length} 个平台的中文审校稿，请逐个确认。`);
     } catch (caught) {
       setMessage('');
       setError(caught instanceof Error ? caught.message : '多平台 Listing 生成失败');
@@ -132,14 +132,14 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
   if (!task) return <section className="panel listing-panel"><h2>请先创建商品任务</h2><p>完成商品资料处理后，才能生成平台 Listing。</p></section>;
 
   return <section className="panel listing-panel">
-    <div className="section-heading"><div><span>STEP 03 · MOCK PLATFORM LISTING</span><h2>生成并确认各平台 Listing</h2><p>系统按平台、站点和类目获取 Mock 字段；资料有值就直接映射，缺少的可创作字段由智能体补写并标明来源。</p></div><button className="primary" type="button" onClick={generate} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成全部版本' : '生成全部平台版本'}</button></div>
-    <div className="mock-mode-note"><b>Mock 平台服务器</b><span>当前字段校验和草稿创建都在模拟环境中执行，不会把商品发送到真实平台。</span></div>
+    <div className="section-heading"><div><span>STEP 03 · PLATFORM LISTING REVIEW</span><h2>按平台审核中文 Listing</h2><p>系统按选定平台获取字段，将商品资料映射到对应表单，并由智能体用中文补全各平台的营销内容。</p></div><button className="primary" type="button" onClick={generate} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成中文审校稿' : '生成各平台中文审校稿'}</button></div>
+    <div className="mock-mode-note"><b>中文审校阶段</b><span>当前统一使用简体中文审核；目标市场语言仅作为发布元数据，将在后续发布阶段进行本地化。当前仍为 Mock 平台，不会发送到真实平台。</span></div>
     {error && <div className="form-error" role="alert">{error}</div>}
     {message && <div className="form-success" role="status">{message}</div>}
     <div className="platform-tabs dynamic">{passport?.platformDrafts.map((draft) => <button className={selectedDraft?.id === draft.id ? 'active' : ''} onClick={() => { setSelectedDraftId(draft.id); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market} · {draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'}</small></button>)}</div>
 
-    {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成全部平台版本”，系统将调用 Mock Schema 接口，并让百炼填写每个平台的营销字段。</p></div> : <>
-      <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · {listing.schema.market}</b><span>{listing.schema.categoryLabel} · {listing.schema.locale}</span></div><code>{listing.schema.schemaVersion}</code></div>
+    {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成各平台中文审校稿”，系统将调用 Mock Schema 接口，并让百炼用中文填写每个平台的营销字段。</p></div> : <>
+      <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · 发布语言：{listing.schema.locale} · {listing.schema.categoryLabel}</span></div><code>{listing.schema.schemaVersion}</code></div>
       <div className="listing-form-grid">{listing.schema.fields.map((field) => <ListingFieldEditor
         key={field.key}
         field={field}
