@@ -11,8 +11,9 @@ import type {
   AgentToolName,
   AgentWorkflowState,
 } from '@/lib/domain/agent-orchestrator';
+import type { AgentConversationRecord, ConversationSummary } from '@/lib/domain/conversation';
 import type { FactConflict, FactValue, ProductPassport } from '@/lib/domain/product-passport';
-import { PENDING_PRODUCT_NAME, TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
+import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { platformRegistry } from '@/lib/platforms/registry';
 
@@ -179,14 +180,22 @@ export function AgentConversation() {
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
   const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>(initialMessages);
+  const toolRunsRef = useRef<ToolRun[]>([]);
+  const selectedAssetsRef = useRef<string[]>([]);
+  const conversationIdRef = useRef<string | null>(null);
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
 
   const append = (role: ChatMessage['role'], text: string, meta?: string) => {
-    setMessages((current) => [...current, { id: messageId(), role, text, meta }]);
+    const next = [...messagesRef.current, { id: messageId(), role, text, meta }].slice(-200);
+    messagesRef.current = next;
+    setMessages(next);
   };
 
   const fetchPassport = async (taskId: string): Promise<ProductPassport> => {
@@ -199,26 +208,95 @@ export function AgentConversation() {
     return payload.task;
   };
 
+  const updateConversationList = (conversation: AgentConversationRecord | ConversationSummary) => {
+    setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
+  };
+
+  const applyConversation = async (conversation: AgentConversationRecord) => {
+    conversationIdRef.current = conversation.id;
+    setConversationId(conversation.id);
+    messagesRef.current = conversation.messages.length ? conversation.messages : initialMessages;
+    setMessages(messagesRef.current);
+    modelHistory.current = conversation.modelHistory;
+    toolRunsRef.current = conversation.toolRuns;
+    setToolRuns(conversation.toolRuns);
+    selectedAssetsRef.current = conversation.selectedAssetIds;
+    setSelectedAssets(conversation.selectedAssetIds);
+    setError(''); setComposer('');
+    setConflictOpen(false); setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
+    updateConversationList(conversation);
+    if (!conversation.taskId) {
+      setTask(null); setPassport(null); setPhase('intake'); setProgressStep(0);
+      return;
+    }
+    const [loadedTask, loadedPassport] = await Promise.all([fetchTask(conversation.taskId), fetchPassport(conversation.taskId)]);
+    setTask(loadedTask); setPassport(loadedPassport);
+    const openConflicts = loadedPassport.conflicts.some((item) => item.status === 'OPEN');
+    const published = loadedPassport.platformDrafts.some((draft) => draft.status === 'DRAFT_CREATED');
+    const generated = loadedPassport.platformDrafts.some((draft) => isListingDraftPayload(draft.payload));
+    const allApproved = loadedPassport.platformDrafts.length > 0 && loadedPassport.platformDrafts.every((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
+    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (conversation.selectedAssetIds.length ? 'publish' : 'assets') : generated ? 'listing' : 'resume');
+  };
+
+  const persistConversation = async (taskIdOverride?: string | null, statusOverride?: 'ACTIVE' | 'COMPLETED') => {
+    const id = conversationIdRef.current;
+    if (!id) return;
+    const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        taskId: taskIdOverride === undefined ? task?.id ?? null : taskIdOverride,
+        status: statusOverride ?? (phase === 'complete' ? 'COMPLETED' : 'ACTIVE'),
+        messages: messagesRef.current,
+        modelHistory: modelHistory.current.slice(-48),
+        toolRuns: toolRunsRef.current,
+        selectedAssetIds: selectedAssetsRef.current,
+      }),
+    }), '会话保存失败');
+    updateConversationList(payload.conversation);
+  };
+
+  const loadConversation = async (id: string) => {
+    if (id === conversationIdRef.current) return;
+    await persistConversation();
+    setPhase('loading'); setBusyLabel('正在恢复会话记忆…');
+    const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${id}`), '会话读取失败');
+    await applyConversation(payload.conversation);
+  };
+
+  const createConversation = async (taskId?: string) => {
+    const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch('/api/conversations', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(taskId ? { taskId } : {}),
+    }), '新建会话失败');
+    await applyConversation(payload.conversation);
+    return payload.conversation;
+  };
+
   useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/tasks', { signal: controller.signal }).then((response) => responseJson<{ tasks: TaskSnapshot[] }>(response, '任务读取失败')).then(async (payload) => {
-      const recent = payload.tasks[0];
-      if (!recent) { setPhase('intake'); return; }
-      const recentPassport = await fetchPassport(recent.id);
-      setTask(recent);
-      setPassport(recentPassport);
-      setPhase('resume');
-      setMessages((current) => [...current, {
-        id: messageId(), role: 'agent',
-        text: `我找到了最近的商品任务“${recent.productName}”。你可以继续它，也可以开始一次新的上新对话。`,
-        meta: TASK_STATUS_LABELS[recent.status],
-      }]);
-    }).catch((caught) => {
-      if (caught instanceof DOMException && caught.name === 'AbortError') return;
-      setError(caught instanceof Error ? caught.message : '任务读取失败');
-      setPhase('intake');
-    });
-    return () => controller.abort();
+    let active = true;
+    (async () => {
+      try {
+        const listed = await responseJson<{ conversations: ConversationSummary[] }>(await fetch('/api/conversations'), '会话列表读取失败');
+        if (!active) return;
+        setConversations(listed.conversations);
+        if (listed.conversations[0]) {
+          const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${listed.conversations[0].id}`), '会话读取失败');
+          if (active) await applyConversation(payload.conversation);
+          return;
+        }
+        const tasksPayload = await responseJson<{ tasks: TaskSnapshot[] }>(await fetch('/api/tasks'), '任务读取失败');
+        if (!active) return;
+        await createConversation(tasksPayload.tasks[0]?.id);
+      } catch (caught) {
+        if (!active) return;
+        setError(caught instanceof Error ? caught.message : '会话读取失败');
+        setPhase('intake');
+      }
+    })();
+    return () => { active = false; };
+  // Initial hydration deliberately runs once; switching is handled by loadConversation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, phase, busyLabel]);
@@ -242,18 +320,19 @@ export function AgentConversation() {
   };
 
   const markToolRun = (call: AgentToolCall, status: ToolRun['status']) => {
-    setToolRuns((current) => {
-      const existing = current.find((item) => item.id === call.id);
-      if (existing) return current.map((item) => item.id === call.id ? { ...item, status } : item);
-      return [...current, { id: call.id, name: call.function.name, status }].slice(-12);
-    });
+    const existing = toolRunsRef.current.find((item) => item.id === call.id);
+    const next = existing
+      ? toolRunsRef.current.map((item) => item.id === call.id ? { ...item, status } : item)
+      : [...toolRunsRef.current, { id: call.id, name: call.function.name, status }].slice(-12);
+    toolRunsRef.current = next;
+    setToolRuns(next);
   };
 
   const executeTool = async (
     call: AgentToolCall,
     currentTask: TaskSnapshot,
     publishApproved: boolean,
-  ): Promise<{ result: Record<string, unknown>; checkpoint: boolean }> => {
+  ): Promise<{ result: Record<string, unknown>; checkpoint: boolean; completed?: boolean }> => {
     const name = call.function.name;
     markToolRun(call, 'RUNNING');
     try {
@@ -320,7 +399,7 @@ export function AgentConversation() {
         const payload = await responseJson<{ passport: ProductPassport; message?: string; results: unknown[] }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), 'Mock 草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
         markToolRun(call, 'COMPLETED');
-        return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false };
+        return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false, completed: true };
       }
       throw new Error(`不支持的 Agent 工具：${name}`);
     } catch (caught) {
@@ -336,7 +415,10 @@ export function AgentConversation() {
   ) => {
     if (options.resetHistory) modelHistory.current = [];
     if (options.appendUser !== false) append('user', userText);
-    let history: AgentModelMessage[] = [...modelHistory.current, { role: 'user', content: userText }];
+    const retainedHistory = modelHistory.current.length > 36
+      ? modelHistory.current.filter((message) => message.role === 'user' || (message.role === 'assistant' && !message.toolCalls?.length)).slice(-20)
+      : modelHistory.current;
+    let history: AgentModelMessage[] = [...retainedHistory, { role: 'user', content: userText }];
     setPhase('processing'); setBusyLabel('中央 Agent 正在判断下一步…'); setError('');
     try {
       for (let step = 0; step < 10; step += 1) {
@@ -361,6 +443,7 @@ export function AgentConversation() {
         if (!call) {
           modelHistory.current = history;
           phaseFromState(payload.state);
+          await persistConversation(currentTask?.id ?? null, payload.state.publishedDraftCount > 0 ? 'COMPLETED' : 'ACTIVE');
           return;
         }
         if (!currentTask) throw new Error('Agent 在没有任务时请求了业务工具');
@@ -372,6 +455,7 @@ export function AgentConversation() {
           content: JSON.stringify(execution.result),
         }];
         modelHistory.current = history;
+        await persistConversation(currentTask.id, execution.completed ? 'COMPLETED' : 'ACTIVE');
         if (execution.checkpoint) return;
       }
       throw new Error('Agent 连续执行步骤过多，已安全暂停');
@@ -379,13 +463,15 @@ export function AgentConversation() {
       const message = caught instanceof Error ? caught.message : 'Agent 执行失败';
       setError(message); setPhase('error');
       append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
+      await persistConversation(currentTask?.id ?? null).catch(() => undefined);
     }
   };
 
   const handleIntakeComplete = async (createdTask: TaskSnapshot) => {
     setTask(createdTask);
     setPassport(await fetchPassport(createdTask.id));
-    setToolRuns([]);
+    toolRunsRef.current = []; setToolRuns([]);
+    await persistConversation(createdTask.id);
     await runAgentTurn(
       createdTask,
       `已提交 ${createdTask.files.length} 份同一商品资料，目标平台：${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')}。请自主完成内部步骤，只在需要我决定时暂停。`,
@@ -450,18 +536,29 @@ export function AgentConversation() {
     finally { setActionBusy(false); }
   };
 
-  const newConversation = () => {
-    setTask(null); setPassport(null); setPhase('intake'); setProgressStep(0); setMessages(initialMessages); setError(''); setComposer(''); setSelectedAssets([]);
-    setToolRuns([]); modelHistory.current = [];
-    setConflictOpen(false); setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
+  const newConversation = async () => {
+    try {
+      await persistConversation();
+      await createConversation();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '新建会话失败');
+    }
   };
 
   const sendMessage = async () => {
     const text = composer.trim();
     if (!text) return;
     setComposer('');
-    if (/新建|重新开始/.test(text)) { newConversation(); return; }
+    if (/新建|重新开始/.test(text)) { await newConversation(); return; }
     await runAgentTurn(task, text);
+  };
+
+  const toggleAsset = (id: string) => {
+    const next = selectedAssetsRef.current.includes(id)
+      ? selectedAssetsRef.current.filter((item) => item !== id)
+      : [...selectedAssetsRef.current, id];
+    selectedAssetsRef.current = next;
+    setSelectedAssets(next);
   };
 
   const visibleFacts = passport?.facts.filter((fact) => fact.status !== 'MISSING') ?? [];
@@ -472,9 +569,9 @@ export function AgentConversation() {
   return <main className="agent-shell">
     <aside className="agent-rail">
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
-      <button className="new-agent-task" type="button" onClick={newConversation}><span>+</span>新建上新对话</button>
-      <div className="agent-rail-label">当前对话</div>
-      <button className="conversation-item active" type="button"><span>◉</span><div><b>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : '新商品上新'}</b><small>{task ? TASK_STATUS_LABELS[task.status] : '等待资料'}</small></div></button>
+      <button className="new-agent-task" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span>新建上新对话</button>
+      <div className="agent-rail-label">上新会话</div>
+      <div className="conversation-list">{conversations.map((item) => <button className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)} key={item.id}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>)}</div>
       <div className="agent-rail-note"><i /> <b>Agent 自动推进</b><p>只在事实冲突、主观选择和最终发布时向你提问。</p></div>
       <div className="agent-user"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div></div>
     </aside>
@@ -494,7 +591,7 @@ export function AgentConversation() {
 
           {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} agentManaged /></div></div>}
 
-          {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={newConversation}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
+          {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 
           {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>Agent 正在调用商品理解和平台适配工具，完成后会主动通知你。</small></div><em>自动执行中</em></div>}
 
@@ -511,7 +608,7 @@ export function AgentConversation() {
 
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
 
-          {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>交付完成</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button className="primary" type="button" onClick={newConversation}>处理下一个商品</button></div>}
+          {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>交付完成</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 
           {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{task && <button type="button" onClick={resumeTask}>重试当前步骤</button>}</div>}
           <div ref={threadEnd} />
@@ -526,12 +623,12 @@ export function AgentConversation() {
         </aside>
       </div>
 
-      <footer className="agent-composer"><button type="button" aria-label="添加附件" onClick={() => phase !== 'intake' && newConversation()}>+</button><input value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : phase === 'intake' ? '可以先告诉 Agent 你想做什么…' : '直接告诉 Agent 你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim() || phase === 'processing'}>↑</button></footer>
+      <footer className="agent-composer"><button type="button" aria-label="新建上新会话" onClick={() => { if (phase !== 'intake') void newConversation(); }}>+</button><input value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : phase === 'intake' ? '可以先告诉 Agent 你想做什么…' : '直接告诉 Agent 你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim() || phase === 'processing'}>↑</button></footer>
     </section>
 
     {conflictOpen && passport && <ConflictDialog passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} onClose={() => setConflictOpen(false)} />}
     {listingOpen && task && <AgentDialog eyebrow="AGENT CHECKPOINT · LISTING REVIEW" title="审核各平台中文 Listing" onClose={() => { setListingOpen(false); void refreshAfterListing(); }} wide><div className="embedded-listing"><ListingWorkspace task={task} onAssets={proceedToAssets} /></div></AgentDialog>}
-    {assetOpen && <AssetDialog selected={selectedAssets} onToggle={(id) => setSelectedAssets((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
+    {assetOpen && <AssetDialog selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
   </main>;
 }

@@ -168,6 +168,19 @@ export const schemaStatements = [
     FOREIGN KEY (passport_id) REFERENCES product_passports(id) ON DELETE CASCADE,
     FOREIGN KEY (file_id) REFERENCES task_files(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS agent_conversations (
+    id TEXT PRIMARY KEY,
+    task_id TEXT UNIQUE,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    messages_json TEXT NOT NULL DEFAULT '[]',
+    model_history_json TEXT NOT NULL DEFAULT '[]',
+    tool_runs_json TEXT NOT NULL DEFAULT '[]',
+    selected_assets_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_task_files_task_id ON task_files(task_id)`,
   `CREATE INDEX IF NOT EXISTS idx_task_events_task_created ON task_events(task_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC)`,
@@ -181,4 +194,5 @@ export const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_agent_runs_task_created ON agent_runs(task_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_vision_runs_task_created ON vision_agent_runs(task_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_vision_runs_file_created ON vision_agent_runs(file_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_conversations_updated ON agent_conversations(updated_at DESC)`,
 ] as const;

@@ -257,11 +257,13 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .new-agent-task { width:100%; display:flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid #34545a; border-radius:11px; background:#17383e; color:#e7f4f2; font-size:14px; font-weight:800; }
 .new-agent-task:hover { border-color:#66aa9f; background:#1b4449; } .new-agent-task>span { color:#8fe0d2; font-size:20px; font-weight:400; }
 .agent-rail-label { margin:24px 9px 9px; color:#6f9295; font-size:12px; font-weight:800; letter-spacing:.08em; }
+.conversation-list { min-height:0; flex:1; overflow-y:auto; padding-right:2px; }
 .conversation-item { width:100%; display:flex; align-items:center; gap:10px; padding:11px; border:1px solid transparent; border-radius:11px; background:transparent; color:#b8cccb; text-align:left; }
+.conversation-item:disabled,.new-agent-task:disabled { cursor:not-allowed; opacity:.55; }
 .conversation-item.active { border-color:#315158; background:#17393f; color:#fff; } .conversation-item>span { width:26px; color:#8bd7ca; font-size:18px; text-align:center; }
 .conversation-item div { min-width:0; } .conversation-item b,.conversation-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .conversation-item b { font-size:14px; } .conversation-item small { margin-top:4px; color:#84a3a5; font-size:12px; }
-.agent-rail-note { margin-top:auto; padding:14px; border:1px solid #2f5055; border-radius:12px; background:#0c2429; }
+.agent-rail-note { margin-top:12px; padding:14px; border:1px solid #2f5055; border-radius:12px; background:#0c2429; }
 .agent-rail-note>i { display:inline-block; width:7px; height:7px; margin-right:7px; border-radius:50%; background:#5bce98; box-shadow:0 0 0 4px #5bce9818; }
 .agent-rail-note b { color:#d6e7e5; font-size:13px; } .agent-rail-note p { margin:8px 0 0; color:#83a2a4; font-size:12px; line-height:1.6; }
 .agent-user { display:flex; align-items:center; gap:9px; margin-top:13px; padding:13px 7px 0; border-top:1px solid #2b484e; }
