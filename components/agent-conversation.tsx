@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
@@ -11,7 +12,12 @@ import type {
   AgentToolName,
   AgentWorkflowState,
 } from '@/lib/domain/agent-orchestrator';
-import type { AgentConversationRecord, ConversationSummary } from '@/lib/domain/conversation';
+import type {
+  AgentConversationRecord,
+  ConversationAttachment,
+  ConversationMessage,
+  ConversationSummary,
+} from '@/lib/domain/conversation';
 import type { FactConflict, FactValue, ProductPassport } from '@/lib/domain/product-passport';
 import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
@@ -19,12 +25,7 @@ import { platformRegistry } from '@/lib/platforms/registry';
 
 type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'publish' | 'complete' | 'error';
 
-interface ChatMessage {
-  id: string;
-  role: 'agent' | 'user';
-  text: string;
-  meta?: string;
-}
+type ChatMessage = ConversationMessage;
 
 interface ToolRun {
   id: string;
@@ -52,6 +53,36 @@ const assetCandidates = [
   { id: 'detail', type: '细节图 · 3:4', title: '结构与材质细节', note: '放大展示外观、工艺或部件' },
 ];
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function RichMessageContent({ message }: { message: ChatMessage }) {
+  return <>
+    {message.text && <p>{message.text}</p>}
+    {message.attachments && message.attachments.length > 0 && <div className="rich-file-list">
+      {message.attachments.map((file) => {
+        const image = file.contentType.startsWith('image/');
+        return <article className="rich-file" key={file.fileId}>
+          {image
+            ? <Image src={`/api/tasks/${file.taskId}/files/${file.fileId}`} alt={file.name} width={58} height={58} unoptimized />
+            : <span className="rich-file-icon">{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span>}
+          <div><b>{file.name}</b><small>{formatBytes(file.size)} · 已安全上传</small></div><em>✓</em>
+        </article>;
+      })}
+    </div>}
+    {message.tool && <div className={`rich-tool-message ${message.tool.status.toLowerCase()}`}>
+      <span>{message.tool.status === 'COMPLETED' ? '✓' : message.tool.status === 'FAILED' ? '!' : '↻'}</span>
+      <div><b>{toolLabels[message.tool.name]}</b><small>{message.tool.status === 'COMPLETED' ? '工具执行完成' : message.tool.status === 'FAILED' ? '工具执行失败' : 'Agent 正在调用工具'}</small></div>
+    </div>}
+    {message.items && message.items.length > 0 && <div className={`rich-item-list ${message.kind ?? 'text'}`}>
+      {message.items.map((item) => <article key={item.id}><div><span>{item.label}</span>{item.status && <em>{item.status}</em>}</div><b>{item.value}</b>{item.detail && <small>{item.detail}</small>}</article>)}
+    </div>}
+    {message.meta && <small>{message.meta}</small>}
+  </>;
+}
+
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
@@ -61,6 +92,16 @@ const initialMessages: ChatMessage[] = [{
 
 function messageId(): string {
   return `message_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function taskAttachments(task: TaskSnapshot): ConversationAttachment[] {
+  return task.files.map((file) => ({
+    taskId: task.id,
+    fileId: file.id,
+    name: file.name,
+    contentType: file.contentType,
+    size: file.size,
+  }));
 }
 
 function displayValue(value: FactValue, unit?: string | null): string {
@@ -180,7 +221,7 @@ export function AgentConversation() {
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
-  const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
+  const [, setToolRuns] = useState<ToolRun[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
@@ -193,8 +234,30 @@ export function AgentConversation() {
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
 
-  const append = (role: ChatMessage['role'], text: string, meta?: string) => {
-    const next = [...messagesRef.current, { id: messageId(), role, text, meta }].slice(-200);
+  const append = (
+    role: ChatMessage['role'],
+    text: string,
+    meta?: string,
+    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items' | 'tool'>> = {},
+  ) => {
+    const next = [...messagesRef.current, { id: messageId(), role, text, ...(meta ? { meta } : {}), ...rich }].slice(-200);
+    messagesRef.current = next;
+    setMessages(next);
+  };
+
+  const syncToolMessage = (call: AgentToolCall, status: ToolRun['status']) => {
+    const id = `tool_${call.id}`;
+    const message: ChatMessage = {
+      id,
+      role: 'agent',
+      text: '',
+      kind: 'tool',
+      tool: { name: call.function.name, status },
+    };
+    const found = messagesRef.current.some((item) => item.id === id);
+    const next = found
+      ? messagesRef.current.map((item) => item.id === id ? message : item)
+      : [...messagesRef.current, message].slice(-200);
     messagesRef.current = next;
     setMessages(next);
   };
@@ -233,6 +296,14 @@ export function AgentConversation() {
     }
     const [loadedTask, loadedPassport] = await Promise.all([fetchTask(conversation.taskId), fetchPassport(conversation.taskId)]);
     setTask(loadedTask); setPassport(loadedPassport);
+    if (loadedTask.files.length > 0 && !messagesRef.current.some((message) => message.attachments?.some((file) => file.taskId === loadedTask.id))) {
+      messagesRef.current = [...messagesRef.current, {
+        id: messageId(), role: 'user', text: `本会话已提交 ${loadedTask.files.length} 份商品资料`, meta: '历史资料记录',
+        kind: 'files', attachments: taskAttachments(loadedTask),
+      }].slice(-200);
+      setMessages(messagesRef.current);
+      await persistConversation(loadedTask.id, conversation.status);
+    }
     const openConflicts = loadedPassport.conflicts.some((item) => item.status === 'OPEN');
     const published = loadedPassport.platformDrafts.some((draft) => draft.status === 'DRAFT_CREATED');
     const generated = loadedPassport.platformDrafts.some((draft) => isListingDraftPayload(draft.payload));
@@ -328,6 +399,7 @@ export function AgentConversation() {
       : [...toolRunsRef.current, { id: call.id, name: call.function.name, status }].slice(-12);
     toolRunsRef.current = next;
     setToolRuns(next);
+    syncToolMessage(call, status);
   };
 
   const executeTool = async (
@@ -376,29 +448,56 @@ export function AgentConversation() {
       }
       if (name === 'open_conflict_review') {
         const refreshed = await refreshTaskState(currentTask.id);
-        const count = refreshed.passport.conflicts.filter((item) => item.status === 'OPEN').length;
+        const conflicts = refreshed.passport.conflicts.filter((item) => item.status === 'OPEN');
+        const count = conflicts.length;
         if (count === 0) throw new Error('当前没有待确认的商品属性冲突');
         setPhase('conflict'); setConflictOpen(true);
-        append('agent', `我发现 ${count} 处图文冲突，已经暂停自动执行。请确认真实信息后我再继续。`, '等待人工决策');
+        append('agent', `我发现 ${count} 处图文冲突，已经暂停自动执行。请确认真实信息后我再继续。`, '等待人工决策', {
+          kind: 'decision',
+          items: conflicts.slice(0, 8).map((conflict) => ({
+            id: conflict.id,
+            label: refreshed.passport.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey,
+            value: conflict.candidates.map((candidate) => displayValue(candidate.value, candidate.unit)).join(' ↔ '),
+            status: '待确认',
+          })),
+        });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, openConflicts: count }, checkpoint: true };
       }
       if (name === 'open_listing_review') {
         const refreshed = await refreshTaskState(currentTask.id);
         setPhase('listing'); setListingOpen(true);
-        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份平台中文审校稿。请集中审核，确认后我会继续。`, '等待 Listing 审核');
+        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份平台中文审校稿。请集中审核，确认后我会继续。`, '等待 Listing 审核', {
+          kind: 'listing',
+          items: refreshed.passport.platformDrafts.map((draft) => {
+            const payload = isListingDraftPayload(draft.payload) ? draft.payload : null;
+            return {
+              id: draft.id,
+              label: platformNames.get(draft.platformId) ?? draft.platformId,
+              value: payload ? listingTitle(payload) : '等待生成',
+              detail: `${draft.market} · 中文审校稿`,
+              status: draft.status === 'APPROVED' ? '已确认' : '待审核',
+            };
+          }),
+        });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
       }
       if (name === 'open_asset_selection') {
         setPhase('assets'); setAssetOpen(true);
-        append('agent', '平台 Listing 已全部确认。请选择要进入交付包的视觉方案。', '等待素材选择');
+        append('agent', '平台 Listing 已全部确认。请选择要进入交付包的视觉方案。', '等待素材选择', {
+          kind: 'assets',
+          items: assetCandidates.map((asset) => ({ id: asset.id, label: asset.type, value: asset.title, detail: asset.note, status: '待选择' })),
+        });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
       if (name === 'open_publish_confirmation') {
         setPhase('publish'); setPublishOpen(true);
-        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用发布工具。', '等待最终确认');
+        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用发布工具。', '等待最终确认', {
+          kind: 'publish',
+          items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · Mock 发布`, status: '待确认' }],
+        });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -407,6 +506,16 @@ export function AgentConversation() {
         setProgressStep(4); setBusyLabel('Agent 正在创建 Mock 平台草稿…');
         const payload = await responseJson<{ passport: ProductPassport; message?: string; results: unknown[] }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), 'Mock 草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
+        append('agent', `发布工具已完成，已创建 ${payload.results.length} 个平台草稿。`, '发布记录已保存', {
+          kind: 'publish',
+          items: payload.passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').map((draft) => ({
+            id: draft.id,
+            label: platformNames.get(draft.platformId) ?? draft.platformId,
+            value: '平台草稿已创建',
+            detail: draft.market,
+            status: '成功',
+          })),
+        });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false, completed: true };
       }
@@ -480,11 +589,15 @@ export function AgentConversation() {
     setTask(createdTask);
     setPassport(await fetchPassport(createdTask.id));
     toolRunsRef.current = []; setToolRuns([]);
+    append('user', `已上传 ${createdTask.files.length} 份同一商品资料`, `${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · ${createdTask.markets.join('、')}`, {
+      kind: 'files',
+      attachments: taskAttachments(createdTask),
+    });
     await persistConversation(createdTask.id);
     await runAgentTurn(
       createdTask,
       `已提交 ${createdTask.files.length} 份同一商品资料，目标平台：${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')}。请自主完成内部步骤，只在需要我决定时暂停。`,
-      { resetHistory: true },
+      { resetHistory: true, appendUser: false },
     );
   };
 
@@ -505,7 +618,11 @@ export function AgentConversation() {
         body: JSON.stringify({ conflictResolution: candidateId ? { conflictId: conflict.id, candidateId } : { conflictId: conflict.id, manualValue: chosen } }),
       }), '冲突确认失败');
       setPassport(payload.passport); setManualConflictValue('');
-      append('user', `已确认“${passport?.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey}”为：${chosen}`);
+      const label = passport?.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey;
+      append('user', `已确认商品属性：${label}`, '人工决策已记录', {
+        kind: 'decision',
+        items: [{ id: conflict.id, label, value: chosen, status: '已确认' }],
+      });
       const remaining = payload.passport.conflicts.filter((item) => item.status === 'OPEN');
       if (remaining.length === 0) {
         setConflictOpen(false);
@@ -533,14 +650,23 @@ export function AgentConversation() {
 
   const confirmAssets = async () => {
     setAssetOpen(false);
-    if (task) await runAgentTurn(task, `我已选择 ${selectedAssets.length} 个视觉方案，请继续。`);
+    const chosen = assetCandidates.filter((asset) => selectedAssets.includes(asset.id));
+    append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
+      kind: 'assets',
+      items: chosen.map((asset) => ({ id: asset.id, label: asset.type, value: asset.title, detail: asset.note, status: '已选择' })),
+    });
+    if (task) await runAgentTurn(task, `我已选择 ${selectedAssets.length} 个视觉方案，请继续。`, { appendUser: false });
   };
 
   const publish = async () => {
     if (!task) return;
     setActionBusy(true); setError('');
     try {
-      await runAgentTurn(task, '我已检查并明确确认发布，请调用发布工具。', { publishApproved: true });
+      append('user', '我已检查并确认发布', '最终授权已记录', {
+        kind: 'publish',
+        items: [{ id: task.id, label: task.productName, value: `${passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED').length ?? 0} 个平台 Listing`, status: '已授权' }],
+      });
+      await runAgentTurn(task, '我已检查并明确确认发布，请调用发布工具。', { publishApproved: true, appendUser: false });
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Mock 草稿创建失败'); }
     finally { setActionBusy(false); }
   };
@@ -592,7 +718,7 @@ export function AgentConversation() {
           <div className="agent-date">今天 · Agent 工作区</div>
           {messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
             <span className="chat-avatar">{message.role === 'agent' ? 'AI' : '林'}</span>
-            <div><p>{message.text}</p>{message.meta && <small>{message.meta}</small>}</div>
+            <div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}><RichMessageContent message={message} /></div>
           </article>)}
 
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
@@ -602,8 +728,6 @@ export function AgentConversation() {
           {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 
           {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>Agent 正在调用商品理解和平台适配工具，完成后会主动通知你。</small></div><em>自动执行中</em></div>}
-
-          {toolRuns.length > 0 && <div className="agent-tool-trace"><div><span>实时工具调用</span><b>{toolRuns.filter((run) => run.status === 'COMPLETED').length}/{toolRuns.length} 已完成</b></div><ol>{toolRuns.map((run) => <li className={run.status.toLowerCase()} key={run.id}><i>{run.status === 'COMPLETED' ? '✓' : run.status === 'FAILED' ? '!' : '↻'}</i><span>{toolLabels[run.name]}</span><small>{run.status === 'COMPLETED' ? '执行完成' : run.status === 'FAILED' ? '执行失败' : '执行中'}</small></li>)}</ol></div>}
 
           {phase === 'conflict' && passport && <div className="chat-action-card checkpoint warning"><div className="checkpoint-icon">!</div><div><span>流程已暂停</span><h3>{openConflictCount} 项属性冲突需要你确认</h3><p>这些决定会同步影响各平台 Listing，Agent 不会自作主张。</p></div><button type="button" onClick={() => setConflictOpen(true)}>打开确认卡</button></div>}
 

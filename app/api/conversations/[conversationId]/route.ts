@@ -1,6 +1,12 @@
 import { ensureSchema, getBindings } from '@/db/client';
 import { isAgentToolName, type AgentModelMessage } from '@/lib/domain/agent-orchestrator';
-import type { ConversationMessage, ConversationToolRun } from '@/lib/domain/conversation';
+import {
+  CONVERSATION_MESSAGE_KINDS,
+  type ConversationAttachment,
+  type ConversationMessage,
+  type ConversationRichItem,
+  type ConversationToolRun,
+} from '@/lib/domain/conversation';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
 import { getConversation, updateConversation } from '@/lib/server/conversation-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
@@ -9,17 +15,57 @@ export const dynamic = 'force-dynamic';
 
 function parseMessages(value: unknown): ConversationMessage[] {
   if (!Array.isArray(value) || value.length > 200) throw new Error('会话消息格式无效');
+  if (JSON.stringify(value).length > 500_000) throw new Error('会话消息过大');
   return value.map((item) => {
     if (!item || typeof item !== 'object') throw new Error('会话消息格式无效');
     const row = item as Record<string, unknown>;
     if (typeof row.id !== 'string' || !['agent', 'user'].includes(String(row.role)) || typeof row.text !== 'string') {
       throw new Error('会话消息格式无效');
     }
+    const kind = CONVERSATION_MESSAGE_KINDS.includes(row.kind as (typeof CONVERSATION_MESSAGE_KINDS)[number])
+      ? row.kind as ConversationMessage['kind']
+      : undefined;
+    const attachments = Array.isArray(row.attachments) ? row.attachments.slice(0, 12).map((raw): ConversationAttachment => {
+      if (!raw || typeof raw !== 'object') throw new Error('附件消息格式无效');
+      const file = raw as Record<string, unknown>;
+      if (typeof file.taskId !== 'string' || typeof file.fileId !== 'string' || typeof file.name !== 'string'
+        || typeof file.contentType !== 'string' || typeof file.size !== 'number' || !Number.isFinite(file.size)) {
+        throw new Error('附件消息格式无效');
+      }
+      return {
+        taskId: file.taskId.slice(0, 100), fileId: file.fileId.slice(0, 100), name: file.name.slice(0, 200),
+        contentType: file.contentType.slice(0, 100), size: Math.max(0, Math.round(file.size)),
+      };
+    }) : undefined;
+    const items = Array.isArray(row.items) ? row.items.slice(0, 24).map((raw): ConversationRichItem => {
+      if (!raw || typeof raw !== 'object') throw new Error('卡片消息格式无效');
+      const rich = raw as Record<string, unknown>;
+      if (typeof rich.id !== 'string' || typeof rich.label !== 'string' || typeof rich.value !== 'string') {
+        throw new Error('卡片消息格式无效');
+      }
+      return {
+        id: rich.id.slice(0, 120), label: rich.label.slice(0, 200), value: rich.value.slice(0, 4_000),
+        ...(typeof rich.detail === 'string' ? { detail: rich.detail.slice(0, 500) } : {}),
+        ...(typeof rich.status === 'string' ? { status: rich.status.slice(0, 100) } : {}),
+      };
+    }) : undefined;
+    let tool: ConversationMessage['tool'];
+    if (row.tool && typeof row.tool === 'object') {
+      const rawTool = row.tool as Record<string, unknown>;
+      if (!isAgentToolName(rawTool.name) || !['RUNNING', 'COMPLETED', 'FAILED'].includes(String(rawTool.status))) {
+        throw new Error('工具消息格式无效');
+      }
+      tool = { name: rawTool.name, status: rawTool.status as NonNullable<ConversationMessage['tool']>['status'] };
+    }
     return {
       id: row.id.slice(0, 200),
       role: row.role as 'agent' | 'user',
       text: row.text.slice(0, 8_000),
       ...(typeof row.meta === 'string' ? { meta: row.meta.slice(0, 200) } : {}),
+      ...(kind ? { kind } : {}),
+      ...(attachments?.length ? { attachments } : {}),
+      ...(items?.length ? { items } : {}),
+      ...(tool ? { tool } : {}),
     };
   });
 }
