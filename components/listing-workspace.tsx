@@ -111,8 +111,8 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
         body: JSON.stringify({ draftId: selectedDraft.id, action, fields, confirmedInferredFields: confirmations }),
       });
       const payload = await response.json() as { passport?: ProductPassport; error?: string };
+      if (payload.passport) setPassport(payload.passport);
       if (!response.ok || !payload.passport) throw new Error(payload.error || 'Listing 保存失败');
-      setPassport(payload.passport);
       setDraftEdits((current) => {
         const next = { ...current };
         delete next[selectedDraft.id];

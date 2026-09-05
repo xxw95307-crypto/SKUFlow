@@ -61,19 +61,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
       ? body.confirmedInferredFields.filter((key): key is string => typeof key === 'string' && fieldSources[key] === 'AI_INFERRED')
       : confirmedInferredFields(draft.payload);
     const issues = validateMockListing(draft.payload.schema, fields, fieldSources, requestedConfirmations);
-    if (action === 'approve' && issues.some((issue) => issue.severity === 'error')) {
-      return Response.json({ error: '请先补齐必填字段并修正校验问题', issues }, { status: 409 });
-    }
+    const hasErrors = issues.some((issue) => issue.severity === 'error');
     const payload = { ...draft.payload, fields, fieldSources, confirmedInferredFields: requestedConfirmations };
     delete payload.mockPublication;
-    const status = action === 'approve' ? 'APPROVED' : issues.some((issue) => issue.severity === 'error') ? 'NEEDS_REVIEW' : 'VALIDATED';
+    const status = action === 'approve' && !hasErrors ? 'APPROVED' : hasErrors ? 'NEEDS_REVIEW' : 'VALIDATED';
     const now = new Date().toISOString();
     await DB.prepare(
       `UPDATE platform_drafts
        SET status = ?, payload_json = ?, validation_json = ?, updated_at = ?
        WHERE id = ? AND task_id = ?`,
     ).bind(status, JSON.stringify(payload), JSON.stringify(issues), now, draftId, taskId).run();
-    return Response.json({ passport: await getProductPassport(DB, taskId) as ProductPassport, issues, status });
+    const refreshedPassport = await getProductPassport(DB, taskId) as ProductPassport;
+    if (action === 'approve' && hasErrors) {
+      return Response.json({ error: '已保存当前修改，请继续处理高亮字段', passport: refreshedPassport, issues, status }, { status: 409 });
+    }
+    return Response.json({ passport: refreshedPassport, issues, status });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to update listing draft' }, { status: 500 });
   }
