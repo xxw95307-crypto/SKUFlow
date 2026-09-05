@@ -439,10 +439,62 @@ export function AgentConversation() {
     call: AgentToolCall,
     currentTask: TaskSnapshot | null,
     publishApproved: boolean,
-  ): Promise<{ result: Record<string, unknown>; checkpoint: boolean; completed?: boolean }> => {
+    attachmentFiles: File[],
+    requestText: string,
+  ): Promise<{ result: Record<string, unknown>; checkpoint: boolean; completed?: boolean; task?: TaskSnapshot; consumedAttachments?: boolean }> => {
     const name = call.function.name;
     markToolRun(call, 'RUNNING');
     try {
+      if (name === 'inspect_chat_attachments') {
+        if (attachmentFiles.length === 0) throw new Error('本轮没有可读取的聊天附件');
+        setBusyLabel('Agent 正在读取本轮附件…');
+        const body = new FormData();
+        attachmentFiles.forEach((file) => body.append('files', file));
+        const payload = await responseJson<Record<string, unknown>>(await fetch('/api/agent/inspect-attachments', { method: 'POST', body }), '附件读取失败');
+        setPendingFiles([]);
+        if (composerFileInput.current) composerFileInput.current.value = '';
+        markToolRun(call, 'COMPLETED');
+        return { result: payload, checkpoint: false, consumedAttachments: true };
+      }
+      if (name === 'create_listing_task_from_attachments') {
+        if (currentTask) throw new Error('当前会话已经绑定商品任务');
+        if (attachmentFiles.length === 0) throw new Error('本轮没有可用于创建任务的附件');
+        setBusyLabel('Agent 正在安全保存资料并创建商品任务…');
+        const body = new FormData();
+        body.set('request', requestText);
+        attachmentFiles.forEach((file) => body.append('files', file));
+        const payload = await responseJson<{
+          task: TaskSnapshot;
+          targeting: { platformSource: string; marketSource: string };
+        }>(await fetch('/api/tasks', { method: 'POST', body }), '商品任务创建失败');
+        const createdTask = payload.task;
+        setTask(createdTask);
+        setPassport(await fetchPassport(createdTask.id));
+        setPendingFiles([]);
+        if (composerFileInput.current) composerFileInput.current.value = '';
+        const latestUser = [...messagesRef.current].reverse().find((message) => message.role === 'user');
+        if (latestUser) {
+          const next = messagesRef.current.map((message) => message.id === latestUser.id
+            ? { ...message, kind: 'files' as const, items: undefined, attachments: taskAttachments(createdTask), meta: `${createdTask.files.length} 份资料 · 已安全上传` }
+            : message);
+          messagesRef.current = next;
+          setMessages(next);
+        }
+        markToolRun(call, 'COMPLETED');
+        return {
+          result: {
+            ok: true,
+            taskId: createdTask.id,
+            files: createdTask.files.length,
+            platforms: createdTask.platforms,
+            markets: createdTask.markets,
+            targeting: payload.targeting,
+          },
+          checkpoint: false,
+          task: createdTask,
+          consumedAttachments: true,
+        };
+      }
       if (name === 'start_listing_workflow') {
         setPhase('intake');
         append('agent', '好的，我们开始创建商品上新任务。请先选择目标市场和平台，再上传同一个商品的全部资料。', '等待平台与资料');
@@ -562,14 +614,23 @@ export function AgentConversation() {
   const runAgentTurn = async (
     currentTask: TaskSnapshot | null,
     userText: string,
-    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean } = {},
+    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean; pendingFiles?: File[] } = {},
   ) => {
     if (options.resetHistory) modelHistory.current = [];
-    if (options.appendUser !== false) append('user', userText);
+    let activeTask = currentTask;
+    let activeFiles = options.pendingFiles ?? [];
+    const attachmentContext = activeFiles.length > 0
+      ? `\n\n[本轮聊天附件：${activeFiles.map((file) => `${file.name}（${file.type || '未知类型'}，${formatBytes(file.size)}）`).join('、')}。附件尚未创建商品任务，请严格根据用户意图决定是读取附件、创建上新任务、展示填写卡片或不调用工具。]`
+      : '';
+    const modelUserText = `${userText}${attachmentContext}`;
+    if (options.appendUser !== false) append('user', userText, activeFiles.length ? `${activeFiles.length} 个聊天附件` : undefined, activeFiles.length ? {
+      kind: 'files',
+      items: activeFiles.map((file, index) => ({ id: `pending_${index}`, label: file.name, value: formatBytes(file.size), status: '随消息发送' })),
+    } : {});
     const retainedHistory = modelHistory.current.length > 36
       ? modelHistory.current.filter((message) => message.role === 'user' || (message.role === 'assistant' && !message.toolCalls?.length)).slice(-20)
       : modelHistory.current;
-    let history: AgentModelMessage[] = [...retainedHistory, { role: 'user', content: userText }];
+    let history: AgentModelMessage[] = [...retainedHistory, { role: 'user', content: modelUserText }];
     setPhase('processing'); setBusyLabel('中央 Agent 正在判断下一步…'); setError('');
     try {
       for (let step = 0; step < 10; step += 1) {
@@ -577,12 +638,13 @@ export function AgentConversation() {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            taskId: currentTask?.id,
+            taskId: activeTask?.id,
             messages: history,
             selectedAssetIds: selectedAssets,
             publishApproved: options.publishApproved === true,
             intakePresented: phase === 'intake' || toolRunsRef.current.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED'),
-            requireAction: currentTask !== null,
+            pendingAttachmentCount: activeFiles.length,
+            requireAction: activeTask !== null,
           }),
         }), 'Agent 无法决定下一步');
         history = [...history, {
@@ -595,10 +657,12 @@ export function AgentConversation() {
         if (!call) {
           modelHistory.current = history;
           phaseFromState(payload.state);
-          await persistConversation(currentTask?.id ?? null, payload.state.publishedDraftCount > 0 ? 'COMPLETED' : 'ACTIVE');
+          await persistConversation(activeTask?.id ?? null, payload.state.publishedDraftCount > 0 ? 'COMPLETED' : 'ACTIVE');
           return;
         }
-        const execution = await executeTool(call, currentTask, options.publishApproved === true);
+        const execution = await executeTool(call, activeTask, options.publishApproved === true, activeFiles, userText);
+        if (execution.task) activeTask = execution.task;
+        if (execution.consumedAttachments) activeFiles = [];
         history = [...history, {
           role: 'tool',
           toolCallId: call.id,
@@ -606,7 +670,7 @@ export function AgentConversation() {
           content: JSON.stringify(execution.result),
         }];
         modelHistory.current = history;
-        await persistConversation(currentTask?.id ?? null, execution.completed ? 'COMPLETED' : 'ACTIVE');
+        await persistConversation(activeTask?.id ?? null, execution.completed ? 'COMPLETED' : 'ACTIVE');
         if (execution.checkpoint) return;
       }
       throw new Error('Agent 连续执行步骤过多，已安全暂停');
@@ -614,11 +678,13 @@ export function AgentConversation() {
       const message = caught instanceof Error ? caught.message : 'Agent 执行失败';
       setError(message); setPhase('error');
       append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
-      await persistConversation(currentTask?.id ?? null).catch(() => undefined);
+      await persistConversation(activeTask?.id ?? null).catch(() => undefined);
     }
   };
 
   const handleIntakeComplete = async (createdTask: TaskSnapshot) => {
+    setPendingFiles([]);
+    if (composerFileInput.current) composerFileInput.current.value = '';
     setTask(createdTask);
     setPassport(await fetchPassport(createdTask.id));
     toolRunsRef.current = [];
@@ -743,48 +809,12 @@ export function AgentConversation() {
   };
 
   const sendMessage = async () => {
-    const text = composer.trim();
-    if (!text && pendingFiles.length === 0) return;
-    if (pendingFiles.length > 0) {
-      if (task) return setError('当前会话已经绑定一个商品任务；如需处理另一个商品，请新建上新对话。');
-      const requestText = text || '请根据这些资料上新这款商品。';
-      const previousPhase = phase;
-      setPhase('processing'); setBusyLabel('正在安全接收商品资料…'); setError('');
-      try {
-        const body = new FormData();
-        body.set('request', requestText);
-        pendingFiles.forEach((file) => body.append('files', file));
-        const payload = await responseJson<{
-          task: TaskSnapshot;
-          targeting: { platformSource: 'message' | 'default' | 'explicit'; marketSource: 'message' | 'default' | 'explicit' };
-        }>(await fetch('/api/tasks', { method: 'POST', body }), '商品资料上传失败');
-        const createdTask = payload.task;
-        setComposer(''); setPendingFiles([]);
-        if (composerFileInput.current) composerFileInput.current.value = '';
-        setTask(createdTask);
-        setPassport(await fetchPassport(createdTask.id));
-        toolRunsRef.current = [];
-        append('user', requestText, `${createdTask.files.length} 份资料 · 已安全上传`, {
-          kind: 'files',
-          attachments: taskAttachments(createdTask),
-        });
-        const targetSummary = `${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · ${createdTask.markets.join('、')}`;
-        const usedDefaults = payload.targeting.platformSource === 'default' || payload.targeting.marketSource === 'default';
-        append('agent', `资料已经接收，我会按 ${targetSummary} 自动处理。${usedDefaults ? '你没有明确写出的目标已按当前默认配置补齐。' : ''}`, '后台任务已建立');
-        await persistConversation(createdTask.id);
-        await runAgentTurn(
-          createdTask,
-          `${requestText}\n系统已接收 ${createdTask.files.length} 份同一商品资料，目标为 ${targetSummary}。请直接推进后台处理，只在事实冲突、素材选择和发布确认时暂停。`,
-          { resetHistory: true, appendUser: false },
-        );
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : '商品资料上传失败');
-        setPhase(previousPhase);
-      }
-      return;
-    }
+    const typedText = composer.trim();
+    if (!typedText && pendingFiles.length === 0) return;
+    const text = typedText || '请查看我随消息发送的这些附件。';
+    const filesForTurn = [...pendingFiles];
     setComposer('');
-    await runAgentTurn(task, text);
+    await runAgentTurn(task, text, { pendingFiles: filesForTurn });
   };
 
   const toggleAsset = (id: string) => {
@@ -861,7 +891,7 @@ export function AgentConversation() {
 
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
 
-          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} agentManaged /></div></div>}
+          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} /></div></div>}
 
           {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 
@@ -897,7 +927,7 @@ export function AgentConversation() {
         <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
         {pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
         <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务' : '添加图片、表格或文档'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>
-        <input className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : pendingFiles.length ? '说明要上新到哪些平台和市场，然后发送…' : phase === 'idle' ? '输入要求，或点击左侧＋直接添加商品资料…' : '直接告诉 Agent 你的要求…'} />
+        <input className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : pendingFiles.length ? '告诉 Agent 要处理附件还是用它们上新…' : phase === 'idle' ? '输入要求，或点击左侧＋添加附件…' : '直接告诉 Agent 你的要求…'} />
         <button className="send" type="button" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
       </footer>
     </section>

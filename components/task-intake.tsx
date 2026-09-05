@@ -15,11 +15,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function TaskIntake({ onNext, agentManaged = false }: { onNext: (task: TaskSnapshot) => void; agentManaged?: boolean }) {
+export function TaskIntake({ onNext, agentManaged = false, initialFiles = [] }: {
+  onNext: (task: TaskSnapshot) => void;
+  agentManaged?: boolean;
+  initialFiles?: File[];
+}) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [markets, setMarkets] = useState<string[]>(['美国']);
   const [platforms, setPlatforms] = useState<PlatformId[]>(defaultPlatformIds);
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(initialFiles);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');

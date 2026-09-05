@@ -1,4 +1,6 @@
 export const AGENT_TOOL_NAMES = [
+  'inspect_chat_attachments',
+  'create_listing_task_from_attachments',
   'start_listing_workflow',
   'parse_product_sources',
   'analyze_product_images',
@@ -30,6 +32,7 @@ export type AgentModelMessage =
 export interface AgentWorkflowState {
   taskId: string | null;
   intakePresented: boolean;
+  pendingAttachmentCount: number;
   taskStatus: string | null;
   productName: string | null;
   fileCount: number;

@@ -22,6 +22,7 @@ interface RequestBody {
   publishApproved?: unknown;
   requireAction?: unknown;
   intakePresented?: unknown;
+  pendingAttachmentCount?: unknown;
 }
 
 function parseMessages(value: unknown): AgentModelMessage[] {
@@ -72,8 +73,11 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
   const selectedAssetCount = Array.isArray(body.selectedAssetIds)
     ? new Set(body.selectedAssetIds.filter((item): item is string => typeof item === 'string').slice(0, 20)).size
     : 0;
+  const pendingAttachmentCount = typeof body.pendingAttachmentCount === 'number' && Number.isInteger(body.pendingAttachmentCount)
+    ? Math.min(12, Math.max(0, body.pendingAttachmentCount))
+    : 0;
   const empty: AgentWorkflowState = {
-    taskId: null, intakePresented: body.intakePresented === true, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
+    taskId: null, intakePresented: body.intakePresented === true, pendingAttachmentCount, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
     imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
     selectedAssetCount, publishApproved: body.publishApproved === true,
@@ -92,7 +96,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
-    taskId, intakePresented: true,
+    taskId, intakePresented: true, pendingAttachmentCount,
     taskStatus: task.status,
     productName: task.productName === PENDING_PRODUCT_NAME ? null : task.productName,
     fileCount: task.files.length,

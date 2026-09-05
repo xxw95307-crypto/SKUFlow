@@ -6,7 +6,7 @@ import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
 function state(overrides: Partial<AgentWorkflowState> = {}): AgentWorkflowState {
   return {
-    taskId: 'task_demo', intakePresented: true, taskStatus: 'CREATED', productName: null,
+    taskId: 'task_demo', intakePresented: true, pendingAttachmentCount: 0, taskStatus: 'CREATED', productName: null,
     fileCount: 2, parsedFileCount: 0, imageCount: 1, analyzedImageCount: 0,
     factCount: 0, openConflictCount: 0, draftCount: 2, generatedDraftCount: 0,
     approvedDraftCount: 0, publishedDraftCount: 0, selectedAssetCount: 0,
@@ -26,6 +26,15 @@ test('a blank conversation only exposes the tool that opens the listing intake',
   const blank = state({ taskId: null, intakePresented: false, fileCount: 0, draftCount: 0 });
   assert.deepEqual(availableAgentTools(blank).map((item) => item.function.name), ['start_listing_workflow']);
   assert.deepEqual(availableAgentTools({ ...blank, intakePresented: true }), []);
+});
+
+test('chat attachments expose inspection and task creation as separate Agent decisions', () => {
+  const attached = state({ taskId: null, intakePresented: false, pendingAttachmentCount: 2, fileCount: 0, draftCount: 0 });
+  assert.deepEqual(availableAgentTools(attached).map((item) => item.function.name), [
+    'inspect_chat_attachments',
+    'create_listing_task_from_attachments',
+    'start_listing_workflow',
+  ]);
 });
 
 test('publish tool is unavailable until listings, assets and explicit approval are all present', () => {
