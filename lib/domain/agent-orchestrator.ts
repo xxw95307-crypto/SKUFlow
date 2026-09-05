@@ -1,4 +1,5 @@
 export const AGENT_TOOL_NAMES = [
+  'start_listing_workflow',
   'parse_product_sources',
   'analyze_product_images',
   'merge_product_facts',
@@ -28,6 +29,7 @@ export type AgentModelMessage =
 
 export interface AgentWorkflowState {
   taskId: string | null;
+  intakePresented: boolean;
   taskStatus: string | null;
   productName: string | null;
   fileCount: number;

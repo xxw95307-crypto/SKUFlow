@@ -17,7 +17,7 @@ import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { platformRegistry } from '@/lib/platforms/registry';
 
-type AgentPhase = 'loading' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'publish' | 'complete' | 'error';
+type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'publish' | 'complete' | 'error';
 
 interface ChatMessage {
   id: string;
@@ -33,6 +33,7 @@ interface ToolRun {
 }
 
 const toolLabels: Record<AgentToolName, string> = {
+  start_listing_workflow: '启动商品上新',
   parse_product_sources: '解析原始资料',
   analyze_product_images: '理解商品图片',
   merge_product_facts: '合并商品事实',
@@ -54,8 +55,8 @@ const assetCandidates = [
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，我是 SKUFlow 上新 Agent。把同一商品的图片、参数表和说明书交给我，我会自动理解商品、生成各平台 Listing，只在必须由你决定时暂停。',
-  meta: '上新任务已就绪',
+  text: '你好，我是 SKUFlow Agent。你可以直接告诉我今天想做什么，例如“我要上新一款商品”，也可以先问我有关平台 Listing 的问题。',
+  meta: '等待你的消息',
 }];
 
 function messageId(): string {
@@ -226,7 +227,8 @@ export function AgentConversation() {
     setConflictOpen(false); setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
     updateConversationList(conversation);
     if (!conversation.taskId) {
-      setTask(null); setPassport(null); setPhase('intake'); setProgressStep(0);
+      const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
+      setTask(null); setPassport(null); setPhase(intakeStarted ? 'intake' : 'idle'); setProgressStep(0);
       return;
     }
     const [loadedTask, loadedPassport] = await Promise.all([fetchTask(conversation.taskId), fetchPassport(conversation.taskId)]);
@@ -291,7 +293,7 @@ export function AgentConversation() {
       } catch (caught) {
         if (!active) return;
         setError(caught instanceof Error ? caught.message : '会话读取失败');
-        setPhase('intake');
+        setPhase('idle');
       }
     })();
     return () => { active = false; };
@@ -309,7 +311,7 @@ export function AgentConversation() {
   };
 
   const phaseFromState = (state: AgentWorkflowState) => {
-    if (!state.taskId) return setPhase('intake');
+    if (!state.taskId) return setPhase(state.intakePresented ? 'intake' : 'idle');
     if (state.publishedDraftCount > 0) return setPhase('complete');
     if (state.openConflictCount > 0) return setPhase('conflict');
     if (state.generatedDraftCount > 0 && state.approvedDraftCount < state.draftCount) return setPhase('listing');
@@ -330,12 +332,19 @@ export function AgentConversation() {
 
   const executeTool = async (
     call: AgentToolCall,
-    currentTask: TaskSnapshot,
+    currentTask: TaskSnapshot | null,
     publishApproved: boolean,
   ): Promise<{ result: Record<string, unknown>; checkpoint: boolean; completed?: boolean }> => {
     const name = call.function.name;
     markToolRun(call, 'RUNNING');
     try {
+      if (name === 'start_listing_workflow') {
+        setPhase('intake');
+        append('agent', '好的，我们开始创建商品上新任务。请先选择目标市场和平台，再上传同一个商品的全部资料。', '等待平台与资料');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, presented: true }, checkpoint: true };
+      }
+      if (!currentTask) throw new Error('当前还没有创建商品任务');
       if (name === 'parse_product_sources') {
         setProgressStep(0); setBusyLabel('Agent 正在解析图片、表格和文档…');
         const payload = await responseJson<{ summary: Record<string, unknown> }>(await fetch(`/api/tasks/${currentTask.id}/parse`, { method: 'POST' }), '资料解析失败');
@@ -430,6 +439,7 @@ export function AgentConversation() {
             messages: history,
             selectedAssetIds: selectedAssets,
             publishApproved: options.publishApproved === true,
+            intakePresented: phase === 'intake' || toolRunsRef.current.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED'),
             requireAction: currentTask !== null,
           }),
         }), 'Agent 无法决定下一步');
@@ -446,7 +456,6 @@ export function AgentConversation() {
           await persistConversation(currentTask?.id ?? null, payload.state.publishedDraftCount > 0 ? 'COMPLETED' : 'ACTIVE');
           return;
         }
-        if (!currentTask) throw new Error('Agent 在没有任务时请求了业务工具');
         const execution = await executeTool(call, currentTask, options.publishApproved === true);
         history = [...history, {
           role: 'tool',
@@ -455,7 +464,7 @@ export function AgentConversation() {
           content: JSON.stringify(execution.result),
         }];
         modelHistory.current = history;
-        await persistConversation(currentTask.id, execution.completed ? 'COMPLETED' : 'ACTIVE');
+        await persistConversation(currentTask?.id ?? null, execution.completed ? 'COMPLETED' : 'ACTIVE');
         if (execution.checkpoint) return;
       }
       throw new Error('Agent 连续执行步骤过多，已安全暂停');
@@ -549,7 +558,6 @@ export function AgentConversation() {
     const text = composer.trim();
     if (!text) return;
     setComposer('');
-    if (/新建|重新开始/.test(text)) { await newConversation(); return; }
     await runAgentTurn(task, text);
   };
 
@@ -577,9 +585,9 @@ export function AgentConversation() {
     </aside>
 
     <section className="agent-main">
-      <header className="agent-topbar"><div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : '创建商品上新任务'}</h1></div><div className="agent-model"><span>百炼 Function Calling</span><b>qwen3.8-max · 工具已开启</b></div></header>
+      <header className="agent-topbar"><div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? '新对话' : '创建商品上新任务'}</h1></div><div className="agent-model"><span>百炼 Function Calling</span><b>qwen3.8-max · 工具已开启</b></div></header>
 
-      <div className="agent-chat-layout">
+      <div className={`agent-chat-layout ${phase === 'idle' ? 'idle' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           <div className="agent-date">今天 · Agent 工作区</div>
           {messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
@@ -614,16 +622,16 @@ export function AgentConversation() {
           <div ref={threadEnd} />
         </section>
 
-        <aside className="agent-context">
+        {phase !== 'idle' && <aside className="agent-context">
           <div className="context-head"><span>任务进度</span><b>{phase === 'complete' ? '已完成' : '进行中'}</b></div>
           <ol className="agent-progress">{['接收资料', '商品理解', 'Listing 审核', '视觉选择', '发布交付'].map((label, index) => <li className={index < currentStep || phase === 'complete' ? 'done' : index === currentStep ? 'current' : ''} key={label}><span>{index < currentStep || phase === 'complete' ? '✓' : index + 1}</span><div><b>{label}</b><small>{index < currentStep || phase === 'complete' ? '已完成' : index === currentStep ? '当前阶段' : '由 Agent 继续'}</small></div></li>)}</ol>
           {task && <div className="context-summary"><span>当前商品</span><h3>{task.productName}</h3><div><b>{visibleFacts.length}</b><small>属性</small><b>{openConflictCount}</b><small>冲突</small><b>{approvedCount}</b><small>已审核</small></div><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join(' · ')}</p></div>}
           {passport && <details className="agent-evidence"><summary>查看商品事实与证据</summary><div>{visibleFacts.slice(0, 12).map((fact) => <p key={fact.id}><b>{fact.label}</b><span>{displayValue(fact.value, fact.unit)}</span></p>)}{visibleFacts.length > 12 && <small>还有 {visibleFacts.length - 12} 项属性已收起</small>}</div></details>}
           <div className="context-safety"><span>◈</span><div><b>人工门禁已开启</b><small>冲突与发布永远需要你确认</small></div></div>
-        </aside>
+        </aside>}
       </div>
 
-      <footer className="agent-composer"><button type="button" aria-label="新建上新会话" onClick={() => { if (phase !== 'intake') void newConversation(); }}>+</button><input value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : phase === 'intake' ? '可以先告诉 Agent 你想做什么…' : '直接告诉 Agent 你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim() || phase === 'processing'}>↑</button></footer>
+      <footer className="agent-composer"><button type="button" aria-label="新建上新会话" onClick={() => { if (phase !== 'idle') void newConversation(); }}>+</button><input value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : phase === 'idle' ? '告诉 Agent 你想做什么…' : '直接告诉 Agent 你的要求…'} /><button className="send" type="button" onClick={() => void sendMessage()} disabled={!composer.trim() || phase === 'processing'}>↑</button></footer>
     </section>
 
     {conflictOpen && passport && <ConflictDialog passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} onClose={() => setConflictOpen(false)} />}

@@ -6,7 +6,7 @@ import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
 function state(overrides: Partial<AgentWorkflowState> = {}): AgentWorkflowState {
   return {
-    taskId: 'task_demo', taskStatus: 'CREATED', productName: null,
+    taskId: 'task_demo', intakePresented: true, taskStatus: 'CREATED', productName: null,
     fileCount: 2, parsedFileCount: 0, imageCount: 1, analyzedImageCount: 0,
     factCount: 0, openConflictCount: 0, draftCount: 2, generatedDraftCount: 0,
     approvedDraftCount: 0, publishedDraftCount: 0, selectedAssetCount: 0,
@@ -20,6 +20,12 @@ test('orchestrator exposes only tools valid for the trusted workflow state', () 
   assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2 })).map((item) => item.function.name), ['analyze_product_images']);
   assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2, analyzedImageCount: 1 })).map((item) => item.function.name), ['merge_product_facts']);
   assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, openConflictCount: 1 })).map((item) => item.function.name), ['open_conflict_review']);
+});
+
+test('a blank conversation only exposes the tool that opens the listing intake', () => {
+  const blank = state({ taskId: null, intakePresented: false, fileCount: 0, draftCount: 0 });
+  assert.deepEqual(availableAgentTools(blank).map((item) => item.function.name), ['start_listing_workflow']);
+  assert.deepEqual(availableAgentTools({ ...blank, intakePresented: true }), []);
 });
 
 test('publish tool is unavailable until listings, assets and explicit approval are all present', () => {

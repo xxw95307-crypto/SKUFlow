@@ -21,6 +21,7 @@ interface RequestBody {
   selectedAssetIds?: unknown;
   publishApproved?: unknown;
   requireAction?: unknown;
+  intakePresented?: unknown;
 }
 
 function parseMessages(value: unknown): AgentModelMessage[] {
@@ -72,7 +73,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     ? new Set(body.selectedAssetIds.filter((item): item is string => typeof item === 'string').slice(0, 20)).size
     : 0;
   const empty: AgentWorkflowState = {
-    taskId: null, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
+    taskId: null, intakePresented: body.intakePresented === true, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
     imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
     selectedAssetCount, publishApproved: body.publishApproved === true,
@@ -91,7 +92,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
-    taskId,
+    taskId, intakePresented: true,
     taskStatus: task.status,
     productName: task.productName === PENDING_PRODUCT_NAME ? null : task.productName,
     fileCount: task.files.length,
@@ -124,6 +125,14 @@ function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModel
   }];
 }
 
+function requestsListingStart(messages: AgentModelMessage[], state: AgentWorkflowState): boolean {
+  if (state.taskId || state.intakePresented) return false;
+  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+  if (lastUser?.role !== 'user') return false;
+  return /(?:我要|我想|帮我|开始|准备|需要).{0,16}(?:上新|发布商品|创建.{0,8}listing|制作.{0,8}listing)/i.test(lastUser.content)
+    || /(?:上新|发布).{0,10}(?:一款|一个|商品|产品)/i.test(lastUser.content);
+}
+
 export async function POST(request: Request) {
   try {
     await ensureSchema();
@@ -139,7 +148,7 @@ export async function POST(request: Request) {
       systemPrompt: buildCommerceOrchestratorPrompt(state),
       messages,
       tools,
-      requireTool: body.requireAction === true && tools.length > 0,
+      requireTool: (body.requireAction === true || requestsListingStart(messages, state)) && tools.length > 0,
     });
     const allowed = new Set(tools.map((item) => item.function.name));
     const toolCalls = result.message.toolCalls.filter((call) => allowed.has(call.function.name)).slice(0, 1);

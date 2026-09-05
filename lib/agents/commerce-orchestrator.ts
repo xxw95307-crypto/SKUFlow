@@ -1,6 +1,7 @@
 import type { AgentToolDefinition, AgentToolName, AgentWorkflowState } from '../domain/agent-orchestrator.ts';
 
 const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
+  start_listing_workflow: '当用户明确表示要上新、发布或创建商品 Listing 时，展示平台选择与商品资料上传卡片。',
   parse_product_sources: '解析当前任务中的图片、PDF、表格和文本资料，形成统一内容块。',
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
@@ -24,7 +25,7 @@ function tool(name: AgentToolName): AgentToolDefinition {
 }
 
 export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinition[] {
-  if (!state.taskId) return [];
+  if (!state.taskId) return state.intakePresented ? [] : [tool('start_listing_workflow')];
   const names: AgentToolName[] = [];
   const parsingReady = state.fileCount > 0 && state.parsedFileCount >= state.fileCount;
   const visionReady = state.imageCount === 0 || state.analyzedImageCount >= state.imageCount;
@@ -52,6 +53,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
   return `你是 SKUFlow 的中央上新 Agent，不是客服话术机器人。你的职责是基于可信任务状态，选择一个合适工具推进单商品、多平台 Listing 工作流。
 
 工作原则：
+0. 尚未创建商品任务时，你首先是一个正常的对话助手。只有用户明确表达要上新、发布商品或制作商品 Listing 的意图时，才调用 start_listing_workflow；普通咨询直接回答，不要展示上传卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
 2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 选择素材 → 人工确认发布 → 创建 Mock 草稿。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
