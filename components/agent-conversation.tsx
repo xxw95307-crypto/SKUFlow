@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
@@ -26,6 +27,11 @@ import { platformRegistry } from '@/lib/platforms/registry';
 type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'publish' | 'complete' | 'error';
 
 type ChatMessage = ConversationMessage;
+
+const DEFAULT_RAIL_WIDTH = 272;
+const MIN_RAIL_WIDTH = 220;
+const MAX_RAIL_WIDTH = 420;
+const RAIL_WIDTH_STORAGE_KEY = 'skuflow-agent-rail-width';
 
 interface ToolRun {
   id: string;
@@ -223,12 +229,15 @@ export function AgentConversation() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<ConversationSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [railWidth, setRailWidth] = useState(DEFAULT_RAIL_WIDTH);
   const threadEnd = useRef<HTMLDivElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
   const messagesRef = useRef<ChatMessage[]>(initialMessages);
   const toolRunsRef = useRef<ToolRun[]>([]);
   const selectedAssetsRef = useRef<string[]>([]);
   const conversationIdRef = useRef<string | null>(null);
+  const railWidthRef = useRef(DEFAULT_RAIL_WIDTH);
+  const railResizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
@@ -361,6 +370,23 @@ export function AgentConversation() {
   }, []);
 
   useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, phase, busyLabel]);
+
+  useEffect(() => {
+    const storedWidth = Number(window.localStorage.getItem(RAIL_WIDTH_STORAGE_KEY));
+    if (!Number.isFinite(storedWidth) || storedWidth < MIN_RAIL_WIDTH || storedWidth > MAX_RAIL_WIDTH) return;
+    const timer = window.setTimeout(() => {
+      railWidthRef.current = storedWidth;
+      setRailWidth(storedWidth);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const resizeRail = (nextWidth: number, remember = false) => {
+    const width = Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, Math.round(nextWidth)));
+    railWidthRef.current = width;
+    setRailWidth(width);
+    if (remember) window.localStorage.setItem(RAIL_WIDTH_STORAGE_KEY, String(width));
+  };
 
   const refreshTaskState = async (taskId: string) => {
     const [nextTask, nextPassport] = await Promise.all([fetchTask(taskId), fetchPassport(taskId)]);
@@ -715,7 +741,7 @@ export function AgentConversation() {
   const approvedCount = passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED').length ?? 0;
   const publishedCount = passport?.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length ?? 0;
 
-  return <main className="agent-shell">
+  return <main className="agent-shell" style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
     <aside className="agent-rail">
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
       <button className="new-agent-task" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span>新建上新对话</button>
@@ -726,6 +752,41 @@ export function AgentConversation() {
       </div>)}</div>
       <div className="agent-rail-note"><i /> <b>Agent 自动推进</b><p>只在事实冲突、主观选择和最终发布时向你提问。</p></div>
       <div className="agent-user"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div></div>
+      <button
+        className="agent-rail-resizer"
+        type="button"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整会话栏宽度"
+        aria-valuemin={MIN_RAIL_WIDTH}
+        aria-valuemax={MAX_RAIL_WIDTH}
+        aria-valuenow={railWidth}
+        title="拖动调整宽度，双击恢复默认"
+        onDoubleClick={() => resizeRail(DEFAULT_RAIL_WIDTH, true)}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          resizeRail(railWidthRef.current + (event.key === 'ArrowRight' ? 16 : -16), true);
+        }}
+        onPointerDown={(event) => {
+          railResizeStart.current = { x: event.clientX, width: railWidthRef.current };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (!railResizeStart.current) return;
+          resizeRail(railResizeStart.current.width + event.clientX - railResizeStart.current.x);
+        }}
+        onPointerUp={(event) => {
+          if (!railResizeStart.current) return;
+          railResizeStart.current = null;
+          resizeRail(railWidthRef.current, true);
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => {
+          railResizeStart.current = null;
+          resizeRail(railWidthRef.current, true);
+        }}
+      ><span /></button>
     </aside>
 
     <section className="agent-main">
