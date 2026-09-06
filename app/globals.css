@@ -386,6 +386,24 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .conflict-custom-reply input:focus { border-color:#268b81; box-shadow:0 0 0 3px #268b8114; }
 .conflict-custom-reply button { min-height:43px; padding:10px 14px; border:0; border-radius:10px; background:#173d41; color:#fff; font-size:13px; font-weight:800; cursor:pointer; }
 .conflict-custom-reply button:disabled { cursor:not-allowed; opacity:.5; }
+.chat-message.listing-conversation { margin-top:-8px; }
+.listing-conversation-card { width:min(790px,86%); max-width:min(790px,86%); overflow:hidden; border:1px solid #b9d7d1; border-radius:6px 16px 16px 16px; background:#fff; box-shadow:0 14px 35px #163d3810; }
+.listing-conversation-head { padding:18px 19px 16px; border-bottom:1px solid #dce9e6; background:linear-gradient(135deg,#eef9f6,#fff); }
+.listing-conversation-head>span { color:#18766d; font-size:12px; font-weight:900; letter-spacing:.06em; }
+.listing-conversation-head h3 { margin:7px 0 0; font-size:18px; }
+.listing-conversation-head p { margin:7px 0 0; color:#637b77; font-size:14px; line-height:1.6; }
+.listing-conversation-card>.form-error,.listing-conversation-card>.form-success { margin:14px 18px 0; }
+.listing-conversation-card .conversation-tabs { margin:15px 18px 0; }
+.listing-conversation-card .listing-schema-bar { margin:13px 18px 0; }
+.listing-conversation-preview { margin:0; padding:6px 18px 4px; }
+.listing-conversation-preview>div { display:grid; grid-template-columns:108px minmax(0,1fr) auto; align-items:start; gap:10px; padding:11px 0; border-bottom:1px solid #e8eeec; }
+.listing-conversation-preview dt { color:#657775; font-size:13px; font-weight:800; }
+.listing-conversation-preview dd { min-width:0; max-height:44px; margin:0; overflow:hidden; color:#213b39; font-size:14px; line-height:1.55; }
+.listing-conversation-preview span { padding:4px 6px; border-radius:999px; background:#e9f4f1; color:#34746b; font-size:10px; white-space:nowrap; }
+.listing-conversation-card .listing-form-grid { grid-template-columns:1fr; max-height:56vh; overflow:auto; margin:13px 18px 0; padding-right:4px; }
+.listing-conversation-card .listing-field input,.listing-conversation-card .listing-field textarea { font-size:14px; }
+.listing-conversation-card .listing-review-actions { align-items:flex-start; margin:12px 18px 18px; }
+.listing-conversation-card .listing-review-actions>div { flex-wrap:wrap; justify-content:flex-end; }
 .listing-summary>.action-card-head { padding-bottom:14px; border-bottom:1px solid #e7eceb; }
 .platform-review-list { display:grid; gap:8px; margin-top:13px; }
 .platform-review-list article { display:grid; grid-template-columns:92px minmax(0,1fr) auto; align-items:center; gap:11px; padding:11px 12px; border:1px solid #e0e8e6; border-radius:10px; background:#fafcfb; }
@@ -506,6 +524,7 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
   .resume-actions,.checkpoint>button,.chat-action-card.completed>button { grid-column:1/-1; width:100%; }
   .agent-dialog-backdrop { padding:10px; } .agent-dialog { max-height:calc(100dvh - 20px); } .agent-dialog-body { padding:15px; }
   .agent-asset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .platform-review-list article { grid-template-columns:78px minmax(0,1fr); } .platform-review-list em { grid-column:2; width:max-content; }
+  .listing-conversation-card .listing-review-actions { align-items:stretch; flex-direction:column; }
 }
 @media (max-width:520px) {
   .chat-message>div { max-width:calc(100% - 45px); } .chat-message p { font-size:14px; }
@@ -514,5 +533,9 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
   .decision-options,.agent-asset-grid,.conflict-quick-replies { grid-template-columns:1fr; } .agent-asset-preview { height:130px; }
   .decision-manual>div,.publish-confirm-list>div,.conflict-custom-reply>div { grid-template-columns:1fr; } .dialog-footer { align-items:stretch; flex-direction:column; } .dialog-footer button,.conflict-custom-reply button { width:100%; }
   .chat-message.conflict-conversation>div { width:calc(100% - 45px); max-width:calc(100% - 45px); }
+  .listing-conversation-card { width:calc(100% - 45px); max-width:calc(100% - 45px); }
+  .listing-conversation-preview>div { grid-template-columns:1fr; gap:5px; }
+  .listing-conversation-preview span { width:max-content; }
+  .listing-conversation-card .listing-review-actions>div { display:grid; grid-template-columns:1fr; }
   .agent-composer { min-height:92px; gap:8px; padding:12px 14px; } .agent-composer-input { min-height:60px; padding:13px 14px; } .agent-composer>button { width:46px; height:46px; } .composer-attachment { min-width:190px; }
 }

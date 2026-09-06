@@ -231,7 +231,6 @@ export function AgentConversation() {
   const [busyLabel, setBusyLabel] = useState('正在读取最近任务…');
   const [error, setError] = useState('');
   const [composer, setComposer] = useState('');
-  const [listingOpen, setListingOpen] = useState(false);
   const [assetOpen, setAssetOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [manualConflictValue, setManualConflictValue] = useState('');
@@ -576,8 +575,8 @@ export function AgentConversation() {
       }
       if (name === 'open_listing_review') {
         const refreshed = await refreshTaskState(currentTask.id);
-        setPhase('listing'); setListingOpen(true);
-        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份平台中文审校稿。请集中审核，确认后我会继续。`, '等待 Listing 审核', {
+        setPhase('listing');
+        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份平台中文审校稿。接下来我会在对话中逐个平台请你确认。`, '等待 Listing 审核', {
           kind: 'listing',
           items: refreshed.passport.platformDrafts.map((draft) => {
             const payload = isListingDraftPayload(draft.payload) ? draft.payload : null;
@@ -791,7 +790,6 @@ export function AgentConversation() {
   };
 
   const proceedToAssets = async () => {
-    setListingOpen(false);
     await refreshAfterListing();
     if (task) await runAgentTurn(task, '我已确认所有平台 Listing，请继续。', { appendUser: false });
   };
@@ -948,10 +946,7 @@ export function AgentConversation() {
 
           {phase === 'conflict' && passport && <ConflictConversationCard passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} />}
 
-          {phase === 'listing' && passport && <div className="chat-action-card listing-summary"><div className="action-card-head"><span>LISTING CHECKPOINT</span><b>各平台中文审校稿</b><p>Agent 已按平台字段分别填写。默认只看结果，需要时再展开字段详情。</p></div><div className="platform-review-list">{passport.platformDrafts.map((draft) => {
-            const payload = isListingDraftPayload(draft.payload) ? draft.payload : null;
-            return <article key={draft.id}><span>{platformNames.get(draft.platformId) ?? draft.platformId}</span><div><b>{payload ? listingTitle(payload) : '等待生成'}</b><small>{draft.market} · {draft.validationIssues.length ? `${draft.validationIssues.length} 项待处理` : '校验通过'}</small></div><em className={draft.status === 'APPROVED' ? 'done' : ''}>{draft.status === 'APPROVED' ? '已确认' : '待审核'}</em></article>;
-          })}</div><button className="primary card-primary" type="button" onClick={() => setListingOpen(true)}>审核 {passport.platformDrafts.length} 个平台稿 →</button></div>}
+          {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
 
           {phase === 'assets' && <div className="chat-action-card checkpoint success"><div className="checkpoint-icon">▣</div><div><span>视觉素材已生成</span><h3>{selectedAssets.length ? `已选择 ${selectedAssets.length} 张图片` : `${generatedAssets.filter((asset) => asset.status === 'COMPLETED').length} 张候选图等待选择`}</h3><p>候选图来自原始商品图片，并受已确认商品事实约束。</p></div><button type="button" onClick={() => setAssetOpen(true)}>打开选图卡</button></div>}
 
@@ -981,7 +976,6 @@ export function AgentConversation() {
       </footer>
     </section>
 
-    {listingOpen && task && <AgentDialog eyebrow="AGENT CHECKPOINT · LISTING REVIEW" title="审核各平台中文 Listing" onClose={() => { setListingOpen(false); void refreshAfterListing(); }} wide><div className="embedded-listing"><ListingWorkspace task={task} onAssets={proceedToAssets} /></div></AgentDialog>}
     {assetOpen && <AssetDialog assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
     {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}

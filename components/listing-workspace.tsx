@@ -45,7 +45,11 @@ function ListingFieldEditor({ field, value, source, confirmed, issue, onChange, 
   </label>;
 }
 
-export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null; onAssets: () => void }) {
+export function ListingWorkspace({ task, onAssets, conversation = false }: {
+  task: TaskSnapshot | null;
+  onAssets: () => void;
+  conversation?: boolean;
+}) {
   const [passport, setPassport] = useState<ProductPassport | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState('');
   const [draftEdits, setDraftEdits] = useState<Record<string, Record<string, unknown>>>({});
@@ -53,6 +57,7 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     if (!task) return;
@@ -62,7 +67,7 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
         const payload = await response.json() as { passport?: ProductPassport; error?: string };
         if (!response.ok || !payload.passport) throw new Error(payload.error || '平台草稿加载失败');
         setPassport(payload.passport);
-        setSelectedDraftId((current) => current || payload.passport!.platformDrafts[0]?.id || '');
+        setSelectedDraftId((current) => current || payload.passport!.platformDrafts.find((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED')?.id || payload.passport!.platformDrafts[0]?.id || '');
       })
       .catch((caught) => {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
@@ -106,9 +111,15 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
     if (!task || !selectedDraft) return;
     setBusy(true); setError(''); setMessage('');
     try {
+      const inferredKeys = listing?.schema.fields
+        .filter((field) => (fieldSources[field.key] ?? field.source) === 'AI_INFERRED')
+        .map((field) => field.key) ?? [];
+      const submittedConfirmations = action === 'approve'
+        ? [...new Set([...confirmations, ...inferredKeys])]
+        : confirmations;
       const response = await fetch(`/api/tasks/${task.id}/listing-drafts`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftId: selectedDraft.id, action, fields, confirmedInferredFields: confirmations }),
+        body: JSON.stringify({ draftId: selectedDraft.id, action, fields, confirmedInferredFields: submittedConfirmations }),
       });
       const payload = await response.json() as { passport?: ProductPassport; error?: string };
       if (payload.passport) setPassport(payload.passport);
@@ -123,24 +134,40 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
         delete next[selectedDraft.id];
         return next;
       });
-      setMessage(action === 'approve' ? '该平台 Listing 已确认。' : '修改已保存并重新校验。');
+      if (action === 'approve') {
+        const remaining = payload.passport.platformDrafts.find((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED');
+        if (remaining) {
+          setSelectedDraftId(remaining.id);
+          setDetailsOpen(false);
+          setMessage('该平台 Listing 已确认，接下来请确认下一份。');
+        } else {
+          setMessage('所有平台 Listing 均已确认，Agent 将继续生成视觉素材。');
+          onAssets();
+        }
+      } else {
+        setMessage('修改已保存并重新校验。');
+      }
     } catch (caught) {
+      setDetailsOpen(true);
       setError(caught instanceof Error ? caught.message : 'Listing 保存失败');
     } finally { setBusy(false); }
   };
 
   if (!task) return <section className="panel listing-panel"><h2>请先创建商品任务</h2><p>完成商品资料处理后，才能生成平台 Listing。</p></section>;
 
-  return <section className="panel listing-panel">
-    <div className="section-heading"><div><span>STEP 03 · PLATFORM LISTING REVIEW</span><h2>按平台审核中文 Listing</h2><p>系统按选定平台获取字段，将商品资料映射到对应表单，并由智能体用中文补全各平台的营销内容。</p></div><button className="primary" type="button" onClick={generate} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成中文审校稿' : '生成各平台中文审校稿'}</button></div>
-    <div className="mock-mode-note"><b>中文审校阶段</b><span>当前统一使用简体中文审核；目标市场语言仅作为发布元数据，将在后续发布阶段进行本地化。当前仍为 Mock 平台，不会发送到真实平台。</span></div>
+  return <section className={conversation ? 'listing-conversation-card' : 'panel listing-panel'}>
+    {conversation ? <header className="listing-conversation-head"><span>需要你确认 · 还剩 {Math.max(0, (passport?.platformDrafts.length ?? 0) - approvedCount)} 个平台</span><h3>{listing?.schema.platformName ?? '平台'}中文 Listing 可以使用吗？</h3><p>我已按该平台字段完成中文稿。你可以直接确认，也可以展开修改具体内容。</p></header> : <>
+      <div className="section-heading"><div><span>STEP 03 · PLATFORM LISTING REVIEW</span><h2>按平台审核中文 Listing</h2><p>系统按选定平台获取字段，将商品资料映射到对应表单，并由智能体用中文补全各平台的营销内容。</p></div><button className="primary" type="button" onClick={generate} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成中文审校稿' : '生成各平台中文审校稿'}</button></div>
+      <div className="mock-mode-note"><b>中文审校阶段</b><span>当前统一使用简体中文审核；目标市场语言仅作为发布元数据，将在后续发布阶段进行本地化。当前仍为 Mock 平台，不会发送到真实平台。</span></div>
+    </>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {message && <div className="form-success" role="status">{message}</div>}
-    <div className="platform-tabs dynamic">{passport?.platformDrafts.map((draft) => <button className={selectedDraft?.id === draft.id ? 'active' : ''} onClick={() => { setSelectedDraftId(draft.id); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market} · {draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'}</small></button>)}</div>
+    <div className={`platform-tabs dynamic ${conversation ? 'conversation-tabs' : ''}`}>{passport?.platformDrafts.map((draft) => <button className={selectedDraft?.id === draft.id ? 'active' : ''} onClick={() => { setSelectedDraftId(draft.id); setDetailsOpen(false); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market} · {draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'}</small></button>)}</div>
 
     {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成各平台中文审校稿”，系统将调用 Mock Schema 接口，并让百炼用中文填写每个平台的营销字段。</p></div> : <>
-      <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · 发布语言：{listing.schema.locale} · {listing.schema.categoryLabel}</span></div><code>{listing.schema.schemaVersion}</code></div>
-      <div className="listing-form-grid">{listing.schema.fields.map((field) => <ListingFieldEditor
+      <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · 发布时再转换为 {listing.schema.locale} · {listing.schema.categoryLabel}</span></div>{!conversation && <code>{listing.schema.schemaVersion}</code>}</div>
+      {conversation && !detailsOpen && <dl className="listing-conversation-preview">{listing.schema.fields.slice(0, 5).map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{editableValue(field, fields[field.key]) || '待补充'}</dd><span>{sourceLabels[fieldSources[field.key] ?? field.source]}</span></div>)}</dl>}
+      {(!conversation || detailsOpen) && <div className="listing-form-grid">{listing.schema.fields.map((field) => <ListingFieldEditor
         key={field.key}
         field={field}
         value={fields[field.key]}
@@ -167,10 +194,10 @@ export function ListingWorkspace({ task, onAssets }: { task: TaskSnapshot | null
             [selectedDraft.id]: checked ? [...new Set([...existing, field.key])] : existing.filter((key) => key !== field.key),
           };
         })}
-      />)}</div>
-      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? `${selectedDraft.validationIssues.length} 项需要处理` : '字段校验通过'} · 智能体推断值需勾选核对，营销内容可直接修改</span><div><button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button><button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认此平台 Listing'}</button></div></div>
+      />)}</div>}
+      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? `${selectedDraft.validationIssues.length} 项需要处理` : '字段校验通过'} · 整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
     </>}
 
-    <div className="footer-actions"><span>{generatedCount}/{passport?.platformDrafts.length ?? 0} 已生成 · {approvedCount} 已确认</span><button className="primary" type="button" onClick={onAssets} disabled={!allApproved}>全部确认后进入视觉素材 →</button></div>
+    {!conversation && <div className="footer-actions"><span>{generatedCount}/{passport?.platformDrafts.length ?? 0} 已生成 · {approvedCount} 已确认</span><button className="primary" type="button" onClick={onAssets} disabled={!allApproved}>全部确认后进入视觉素材 →</button></div>}
   </section>;
 }
