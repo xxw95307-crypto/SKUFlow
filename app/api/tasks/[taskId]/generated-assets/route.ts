@@ -1,7 +1,7 @@
 import { ensureSchema, getBindings } from '@/db/client';
-import { ASSET_GENERATION_SPECS, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
-import { callBailianImageGeneration } from '@/lib/ai/bailian-client';
-import { loadBailianImageConfig, missingBailianImageConfig } from '@/lib/config/bailian';
+import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
+import { callBailianAssetPlanning, callBailianImageGeneration } from '@/lib/ai/bailian-client';
+import { loadBailianConfig, loadBailianImageConfig, missingBailianConfig, missingBailianImageConfig } from '@/lib/config/bailian';
 import type { GeneratedAsset, GeneratedAssetSummary } from '@/lib/domain/generated-asset';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { listLatestGeneratedAssets, prepareGeneratedAssetInsert } from '@/lib/server/generated-asset-store';
@@ -24,11 +24,13 @@ function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
   };
 }
 
-async function requestForce(request: Request): Promise<boolean> {
+async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null }> {
   const raw = await request.text();
-  if (!raw.trim()) return false;
+  if (!raw.trim()) return { force: false, guidance: null };
   try {
-    return (JSON.parse(raw) as { force?: unknown }).force === true;
+    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown };
+    const guidance = typeof value.guidance === 'string' ? value.guidance.trim().slice(0, 500) : '';
+    return { force: value.force === true, guidance: guidance || null };
   } catch {
     throw new Error('请求 JSON 格式无效');
   }
@@ -51,10 +53,11 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
   try {
     await ensureSchema();
     const { taskId } = await context.params;
-    const force = await requestForce(request);
+    const options = await requestOptions(request);
     const bindings = getBindings();
     const config = loadBailianImageConfig(bindings);
-    const missing = missingBailianImageConfig(config);
+    const planningConfig = loadBailianConfig(bindings);
+    const missing = [...new Set([...missingBailianImageConfig(config), ...missingBailianConfig(planningConfig)])];
     if (missing.length > 0) return Response.json({ error: `百炼素材生成配置不完整：${missing.join(', ')}` }, { status: 503 });
 
     const [task, passport, existing] = await Promise.all([
@@ -64,26 +67,36 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
     ]);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
-    const reusable = existing.filter((asset) => asset.status === 'COMPLETED');
-    if (!force && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
+    const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith('asset_dynamic_'));
+    if (!options.force && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
 
     const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
     if (approved.length === 0 || approved.length < passport.platformDrafts.length) {
       return Response.json({ error: '请先完成所有平台 Listing 审核，再生成视觉素材' }, { status: 409 });
     }
-    const image = await bindings.DB.prepare(
+    const images = await bindings.DB.prepare(
       `SELECT id, object_key, content_type FROM task_files
-       WHERE task_id = ? AND content_type LIKE 'image/%' ORDER BY created_at ASC LIMIT 1`,
-    ).bind(taskId).first<ImageFileRow>();
+       WHERE task_id = ? AND content_type LIKE 'image/%' ORDER BY created_at ASC`,
+    ).bind(taskId).all<ImageFileRow>();
+    const image = images.results[0];
     if (!image) return Response.json({ error: '当前商品没有可用的原始图片，无法生成视觉素材' }, { status: 409 });
     const source = await bindings.UPLOADS.get(image.object_key);
     if (!source) return Response.json({ error: '对象存储中未找到原始商品图' }, { status: 404 });
     const bytes = new Uint8Array(await source.arrayBuffer());
     const listings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [draft.payload] : []);
-    const batchId = `asset_batch_${crypto.randomUUID()}`;
+    const plan = await callBailianAssetPlanning(planningConfig, {
+      productName: task.productName,
+      facts: passport.facts,
+      listings,
+      platforms: task.platforms,
+      markets: task.markets,
+      sourceImageCount: images.results.length,
+      userGuidance: options.guidance,
+    });
+    const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
 
-    await Promise.all(ASSET_GENERATION_SPECS.map(async (spec) => {
+    await Promise.all(plan.assets.map(async (spec) => {
       const id = `asset_${crypto.randomUUID()}`;
       const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
       try {
@@ -96,7 +109,7 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
         const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
         await bindings.UPLOADS.put(objectKey, generated.bytes, {
           httpMetadata: { contentType: generated.contentType },
-          customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind },
+          customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
         });
         await prepareGeneratedAssetInsert(bindings.DB, {
           id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
@@ -118,7 +131,7 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
       const reason = assets.find((asset) => asset.error)?.error || '图像模型未返回有效素材';
       return Response.json({ error: `视觉素材生成失败：${reason}`, assets, summary }, { status: 502 });
     }
-    return Response.json({ assets, summary, reused: false });
+    return Response.json({ assets, summary, reused: false, plan: plan.assets, plannerModel: plan.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视觉素材生成失败';
     return Response.json({ error: message }, { status: message === '请求 JSON 格式无效' ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });

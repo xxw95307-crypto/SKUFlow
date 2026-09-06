@@ -10,7 +10,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_platform_listings: '读取所选平台的 Mock Listing 字段，并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
-  generate_visual_assets: '调用百炼图像生成模型，以用户上传的商品实物图为参考，生成可用于 Listing 的视觉素材候选。',
+  generate_visual_assets: '先调用视觉策划 Agent，根据商品、平台和商家本轮要求动态规划 2–4 张素材（必须含一张主图），再以原始商品图为参考调用百炼图像模型执行。',
   open_asset_selection: '向商家展示已经真实生成并保存的视觉素材候选，让商家选择交付素材。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
   publish_mock_drafts: '在商家明确确认后，把已审核的 Listing 创建为 Mock 平台草稿。',
@@ -75,7 +75,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
    - 用户明确要上新但没有附件，或明确希望补填平台、市场和资料：调用 start_listing_workflow 展示填写卡片。
    - 普通咨询且无需读取附件：直接回答，不调用工具，不展示卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
-2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 根据原始商品图生成视觉素材 → 人工选图 → 人工确认发布 → 创建 Mock 草稿。
+2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 视觉策划 Agent 动态规划并生成素材 → 人工选图 → 人工确认发布 → 创建 Mock 草稿。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
 4. 发现图文冲突时只能调用 open_conflict_review，在对话中逐项询问商家，绝不能替商家选择，也不要使用弹窗打断对话。
 5. Listing 必须由商家审核；素材必须由商家选择；发布必须得到本轮明确授权。不要绕过人工门禁。
@@ -83,6 +83,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 7. 每轮最多调用一个工具。工具返回后再根据最新状态决定下一步。
 8. 面向商家的自然语言使用简洁中文。调用工具时可以附一句简短说明，但不要伪造工具结果。
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；必须以用户本轮自然语言为准。
+10. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
 
 当前可信状态：
 ${JSON.stringify(state, null, 2)}`;

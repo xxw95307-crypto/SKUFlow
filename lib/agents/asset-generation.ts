@@ -1,41 +1,35 @@
-import type { ListingDraftPayload } from '../domain/listing';
-import type { GeneratedAssetKind } from '../domain/generated-asset';
-import type { ProductFact } from '../domain/product-passport';
+import type { ListingDraftPayload } from '../domain/listing.ts';
+import { GENERATED_ASSET_KINDS, type GeneratedAssetKind } from '../domain/generated-asset.ts';
+import type { PlatformId } from '../domain/platform.ts';
+import type { ProductFact } from '../domain/product-passport.ts';
+
+export const ASSET_PLAN_VERSION = 'dynamic-v1';
+const ALLOWED_SIZES = ['1024*1024', '1024*1280', '1280*1024'] as const;
 
 export interface AssetGenerationSpec {
   kind: GeneratedAssetKind;
   title: string;
   note: string;
-  size: string;
+  size: (typeof ALLOWED_SIZES)[number];
   instruction: string;
 }
 
-export const ASSET_GENERATION_SPECS: readonly AssetGenerationSpec[] = [
-  {
-    kind: 'HERO',
-    title: '平台商品主图',
-    note: '干净、完整地呈现商品本体，适合作为 Listing 首图候选',
-    size: '1024*1024',
-    instruction: '制作一张高端电商商品主图：纯净浅色背景，商品居中完整展示，柔和棚拍光线，轮廓清晰，有自然接触阴影。',
-  },
-  {
-    kind: 'LIFESTYLE',
-    title: '生活方式场景图',
-    note: '表达真实使用情境和商品氛围，不虚构未确认功能',
-    size: '1024*1280',
-    instruction: '制作一张真实自然的生活方式场景图：把同一商品放入符合其用途的日常环境，构图克制，商品仍是视觉主体。',
-  },
-  {
-    kind: 'DETAIL',
-    title: '材质与细节图',
-    note: '突出资料中已确认的材质、结构或工艺细节',
-    size: '1024*1024',
-    instruction: '制作一张商品细节展示图：用近景和局部特写突出可被原图或商品事实支持的材质、结构与工艺，画面专业清晰。',
-  },
-] as const;
+export interface AssetPlanningContext {
+  productName: string;
+  facts: readonly ProductFact[];
+  listings: readonly ListingDraftPayload[];
+  platforms: readonly PlatformId[];
+  markets: readonly string[];
+  sourceImageCount: number;
+  userGuidance?: string | null;
+}
+
+function plainText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 function factText(facts: readonly ProductFact[]): string {
-  return facts.filter((fact) => fact.status !== 'MISSING').slice(0, 30).map((fact) => {
+  return facts.filter((fact) => fact.status !== 'MISSING').slice(0, 40).map((fact) => {
     const value = typeof fact.value === 'string' || typeof fact.value === 'number' || typeof fact.value === 'boolean'
       ? String(fact.value)
       : JSON.stringify(fact.value);
@@ -46,9 +40,67 @@ function factText(facts: readonly ProductFact[]): string {
 function listingText(listings: readonly ListingDraftPayload[]): string {
   return listings.flatMap((listing) => Object.entries(listing.fields))
     .filter(([, value]) => typeof value === 'string' && value.trim())
-    .slice(0, 8)
-    .map(([key, value]) => `${key}：${String(value).slice(0, 240)}`)
+    .slice(0, 12)
+    .map(([key, value]) => `${key}：${String(value).slice(0, 220)}`)
     .join('；');
+}
+
+export function buildAssetPlanningMessages(context: AssetPlanningContext): Array<{ role: 'system' | 'user'; content: string }> {
+  return [{
+    role: 'system',
+    content: `你是跨境电商视觉策划 Agent。请根据商品类目、可信属性、已审核 Listing、目标平台和原图数量，规划最适合该商品的一组视觉素材，而不是套用固定场景。
+
+只输出 JSON：{"assets":[{"kind":"HERO","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的中文生成指令"}]}。
+
+规则：
+1. 总数由你判断，必须为 2–4 张；必须且只能有一张 HERO 商品主图。
+2. 其他 kind 从 LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING 中选择，可按商品需要重复同一 kind，但场景和目的不得重复。
+3. 服装可优先考虑 MODEL、穿搭场景和面料细节；家电可考虑使用场景、结构细节和尺寸感；食品可考虑包装、食用场景和质感特写。必须根据当前商品判断。
+4. size 只能是 1024*1024、1024*1280 或 1280*1024。
+5. instruction 必须明确构图、环境、镜头、光线和要突出的可信事实，并要求保持原商品身份一致。
+6. 不得虚构功能、配件、认证、促销、尺寸或商品事实；不得要求生成价格、标题、角标、平台 Logo 或大段文字。
+7. 如果资料不支持包装、模特、尺寸对照或使用方式，不要规划对应素材。
+8. title、note 和 instruction 使用简体中文。`,
+  }, {
+    role: 'user',
+    content: `商品名称：${context.productName}
+已确认商品事实：${factText(context.facts) || '仅以原图可见内容为准'}
+已审核 Listing：${listingText(context.listings) || '无'}
+目标平台：${context.platforms.join('、') || '未指定'}
+目标市场：${context.markets.join('、') || '未指定'}
+可用原始商品图：${context.sourceImageCount} 张
+商家本轮补充要求：${plainText(context.userGuidance) || '无，由你根据商品与平台自主判断'}
+
+请为这个具体商品制定素材计划。`,
+  }];
+}
+
+export function parseAssetPlan(value: string): AssetGenerationSpec[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(value);
+  } catch {
+    throw new Error('视觉策划 Agent 返回的 JSON 无法解析');
+  }
+  const candidates = raw && typeof raw === 'object' && Array.isArray((raw as { assets?: unknown }).assets)
+    ? (raw as { assets: unknown[] }).assets
+    : [];
+  const assets: AssetGenerationSpec[] = [];
+  for (const candidate of candidates.slice(0, 4)) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const record = candidate as Record<string, unknown>;
+    const kind = plainText(record.kind).toUpperCase();
+    const title = plainText(record.title).slice(0, 40);
+    const note = plainText(record.note).slice(0, 120);
+    const instruction = plainText(record.instruction).slice(0, 1_200);
+    const size = plainText(record.size);
+    if (!GENERATED_ASSET_KINDS.includes(kind as GeneratedAssetKind) || !title || !note || !instruction) continue;
+    if (!ALLOWED_SIZES.includes(size as AssetGenerationSpec['size'])) continue;
+    assets.push({ kind: kind as GeneratedAssetKind, title, note, instruction, size: size as AssetGenerationSpec['size'] });
+  }
+  if (assets.length < 2 || assets.length > 4) throw new Error('视觉策划 Agent 必须规划 2–4 张素材');
+  if (assets.filter((asset) => asset.kind === 'HERO').length !== 1) throw new Error('视觉策划 Agent 必须且只能规划一张商品主图');
+  return assets;
 }
 
 export function buildAssetGenerationPrompt(input: {
@@ -57,7 +109,7 @@ export function buildAssetGenerationPrompt(input: {
   facts: readonly ProductFact[];
   listings: readonly ListingDraftPayload[];
 }): string {
-  return `你是跨境电商商品摄影与视觉设计师。请以输入图片中的真实商品作为唯一主体，生成新的电商视觉素材。
+  return `你是跨境电商商品摄影与视觉设计师。请以输入图片中的真实商品作为唯一主体，执行视觉策划 Agent 制定的单张素材任务。
 
 强制要求：
 1. 严格保持商品身份、外形、颜色、结构、材质、图案、商标和部件数量与参考图一致；不要把商品替换成相似款。
@@ -70,5 +122,5 @@ export function buildAssetGenerationPrompt(input: {
 已确认商品事实：${factText(input.facts) || '以参考图可见内容为准'}
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
 
-本张素材任务：${input.spec.instruction}`;
+视觉策划任务：${input.spec.instruction}`;
 }

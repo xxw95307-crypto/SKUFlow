@@ -1,4 +1,4 @@
-export const GENERATED_ASSET_KINDS = ['HERO', 'LIFESTYLE', 'DETAIL'] as const;
+export const GENERATED_ASSET_KINDS = ['HERO', 'LIFESTYLE', 'DETAIL', 'MODEL', 'FEATURE', 'SCALE', 'PACKAGING'] as const;
 
 export type GeneratedAssetKind = (typeof GENERATED_ASSET_KINDS)[number];
 export type GeneratedAssetStatus = 'COMPLETED' | 'FAILED';

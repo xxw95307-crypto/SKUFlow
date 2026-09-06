@@ -1,6 +1,7 @@
 import { buildFactExtractionMessages, parseFactExtractionOutput, type ExtractionContext } from '../agents/fact-extraction.ts';
 import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/vision-analysis.ts';
 import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
+import { buildAssetPlanningMessages, parseAssetPlan, type AssetGenerationSpec, type AssetPlanningContext } from '../agents/asset-generation.ts';
 import type { BailianConfig, BailianImageConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
@@ -25,6 +26,13 @@ export interface BailianFactExtractionResponse {
 
 export interface BailianListingGenerationResponse {
   output: ListingGenerationOutput;
+  model: string;
+  usage: Record<string, number> | null;
+  requestId: string | null;
+}
+
+export interface BailianAssetPlanningResponse {
+  assets: AssetGenerationSpec[];
   model: string;
   usage: Record<string, number> | null;
   requestId: string | null;
@@ -361,6 +369,54 @@ export async function callBailianListingGeneration(
     };
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼 Listing 生成超时');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function callBailianAssetPlanning(
+  config: BailianConfig,
+  context: AssetPlanningContext,
+  fetchImpl: typeof fetch = fetch,
+): Promise<BailianAssetPlanningResponse> {
+  const apiKey = config.apiKey.trim();
+  if (!apiKey) throw new Error('百炼 API Key 尚未配置');
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const model = config.model.trim();
+  if (!model) throw new Error('BAILIAN_MODEL 尚未配置');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+  try {
+    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: buildAssetPlanningMessages(context),
+        response_format: { type: 'json_object' },
+        enable_thinking: false,
+        temperature: 0.35,
+        max_completion_tokens: 2_048,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
+      throw new Error(`百炼视觉策划失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+    }
+    const payload = await response.json() as ChatCompletionResponse;
+    const content = responseText(payload.choices?.[0]?.message?.content);
+    if (!content) throw new Error('百炼视觉策划返回内容为空');
+    return {
+      assets: parseAssetPlan(content),
+      model: payload.model || model,
+      usage: normalizeUsage(payload.usage),
+      requestId: payload.id || response.headers.get('x-request-id'),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼视觉策划超时');
     throw error;
   } finally {
     clearTimeout(timeout);

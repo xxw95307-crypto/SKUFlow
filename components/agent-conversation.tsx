@@ -104,6 +104,18 @@ function sourceLabel(sourceKind?: string): string {
   return '资料来源';
 }
 
+function assetKindLabel(kind: GeneratedAsset['kind']): string {
+  return {
+    HERO: '商品主图',
+    LIFESTYLE: '场景图',
+    DETAIL: '细节图',
+    MODEL: '模特展示',
+    FEATURE: '卖点视觉',
+    SCALE: '尺寸感展示',
+    PACKAGING: '包装展示',
+  }[kind];
+}
+
 async function responseJson<T>(response: Response, fallback: string): Promise<T> {
   const payload = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || fallback);
@@ -160,9 +172,9 @@ function AssetDialog({ assets, selected, onToggle, onConfirm, onClose }: {
 }) {
   const completed = assets.filter((asset) => asset.status === 'COMPLETED' && asset.imageUrl);
   return <AgentDialog eyebrow="AGENT CHECKPOINT · VISUAL ASSETS" title="视觉候选已准备好" onClose={onClose} wide>
-    <p className="dialog-lead">这些图片由百炼图像模型根据你上传的原始商品图、已确认属性和中文 Listing 生成。请选择要进入交付包的素材。</p>
+    <p className="dialog-lead">视觉策划 Agent 已根据商品类目、已确认属性和目标平台决定本次需要的素材，不再套用固定三张模板。请选择要进入交付包的图片。</p>
     <div className="agent-asset-grid">{completed.map((asset) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
-      <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{asset.kind === 'HERO' ? '商品主图' : asset.kind === 'LIFESTYLE' ? '场景图' : '细节图'}</b></span>
+      <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{assetKindLabel(asset.kind)}</b></span>
       <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
     <div className="dialog-footer"><span>已选择 {selected.length} 个方案</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认素材并继续</button></div>
@@ -582,11 +594,16 @@ export function AgentConversation() {
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
       }
       if (name === 'generate_visual_assets') {
-        setProgressStep(3); setBusyLabel('Agent 正在根据原始商品图生成视觉素材…');
+        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…');
+        const customVisualRequest = /重新生成|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片)|生成.*(?:素材|图片)/.test(requestText);
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
-        }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, { method: 'POST' }), '视觉素材生成失败');
+        }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ force: customVisualRequest, guidance: customVisualRequest ? requestText : null }),
+        }), '视觉素材生成失败');
         setGeneratedAssets(payload.assets);
         selectedAssetsRef.current = [];
         setSelectedAssets([]);
@@ -600,9 +617,9 @@ export function AgentConversation() {
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
         setPhase('assets'); setAssetOpen(true);
-        append('agent', `我已经根据原始商品图生成 ${completed.length} 张视觉素材。请选择要进入交付包的图片。`, '等待素材选择', {
+        append('agent', `我已经根据这个商品的类目、属性、目标平台和原始图片，动态规划并生成 ${completed.length} 张视觉素材。请选择要进入交付包的图片；如果方向不合适，也可以直接告诉我想换成什么场景。`, '等待素材选择', {
           kind: 'assets',
-          items: completed.map((asset) => ({ id: asset.id, label: asset.kind === 'HERO' ? '商品主图' : asset.kind === 'LIFESTYLE' ? '场景图' : '细节图', value: asset.title, detail: asset.note, status: '待选择' })),
+          items: completed.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '待选择' })),
         });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
@@ -784,7 +801,7 @@ export function AgentConversation() {
     const chosen = generatedAssets.filter((asset) => selectedAssetsRef.current.includes(asset.id));
     append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
       kind: 'assets',
-      items: chosen.map((asset) => ({ id: asset.id, label: asset.kind === 'HERO' ? '商品主图' : asset.kind === 'LIFESTYLE' ? '场景图' : '细节图', value: asset.title, detail: asset.note, status: '已选择' })),
+      items: chosen.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '已选择' })),
     });
     if (task) await runAgentTurn(task, `我已选择 ${chosen.length} 个视觉方案，请继续。`, { appendUser: false });
   };

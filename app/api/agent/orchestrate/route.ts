@@ -98,7 +98,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     getLatestCompletedVisionRuns(DB, taskId),
     listLatestGeneratedAssets(DB, taskId),
   ]);
-  const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED');
+  const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith('asset_dynamic_'));
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
@@ -123,8 +123,20 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
 
 function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModelMessage[], state: AgentWorkflowState): AgentToolDefinition[] {
   const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-  const requested = lastUser?.role === 'user' && /重新生成|重写|再生成/.test(lastUser.content);
+  const requested = lastUser?.role === 'user'
+    && /重新生成|重写|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片)|生成.*(?:素材|图片)/.test(lastUser.content);
   if (!requested || state.factCount === 0 || state.openConflictCount > 0 || state.publishedDraftCount > 0) return tools;
+  const visualRequested = state.generatedAssetCount > 0 || (lastUser.role === 'user' && /素材|图片|视觉|主图|场景图/.test(lastUser.content));
+  if (visualRequested && state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
+    return [{
+      type: 'function',
+      function: {
+        name: 'generate_visual_assets',
+        description: '根据用户最新要求重新规划并生成一组视觉素材，替换当前候选批次。',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    }];
+  }
   if (tools.some((item) => item.function.name === 'generate_platform_listings')) return tools;
   return [...tools, {
     type: 'function',
