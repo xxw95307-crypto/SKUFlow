@@ -131,28 +131,30 @@ function AgentDialog({ eyebrow, title, children, onClose, wide = false }: {
   </div>;
 }
 
-function ConflictDialog({ passport, busy, manualValue, onManualValue, onResolve, onClose }: {
+function ConflictConversationCard({ passport, busy, manualValue, onManualValue, onResolve }: {
   passport: ProductPassport;
   busy: boolean;
   manualValue: string;
   onManualValue: (value: string) => void;
   onResolve: (conflict: FactConflict, candidateId?: string) => void;
-  onClose: () => void;
 }) {
   const conflicts = passport.conflicts.filter((item) => item.status === 'OPEN');
   const conflict = conflicts[0];
   if (!conflict) return null;
   const label = passport.facts.find((fact) => fact.key === conflict.factKey)?.label ?? conflict.factKey;
-  return <AgentDialog eyebrow={`需要你决定 · ${conflicts.length} 项待处理`} title={`请确认：${label}`} onClose={onClose}>
-    <div className="decision-intro"><span>!</span><p>图片和文档对这个属性给出了不同答案。Agent 不会擅自覆盖，请选择正确值。</p></div>
-    <div className="decision-options">{conflict.candidates.map((candidate) => <button type="button" disabled={busy} key={candidate.id} onClick={() => onResolve(conflict, candidate.id)}>
-      <small>{sourceLabel(candidate.sourceKind)}</small>
-      <b>{displayValue(candidate.value, candidate.unit)}</b>
-      <span>{candidate.sourceLabel}</span>
-      <strong>采用这个值 →</strong>
-    </button>)}</div>
-    <div className="decision-manual"><label htmlFor="manual-conflict">我已经人工核实</label><div><input id="manual-conflict" value={manualValue} onChange={(event) => onManualValue(event.target.value)} placeholder="输入正确值" maxLength={240} /><button type="button" disabled={busy || !manualValue.trim()} onClick={() => onResolve(conflict)}>{busy ? '写入中…' : '采用人工值'}</button></div></div>
-  </AgentDialog>;
+  return <article className="chat-message agent conflict-conversation">
+    <span className="chat-avatar">AI</span>
+    <div className="conflict-conversation-card">
+      <header><span>需要你确认 · 还剩 {conflicts.length} 项</span><h3>{label} 的真实值是哪一个？</h3><p>图片和文档给出了不同答案。我不会擅自覆盖，你确认后我再继续处理。</p></header>
+      <div className="conflict-quick-replies">{conflict.candidates.map((candidate) => <button type="button" disabled={busy} key={candidate.id} onClick={() => onResolve(conflict, candidate.id)}>
+        <small>{sourceLabel(candidate.sourceKind)}</small>
+        <b>{displayValue(candidate.value, candidate.unit)}</b>
+        <span>{candidate.sourceLabel}</span>
+        <strong>确认采用</strong>
+      </button>)}</div>
+      <div className="conflict-custom-reply"><label htmlFor="conflict-custom-value">以上都不对，直接告诉我真实值</label><div><input id="conflict-custom-value" value={manualValue} onChange={(event) => onManualValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && manualValue.trim() && !busy) onResolve(conflict); }} placeholder="输入真实值" maxLength={240} /><button type="button" disabled={busy || !manualValue.trim()} onClick={() => onResolve(conflict)}>{busy ? '记录中…' : '发送确认'}</button></div></div>
+    </div>
+  </article>;
 }
 
 function AssetDialog({ selected, onToggle, onConfirm, onClose }: {
@@ -221,7 +223,6 @@ export function AgentConversation() {
   const [busyLabel, setBusyLabel] = useState('正在读取最近任务…');
   const [error, setError] = useState('');
   const [composer, setComposer] = useState('');
-  const [conflictOpen, setConflictOpen] = useState(false);
   const [listingOpen, setListingOpen] = useState(false);
   const [assetOpen, setAssetOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -288,7 +289,7 @@ export function AgentConversation() {
     setPendingFiles([]);
     if (composerFileInput.current) composerFileInput.current.value = '';
     setError(''); setComposer('');
-    setConflictOpen(false); setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
+    setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
     updateConversationList(conversation);
     if (!conversation.taskId) {
       const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
@@ -536,8 +537,8 @@ export function AgentConversation() {
         const conflicts = refreshed.passport.conflicts.filter((item) => item.status === 'OPEN');
         const count = conflicts.length;
         if (count === 0) throw new Error('当前没有待确认的商品属性冲突');
-        setPhase('conflict'); setConflictOpen(true);
-        append('agent', `我发现 ${count} 处图文冲突，已经暂停自动执行。请确认真实信息后我再继续。`, '等待人工决策', {
+        setPhase('conflict');
+        append('agent', `我发现 ${count} 处图文冲突，已经暂停自动执行。我们逐项确认，先从第一项开始。`, '等待你的回复', {
           kind: 'decision',
           items: conflicts.slice(0, 8).map((conflict) => ({
             id: conflict.id,
@@ -724,8 +725,10 @@ export function AgentConversation() {
       });
       const remaining = payload.passport.conflicts.filter((item) => item.status === 'OPEN');
       if (remaining.length === 0) {
-        setConflictOpen(false);
         await runAgentTurn(task, '商品属性冲突已经全部由我确认，请继续自动处理。', { appendUser: false });
+      } else {
+        const nextLabel = payload.passport.facts.find((fact) => fact.key === remaining[0].factKey)?.label ?? remaining[0].factKey;
+        append('agent', `已记录“${label}”的确认结果。接下来请确认“${nextLabel}”。`, `还剩 ${remaining.length} 项冲突`);
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : '冲突确认失败'); }
     finally { setActionBusy(false); }
@@ -897,7 +900,7 @@ export function AgentConversation() {
 
           {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>Agent 正在调用商品理解和平台适配工具，完成后会主动通知你。</small></div><em>自动执行中</em></div>}
 
-          {phase === 'conflict' && passport && <div className="chat-action-card checkpoint warning"><div className="checkpoint-icon">!</div><div><span>流程已暂停</span><h3>{openConflictCount} 项属性冲突需要你确认</h3><p>这些决定会同步影响各平台 Listing，Agent 不会自作主张。</p></div><button type="button" onClick={() => setConflictOpen(true)}>打开确认卡</button></div>}
+          {phase === 'conflict' && passport && <ConflictConversationCard passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} />}
 
           {phase === 'listing' && passport && <div className="chat-action-card listing-summary"><div className="action-card-head"><span>LISTING CHECKPOINT</span><b>各平台中文审校稿</b><p>Agent 已按平台字段分别填写。默认只看结果，需要时再展开字段详情。</p></div><div className="platform-review-list">{passport.platformDrafts.map((draft) => {
             const payload = isListingDraftPayload(draft.payload) ? draft.payload : null;
@@ -932,7 +935,6 @@ export function AgentConversation() {
       </footer>
     </section>
 
-    {conflictOpen && passport && <ConflictDialog passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} onClose={() => setConflictOpen(false)} />}
     {listingOpen && task && <AgentDialog eyebrow="AGENT CHECKPOINT · LISTING REVIEW" title="审核各平台中文 Listing" onClose={() => { setListingOpen(false); void refreshAfterListing(); }} wide><div className="embedded-listing"><ListingWorkspace task={task} onAssets={proceedToAssets} /></div></AgentDialog>}
     {assetOpen && <AssetDialog selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}

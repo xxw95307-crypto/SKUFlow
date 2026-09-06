@@ -8,7 +8,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
   generate_platform_listings: '读取所选平台的 Mock Listing 字段，并由 Listing Agent 生成各平台中文审校稿。',
-  open_conflict_review: '暂停自动执行并向商家展示图文冲突确认卡。',
+  open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
   open_asset_selection: '向商家展示视觉素材候选，让商家选择交付素材。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
@@ -68,7 +68,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
 2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 选择素材 → 人工确认发布 → 创建 Mock 草稿。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
-4. 发现图文冲突时只能调用 open_conflict_review，绝不能替商家选择。
+4. 发现图文冲突时只能调用 open_conflict_review，在对话中逐项询问商家，绝不能替商家选择，也不要使用弹窗打断对话。
 5. Listing 必须由商家审核；素材必须由商家选择；发布必须得到本轮明确授权。不要绕过人工门禁。
 6. 只有工具列表中出现的工具才允许调用。不要重复执行已经完成的步骤，除非用户明确要求重新生成。
 7. 每轮最多调用一个工具。工具返回后再根据最新状态决定下一步。
