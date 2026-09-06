@@ -10,7 +10,8 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_platform_listings: '读取所选平台的 Mock Listing 字段，并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
-  open_asset_selection: '向商家展示视觉素材候选，让商家选择交付素材。',
+  generate_visual_assets: '调用百炼图像生成模型，以用户上传的商品实物图为参考，生成可用于 Listing 的视觉素材候选。',
+  open_asset_selection: '向商家展示已经真实生成并保存的视觉素材候选，让商家选择交付素材。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
   publish_mock_drafts: '在商家明确确认后，把已审核的 Listing 创建为 Mock 平台草稿。',
 };
@@ -46,11 +47,12 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
     names.push('generate_platform_listings');
   }
   if (state.generatedDraftCount > 0 && !allDraftsApproved) names.push('open_listing_review');
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.selectedAssetCount === 0) names.push('open_asset_selection');
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.selectedAssetCount > 0 && !state.publishApproved) {
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount === 0) names.push('generate_visual_assets');
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount === 0) names.push('open_asset_selection');
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount > 0 && !state.publishApproved) {
     names.push('open_publish_confirmation');
   }
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.selectedAssetCount > 0 && state.publishApproved) {
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount > 0 && state.publishApproved) {
     names.push('publish_mock_drafts');
   }
   return [...new Set(names)].map(tool);
@@ -73,7 +75,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
    - 用户明确要上新但没有附件，或明确希望补填平台、市场和资料：调用 start_listing_workflow 展示填写卡片。
    - 普通咨询且无需读取附件：直接回答，不调用工具，不展示卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
-2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 选择素材 → 人工确认发布 → 创建 Mock 草稿。
+2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 根据原始商品图生成视觉素材 → 人工选图 → 人工确认发布 → 创建 Mock 草稿。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
 4. 发现图文冲突时只能调用 open_conflict_review，在对话中逐项询问商家，绝不能替商家选择，也不要使用弹窗打断对话。
 5. Listing 必须由商家审核；素材必须由商家选择；发布必须得到本轮明确授权。不要绕过人工门禁。

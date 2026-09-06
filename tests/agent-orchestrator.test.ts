@@ -9,7 +9,7 @@ function state(overrides: Partial<AgentWorkflowState> = {}): AgentWorkflowState 
     taskId: 'task_demo', intakePresented: true, pendingAttachmentCount: 0, taskStatus: 'CREATED', productName: null,
     fileCount: 2, parsedFileCount: 0, imageCount: 1, analyzedImageCount: 0,
     factCount: 0, openConflictCount: 0, draftCount: 2, generatedDraftCount: 0,
-    approvedDraftCount: 0, publishedDraftCount: 0, selectedAssetCount: 0,
+    approvedDraftCount: 0, publishedDraftCount: 0, generatedAssetCount: 0, selectedAssetCount: 0,
     publishApproved: false,
     ...overrides,
   };
@@ -37,11 +37,12 @@ test('chat attachments expose inspection and task creation as separate Agent dec
   ]);
 });
 
-test('publish tool is unavailable until listings, assets and explicit approval are all present', () => {
+test('Agent generates assets before selection and requires explicit approval before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
-  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['open_asset_selection']);
-  assert.deepEqual(availableAgentTools({ ...approved, selectedAssetCount: 2 }).map((item) => item.function.name), ['open_publish_confirmation']);
-  assert.deepEqual(availableAgentTools({ ...approved, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['publish_mock_drafts']);
+  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['generate_visual_assets']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['open_asset_selection']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['open_publish_confirmation']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['publish_mock_drafts']);
 });
 
 test('trusted workflow may safely recover only when exactly one tool is required', () => {

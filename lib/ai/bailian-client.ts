@@ -1,7 +1,7 @@
 import { buildFactExtractionMessages, parseFactExtractionOutput, type ExtractionContext } from '../agents/fact-extraction.ts';
 import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/vision-analysis.ts';
 import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
-import type { BailianConfig } from '../config/bailian.ts';
+import type { BailianConfig, BailianImageConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
 import type { ListingGenerationOutput } from '../domain/listing';
@@ -14,6 +14,7 @@ import {
 } from '../domain/agent-orchestrator.ts';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024;
 
 export interface BailianFactExtractionResponse {
   output: FactExtractionOutput;
@@ -43,6 +44,16 @@ interface ChatCompletionResponse {
   usage?: Record<string, unknown>;
 }
 
+interface ImageGenerationResponse {
+  request_id?: string;
+  code?: string;
+  message?: string;
+  output?: {
+    choices?: Array<{ message?: { content?: Array<{ image?: string }> } }>;
+  };
+  usage?: { image_count?: number; width?: number; height?: number };
+}
+
 function normalizeBaseUrl(value: string): string {
   const baseUrl = value.trim().replace(/\/+$/, '');
   if (!baseUrl) throw new Error('BAILIAN_BASE_URL 尚未配置');
@@ -51,6 +62,12 @@ function normalizeBaseUrl(value: string): string {
     throw new Error('百炼 Base URL 必须使用 aliyuncs.com 的 HTTPS 地址');
   }
   return baseUrl;
+}
+
+function imageGenerationEndpoint(value: string): string {
+  const compatibleBase = normalizeBaseUrl(value);
+  const parsed = new URL(compatibleBase);
+  return `${parsed.origin}/api/v1/services/aigc/multimodal-generation/generation`;
 }
 
 function normalizeUsage(value: Record<string, unknown> | undefined): Record<string, number> | null {
@@ -165,6 +182,81 @@ function toBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
   return btoa(binary);
+}
+
+export interface BailianGeneratedImage {
+  bytes: Uint8Array;
+  contentType: string;
+  model: string;
+  requestId: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+export async function callBailianImageGeneration(
+  config: BailianImageConfig,
+  input: { bytes: Uint8Array; contentType: string; prompt: string; size: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<BailianGeneratedImage> {
+  const apiKey = config.apiKey.trim();
+  if (!apiKey) throw new Error('百炼 API Key 尚未配置');
+  if (!input.contentType.startsWith('image/')) throw new Error('素材生成只接受图片作为参考图');
+  if (input.bytes.length === 0) throw new Error('参考图片内容为空');
+  if (input.bytes.length > MAX_IMAGE_BYTES) throw new Error('参考图片超过 8 MB 限制');
+  const model = config.model.trim();
+  if (!model) throw new Error('BAILIAN_IMAGE_MODEL 尚未配置');
+  const dataUrl = `data:${input.contentType};base64,${toBase64(input.bytes)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180_000);
+
+  try {
+    const response = await fetchImpl(imageGenerationEndpoint(config.baseUrl), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        input: { messages: [{ role: 'user', content: [{ image: dataUrl }, { text: input.prompt }] }] },
+        parameters: {
+          n: 1,
+          size: input.size,
+          prompt_extend: true,
+          watermark: false,
+          negative_prompt: '改变商品本体、错误文字、错误商标、额外商品、低清晰度、畸变、比例错误、虚假配件',
+        },
+      }),
+      signal: controller.signal,
+    });
+    const payload = await response.json() as ImageGenerationResponse;
+    if (!response.ok || payload.code) {
+      const requestId = payload.request_id || response.headers.get('x-request-id');
+      throw new Error(`百炼素材生成失败（${payload.message || `HTTP ${response.status}`}${requestId ? `，Request ID ${requestId}` : ''}）`);
+    }
+    const imageUrl = payload.output?.choices?.flatMap((choice) => choice.message?.content ?? []).find((item) => item.image)?.image;
+    if (!imageUrl) throw new Error('百炼素材生成未返回图片');
+    const parsedImageUrl = new URL(imageUrl);
+    if (parsedImageUrl.protocol !== 'https:' || !parsedImageUrl.hostname.endsWith('.aliyuncs.com')) {
+      throw new Error('百炼返回了不受信任的图片地址');
+    }
+    const downloaded = await fetchImpl(imageUrl, { signal: controller.signal });
+    if (!downloaded.ok) throw new Error(`生成图片下载失败（HTTP ${downloaded.status}）`);
+    const contentLength = Number(downloaded.headers.get('content-length') || 0);
+    if (contentLength > MAX_GENERATED_IMAGE_BYTES) throw new Error('生成图片超过 20 MB 限制');
+    const bytes = new Uint8Array(await downloaded.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > MAX_GENERATED_IMAGE_BYTES) throw new Error('生成图片内容无效');
+    return {
+      bytes,
+      contentType: downloaded.headers.get('content-type')?.split(';')[0] || 'image/png',
+      model,
+      requestId: payload.request_id || response.headers.get('x-request-id'),
+      width: typeof payload.usage?.width === 'number' ? payload.usage.width : null,
+      height: typeof payload.usage?.height === 'number' ? payload.usage.height : null,
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼素材生成超时');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function hashExtractionInput(value: string): Promise<string> {

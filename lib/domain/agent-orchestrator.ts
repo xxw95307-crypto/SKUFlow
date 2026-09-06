@@ -8,6 +8,7 @@ export const AGENT_TOOL_NAMES = [
   'generate_platform_listings',
   'open_conflict_review',
   'open_listing_review',
+  'generate_visual_assets',
   'open_asset_selection',
   'open_publish_confirmation',
   'publish_mock_drafts',
@@ -45,6 +46,7 @@ export interface AgentWorkflowState {
   generatedDraftCount: number;
   approvedDraftCount: number;
   publishedDraftCount: number;
+  generatedAssetCount: number;
   selectedAssetCount: number;
   publishApproved: boolean;
 }

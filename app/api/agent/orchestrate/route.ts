@@ -12,6 +12,7 @@ import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 import { getLatestCompletedVisionRuns } from '@/lib/server/vision-analysis-store';
+import { listLatestGeneratedAssets } from '@/lib/server/generated-asset-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,9 +71,9 @@ function parseMessages(value: unknown): AgentModelMessage[] {
 
 async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState> {
   const taskId = typeof body.taskId === 'string' && /^task_[a-zA-Z0-9-]+$/.test(body.taskId) ? body.taskId : null;
-  const selectedAssetCount = Array.isArray(body.selectedAssetIds)
-    ? new Set(body.selectedAssetIds.filter((item): item is string => typeof item === 'string').slice(0, 20)).size
-    : 0;
+  const selectedAssetIds = new Set(Array.isArray(body.selectedAssetIds)
+    ? body.selectedAssetIds.filter((item): item is string => typeof item === 'string').slice(0, 20)
+    : []);
   const pendingAttachmentCount = typeof body.pendingAttachmentCount === 'number' && Number.isInteger(body.pendingAttachmentCount)
     ? Math.min(12, Math.max(0, body.pendingAttachmentCount))
     : 0;
@@ -80,7 +81,8 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     taskId: null, intakePresented: body.intakePresented === true, pendingAttachmentCount, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
     imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
-    selectedAssetCount, publishApproved: body.publishApproved === true,
+    generatedAssetCount: 0,
+    selectedAssetCount: 0, publishApproved: body.publishApproved === true,
   };
   if (!taskId) return empty;
   const { DB } = getBindings();
@@ -92,7 +94,11 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     `SELECT COUNT(*) AS count FROM file_parse_results
      WHERE task_id = ? AND status IN ('COMPLETED', 'PARTIAL')`,
   ).bind(taskId).first<{ count: number }>();
-  const visionRuns = await getLatestCompletedVisionRuns(DB, taskId);
+  const [visionRuns, generatedAssets] = await Promise.all([
+    getLatestCompletedVisionRuns(DB, taskId),
+    listLatestGeneratedAssets(DB, taskId),
+  ]);
+  const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED');
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
@@ -109,7 +115,8 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     generatedDraftCount: generatedDrafts.length,
     approvedDraftCount: approvedDrafts.length,
     publishedDraftCount: passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length,
-    selectedAssetCount,
+    generatedAssetCount: completedAssets.length,
+    selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length,
     publishApproved: body.publishApproved === true,
   };
 }

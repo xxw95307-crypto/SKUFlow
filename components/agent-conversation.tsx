@@ -20,6 +20,7 @@ import type {
   ConversationSummary,
 } from '@/lib/domain/conversation';
 import type { FactConflict, FactValue, ProductPassport } from '@/lib/domain/product-passport';
+import type { GeneratedAsset } from '@/lib/domain/generated-asset';
 import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { platformRegistry } from '@/lib/platforms/registry';
@@ -41,13 +42,6 @@ interface ToolRun {
   name: AgentToolName;
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
 }
-
-const assetCandidates = [
-  { id: 'main-square', type: '主图 · 1:1', title: '平台白底主图', note: '适用于商品列表和搜索入口' },
-  { id: 'lifestyle', type: '场景图 · 4:5', title: '生活方式场景', note: '用于表达使用情境和商品氛围' },
-  { id: 'infographic', type: '信息图 · 1:1', title: '核心卖点信息图', note: '只展示已确认的商品事实' },
-  { id: 'detail', type: '细节图 · 3:4', title: '结构与材质细节', note: '放大展示外观、工艺或部件' },
-];
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -157,17 +151,19 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetDialog({ selected, onToggle, onConfirm, onClose }: {
+function AssetDialog({ assets, selected, onToggle, onConfirm, onClose }: {
+  assets: GeneratedAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const completed = assets.filter((asset) => asset.status === 'COMPLETED' && asset.imageUrl);
   return <AgentDialog eyebrow="AGENT CHECKPOINT · VISUAL ASSETS" title="视觉候选已准备好" onClose={onClose} wide>
-    <p className="dialog-lead">选择要随 Listing 一起交付的视觉方案。当前是用于跑通流程的 Mock 候选，不伪装成真实模型产物。</p>
-    <div className="agent-asset-grid">{assetCandidates.map((asset, index) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
-      <span className={`agent-asset-preview tone-${index + 1}`}><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{asset.type}</b></span>
-      <strong>{asset.title}</strong><small>{asset.note}</small>
+    <p className="dialog-lead">这些图片由百炼图像模型根据你上传的原始商品图、已确认属性和中文 Listing 生成。请选择要进入交付包的素材。</p>
+    <div className="agent-asset-grid">{completed.map((asset) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
+      <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{asset.kind === 'HERO' ? '商品主图' : asset.kind === 'LIFESTYLE' ? '场景图' : '细节图'}</b></span>
+      <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
     <div className="dialog-footer"><span>已选择 {selected.length} 个方案</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认素材并继续</button></div>
   </AgentDialog>;
@@ -228,6 +224,7 @@ export function AgentConversation() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -269,6 +266,11 @@ export function AgentConversation() {
     return payload.task;
   };
 
+  const fetchGeneratedAssets = async (taskId: string): Promise<GeneratedAsset[]> => {
+    const payload = await responseJson<{ assets: GeneratedAsset[] }>(await fetch(`/api/tasks/${taskId}/generated-assets`), '视觉素材读取失败');
+    return payload.assets;
+  };
+
   const updateConversationList = (conversation: AgentConversationRecord | ConversationSummary) => {
     setConversations((current) => current.some((item) => item.id === conversation.id)
       ? current.map((item) => item.id === conversation.id ? conversation : item)
@@ -293,18 +295,28 @@ export function AgentConversation() {
     updateConversationList(conversation);
     if (!conversation.taskId) {
       const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
-      setTask(null); setPassport(null); setPhase(intakeStarted ? 'intake' : 'idle'); setProgressStep(0);
+      setTask(null); setPassport(null); setGeneratedAssets([]); setPhase(intakeStarted ? 'intake' : 'idle'); setProgressStep(0);
       if (removedInternalLogs) await persistConversation(null, conversation.status);
       return;
     }
-    const [loadedTask, loadedPassport] = await Promise.all([fetchTask(conversation.taskId), fetchPassport(conversation.taskId)]);
-    setTask(loadedTask); setPassport(loadedPassport);
+    const [loadedTask, loadedPassport, loadedAssets] = await Promise.all([
+      fetchTask(conversation.taskId), fetchPassport(conversation.taskId), fetchGeneratedAssets(conversation.taskId),
+    ]);
+    setTask(loadedTask); setPassport(loadedPassport); setGeneratedAssets(loadedAssets);
     let conversationUpgraded = removedInternalLogs;
+    const validAssetIds = new Set(loadedAssets.filter((asset) => asset.status === 'COMPLETED').map((asset) => asset.id));
+    const validSelections = conversation.selectedAssetIds.filter((id) => validAssetIds.has(id));
+    if (validSelections.length !== conversation.selectedAssetIds.length) {
+      selectedAssetsRef.current = validSelections;
+      setSelectedAssets(validSelections);
+      conversationUpgraded = true;
+    }
     if (loadedTask.files.length > 0 && !messagesRef.current.some((message) => message.attachments?.some((file) => file.taskId === loadedTask.id))) {
-      messagesRef.current = [...messagesRef.current, {
+      const historyAttachment: ChatMessage = {
         id: messageId(), role: 'user', text: `本会话已提交 ${loadedTask.files.length} 份商品资料`, meta: '历史资料记录',
         kind: 'files', attachments: taskAttachments(loadedTask),
-      }].slice(-200);
+      };
+      messagesRef.current = [...messagesRef.current, historyAttachment].slice(-200);
       setMessages(messagesRef.current);
       conversationUpgraded = true;
     }
@@ -423,7 +435,7 @@ export function AgentConversation() {
     if (state.openConflictCount > 0) return setPhase('conflict');
     if (state.generatedDraftCount > 0 && state.approvedDraftCount < state.draftCount) return setPhase('listing');
     if (state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
-      return setPhase(state.selectedAssetCount > 0 ? 'publish' : 'assets');
+      return setPhase(state.selectedAssetCount > 0 ? 'publish' : state.generatedAssetCount > 0 ? 'assets' : 'processing');
     }
     setPhase('resume');
   };
@@ -569,11 +581,28 @@ export function AgentConversation() {
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
       }
+      if (name === 'generate_visual_assets') {
+        setProgressStep(3); setBusyLabel('Agent 正在根据原始商品图生成视觉素材…');
+        const payload = await responseJson<{
+          assets: GeneratedAsset[];
+          summary: { total: number; completed: number; failed: number };
+        }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, { method: 'POST' }), '视觉素材生成失败');
+        setGeneratedAssets(payload.assets);
+        selectedAssetsRef.current = [];
+        setSelectedAssets([]);
+        if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary }, checkpoint: false };
+      }
       if (name === 'open_asset_selection') {
+        const assets = await fetchGeneratedAssets(currentTask.id);
+        const completed = assets.filter((asset) => asset.status === 'COMPLETED');
+        if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
+        setGeneratedAssets(assets);
         setPhase('assets'); setAssetOpen(true);
-        append('agent', '平台 Listing 已全部确认。请选择要进入交付包的视觉方案。', '等待素材选择', {
+        append('agent', `我已经根据原始商品图生成 ${completed.length} 张视觉素材。请选择要进入交付包的图片。`, '等待素材选择', {
           kind: 'assets',
-          items: assetCandidates.map((asset) => ({ id: asset.id, label: asset.type, value: asset.title, detail: asset.note, status: '待选择' })),
+          items: completed.map((asset) => ({ id: asset.id, label: asset.kind === 'HERO' ? '商品主图' : asset.kind === 'LIFESTYLE' ? '场景图' : '细节图', value: asset.title, detail: asset.note, status: '待选择' })),
         });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
@@ -641,7 +670,7 @@ export function AgentConversation() {
           body: JSON.stringify({
             taskId: activeTask?.id,
             messages: history,
-            selectedAssetIds: selectedAssets,
+            selectedAssetIds: selectedAssetsRef.current,
             publishApproved: options.publishApproved === true,
             intakePresented: phase === 'intake' || toolRunsRef.current.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED'),
             pendingAttachmentCount: activeFiles.length,
@@ -752,12 +781,12 @@ export function AgentConversation() {
 
   const confirmAssets = async () => {
     setAssetOpen(false);
-    const chosen = assetCandidates.filter((asset) => selectedAssets.includes(asset.id));
+    const chosen = generatedAssets.filter((asset) => selectedAssetsRef.current.includes(asset.id));
     append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
       kind: 'assets',
-      items: chosen.map((asset) => ({ id: asset.id, label: asset.type, value: asset.title, detail: asset.note, status: '已选择' })),
+      items: chosen.map((asset) => ({ id: asset.id, label: asset.kind === 'HERO' ? '商品主图' : asset.kind === 'LIFESTYLE' ? '场景图' : '细节图', value: asset.title, detail: asset.note, status: '已选择' })),
     });
-    if (task) await runAgentTurn(task, `我已选择 ${selectedAssets.length} 个视觉方案，请继续。`, { appendUser: false });
+    if (task) await runAgentTurn(task, `我已选择 ${chosen.length} 个视觉方案，请继续。`, { appendUser: false });
   };
 
   const publish = async () => {
@@ -907,7 +936,7 @@ export function AgentConversation() {
             return <article key={draft.id}><span>{platformNames.get(draft.platformId) ?? draft.platformId}</span><div><b>{payload ? listingTitle(payload) : '等待生成'}</b><small>{draft.market} · {draft.validationIssues.length ? `${draft.validationIssues.length} 项待处理` : '校验通过'}</small></div><em className={draft.status === 'APPROVED' ? 'done' : ''}>{draft.status === 'APPROVED' ? '已确认' : '待审核'}</em></article>;
           })}</div><button className="primary card-primary" type="button" onClick={() => setListingOpen(true)}>审核 {passport.platformDrafts.length} 个平台稿 →</button></div>}
 
-          {phase === 'assets' && <div className="chat-action-card checkpoint success"><div className="checkpoint-icon">▣</div><div><span>视觉素材已准备</span><h3>{selectedAssets.length ? `已选择 ${selectedAssets.length} 个方案` : '请选择要交付的图片'}</h3><p>候选图会与已确认的商品事实和 Listing 保持一致。</p></div><button type="button" onClick={() => setAssetOpen(true)}>打开选图卡</button></div>}
+          {phase === 'assets' && <div className="chat-action-card checkpoint success"><div className="checkpoint-icon">▣</div><div><span>视觉素材已生成</span><h3>{selectedAssets.length ? `已选择 ${selectedAssets.length} 张图片` : `${generatedAssets.filter((asset) => asset.status === 'COMPLETED').length} 张候选图等待选择`}</h3><p>候选图来自原始商品图片，并受已确认商品事实约束。</p></div><button type="button" onClick={() => setAssetOpen(true)}>打开选图卡</button></div>}
 
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
 
@@ -936,7 +965,7 @@ export function AgentConversation() {
     </section>
 
     {listingOpen && task && <AgentDialog eyebrow="AGENT CHECKPOINT · LISTING REVIEW" title="审核各平台中文 Listing" onClose={() => { setListingOpen(false); void refreshAfterListing(); }} wide><div className="embedded-listing"><ListingWorkspace task={task} onAssets={proceedToAssets} /></div></AgentDialog>}
-    {assetOpen && <AssetDialog selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
+    {assetOpen && <AssetDialog assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
     {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}
   </main>;

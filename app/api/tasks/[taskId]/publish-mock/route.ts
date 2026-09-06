@@ -22,7 +22,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     }));
     await DB.batch(results.map(({ draft, mockDraftId }) => {
       const payload: ListingDraftPayload = {
-        ...(draft.payload as ListingDraftPayload),
+        ...(draft.payload as unknown as ListingDraftPayload),
         mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now },
       };
       return DB.prepare(
