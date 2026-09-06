@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { availableAgentTools } from '../lib/agents/commerce-orchestrator.ts';
+import { availableAgentTools, soleRequiredAgentTool } from '../lib/agents/commerce-orchestrator.ts';
 import { callBailianOrchestrator } from '../lib/ai/bailian-client.ts';
 import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
@@ -44,6 +44,14 @@ test('publish tool is unavailable until listings, assets and explicit approval a
   assert.deepEqual(availableAgentTools({ ...approved, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['publish_mock_drafts']);
 });
 
+test('trusted workflow may safely recover only when exactly one tool is required', () => {
+  const oneTool = availableAgentTools(state());
+  assert.equal(soleRequiredAgentTool(oneTool, true)?.function.name, 'parse_product_sources');
+  assert.equal(soleRequiredAgentTool(oneTool, false), null);
+  const severalTools = availableAgentTools(state({ taskId: null, intakePresented: false, pendingAttachmentCount: 2, fileCount: 0, draftCount: 0 }));
+  assert.equal(soleRequiredAgentTool(severalTools, true), null);
+});
+
 test('Bailian orchestrator sends standard function tools and parses one tool call', async () => {
   let requestBody: Record<string, unknown> | null = null;
   const fetchMock: typeof fetch = async (_input, init) => {
@@ -60,6 +68,6 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
   }, fetchMock);
   assert.equal(result.message.toolCalls[0]?.function.name, 'parse_product_sources');
   assert.equal(result.message.content, '先读取资料。');
-  assert.equal(requestBody?.tool_choice, 'required');
+  assert.deepEqual(requestBody?.tool_choice, { type: 'function', function: { name: 'parse_product_sources' } });
   assert.equal(requestBody?.parallel_tool_calls, false);
 });

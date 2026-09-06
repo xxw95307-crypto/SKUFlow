@@ -103,6 +103,7 @@ export async function callBailianOrchestrator(
   if (!model) throw new Error('BAILIAN_MODEL 尚未配置');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
+  const forcedTool = input.requireTool && input.tools.length === 1 ? input.tools[0].function.name : null;
 
   try {
     const response = await fetchImpl(`${baseUrl}/chat/completions`, {
@@ -113,7 +114,9 @@ export async function callBailianOrchestrator(
         messages: [{ role: 'system', content: input.systemPrompt }, ...toBailianMessages(input.messages)],
         ...(input.tools.length ? {
           tools: input.tools,
-          tool_choice: input.requireTool ? 'required' : 'auto',
+          tool_choice: forcedTool
+            ? { type: 'function', function: { name: forcedTool } }
+            : input.requireTool ? 'required' : 'auto',
           parallel_tool_calls: false,
         } : {}),
         enable_thinking: false,

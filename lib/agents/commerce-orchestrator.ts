@@ -56,6 +56,13 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   return [...new Set(names)].map(tool);
 }
 
+export function soleRequiredAgentTool(
+  tools: AgentToolDefinition[],
+  requireTool: boolean,
+): AgentToolDefinition | null {
+  return requireTool && tools.length === 1 ? tools[0] : null;
+}
+
 export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): string {
   return `你是 SKUFlow 的中央上新 Agent，不是客服话术机器人。你的职责是基于可信任务状态，选择一个合适工具推进单商品、多平台 Listing 工作流。
 

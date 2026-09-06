@@ -1,5 +1,5 @@
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, buildCommerceOrchestratorPrompt } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, buildCommerceOrchestratorPrompt, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
@@ -148,14 +148,43 @@ export async function POST(request: Request) {
     const missing = missingBailianConfig(config);
     if (missing.length > 0) return Response.json({ error: `百炼运行时配置不完整：${missing.join(', ')}` }, { status: 503 });
     const tools = withRegenerationTool(availableAgentTools(state), messages, state);
-    const result = await callBailianOrchestrator(config, {
-      systemPrompt: buildCommerceOrchestratorPrompt(state),
-      messages,
-      tools,
-      requireTool: (body.requireAction === true || requestsListingStart(messages, state)) && tools.length > 0,
-    });
+    const requireTool = (body.requireAction === true || requestsListingStart(messages, state)) && tools.length > 0;
+    const soleTool = soleRequiredAgentTool(tools, requireTool);
+    let result;
+    try {
+      result = await callBailianOrchestrator(config, {
+        systemPrompt: buildCommerceOrchestratorPrompt(state),
+        messages,
+        tools,
+        requireTool,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (!soleTool || message !== '百炼 Agent 未返回回复或工具调用') throw error;
+      result = {
+        message: {
+          role: 'assistant' as const,
+          content: '我会继续执行当前唯一可用的安全步骤。',
+          toolCalls: [{
+            id: `call_fallback_${crypto.randomUUID()}`,
+            type: 'function' as const,
+            function: { name: soleTool.function.name, arguments: '{}' },
+          }],
+        },
+        model: config.model,
+        usage: null,
+        requestId: null,
+      };
+    }
     const allowed = new Set(tools.map((item) => item.function.name));
-    const toolCalls = result.message.toolCalls.filter((call) => allowed.has(call.function.name)).slice(0, 1);
+    let toolCalls = result.message.toolCalls.filter((call) => allowed.has(call.function.name)).slice(0, 1);
+    if (toolCalls.length === 0 && soleTool) {
+      toolCalls = [{
+        id: `call_fallback_${crypto.randomUUID()}`,
+        type: 'function',
+        function: { name: soleTool.function.name, arguments: '{}' },
+      }];
+    }
     if (result.message.toolCalls.length > 0 && toolCalls.length === 0) {
       return Response.json({ error: 'Agent 请求了当前状态不允许使用的工具' }, { status: 409 });
     }
