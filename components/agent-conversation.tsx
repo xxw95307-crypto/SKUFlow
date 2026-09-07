@@ -302,7 +302,7 @@ export function AgentConversation() {
     setPendingFiles([]);
     if (composerFileInput.current) composerFileInput.current.value = '';
     setError(''); setComposer('');
-    setListingOpen(false); setAssetOpen(false); setPublishOpen(false);
+    setAssetOpen(false); setPublishOpen(false);
     updateConversationList(conversation);
     if (!conversation.taskId) {
       const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
