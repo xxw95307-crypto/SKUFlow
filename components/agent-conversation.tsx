@@ -163,9 +163,12 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetDialog({ assets, selected, onToggle, onConfirm, onClose }: {
+function AssetDialog({ assets, selected, guidance, onGuidanceChange, onRegenerate, onToggle, onConfirm, onClose }: {
   assets: GeneratedAsset[];
   selected: string[];
+  guidance: string;
+  onGuidanceChange: (value: string) => void;
+  onRegenerate: () => void;
   onToggle: (id: string) => void;
   onConfirm: () => void;
   onClose: () => void;
@@ -177,6 +180,11 @@ function AssetDialog({ assets, selected, onToggle, onConfirm, onClose }: {
       <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{assetKindLabel(asset.kind)}</b></span>
       <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
+    <form className="asset-regeneration" onSubmit={(event) => { event.preventDefault(); if (guidance.trim()) onRegenerate(); }}>
+      <div><b>不满意这批素材？</b><span>直接描述你想调整的场景、构图、人物或光线，Agent 会重新规划并生成一批新候选。</span></div>
+      <textarea value={guidance} onChange={(event) => onGuidanceChange(event.target.value)} maxLength={500} rows={3} placeholder="例如：主图改为俯拍；增加一张户外通勤穿搭图；不要出现模特；整体使用柔和自然光……" />
+      <button className="ghost" type="submit" disabled={!guidance.trim()}>按我的要求重新生成</button>
+    </form>
     <div className="dialog-footer"><span>已选择 {selected.length} 个方案</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认素材并继续</button></div>
   </AgentDialog>;
 }
@@ -236,6 +244,7 @@ export function AgentConversation() {
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
+  const [assetGuidance, setAssetGuidance] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -299,6 +308,7 @@ export function AgentConversation() {
     toolRunsRef.current = conversation.toolRuns;
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
+    setAssetGuidance('');
     setPendingFiles([]);
     if (composerFileInput.current) composerFileInput.current.value = '';
     setError(''); setComposer('');
@@ -796,12 +806,21 @@ export function AgentConversation() {
 
   const confirmAssets = async () => {
     setAssetOpen(false);
+    setAssetGuidance('');
     const chosen = generatedAssets.filter((asset) => selectedAssetsRef.current.includes(asset.id));
     append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
       kind: 'assets',
       items: chosen.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '已选择' })),
     });
     if (task) await runAgentTurn(task, `我已选择 ${chosen.length} 个视觉方案，请继续。`, { appendUser: false });
+  };
+
+  const regenerateAssets = async () => {
+    const guidance = assetGuidance.trim();
+    if (!task || !guidance) return;
+    setAssetGuidance('');
+    setAssetOpen(false);
+    await runAgentTurn(task, `我不满意当前视觉素材，请重新规划并生成一批新素材。我的修改要求：${guidance}`);
   };
 
   const publish = async () => {
@@ -976,7 +995,7 @@ export function AgentConversation() {
       </footer>
     </section>
 
-    {assetOpen && <AssetDialog assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
+    {assetOpen && <AssetDialog assets={generatedAssets} selected={selectedAssets} guidance={assetGuidance} onGuidanceChange={setAssetGuidance} onRegenerate={() => void regenerateAssets()} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
     {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}
   </main>;

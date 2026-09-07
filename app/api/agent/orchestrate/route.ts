@@ -122,12 +122,17 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
 }
 
 function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModelMessage[], state: AgentWorkflowState): AgentToolDefinition[] {
-  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
+  const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : undefined;
   const requested = lastUser?.role === 'user'
     && /重新生成|重写|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片)|生成.*(?:素材|图片)/.test(lastUser.content);
   if (!requested || state.factCount === 0 || state.openConflictCount > 0 || state.publishedDraftCount > 0) return tools;
+  const completedAfterRequest = new Set(messages.slice(lastUserIndex + 1)
+    .filter((message) => message.role === 'tool')
+    .map((message) => message.role === 'tool' ? message.name : null));
   const visualRequested = state.generatedAssetCount > 0 || (lastUser.role === 'user' && /素材|图片|视觉|主图|场景图/.test(lastUser.content));
   if (visualRequested && state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
+    if (completedAfterRequest.has('generate_visual_assets')) return tools;
     return [{
       type: 'function',
       function: {
@@ -137,6 +142,7 @@ function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModel
       },
     }];
   }
+  if (completedAfterRequest.has('generate_platform_listings')) return tools;
   if (tools.some((item) => item.function.name === 'generate_platform_listings')) return tools;
   return [...tools, {
     type: 'function',
