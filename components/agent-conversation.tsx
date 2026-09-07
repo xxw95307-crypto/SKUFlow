@@ -163,30 +163,22 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetDialog({ assets, selected, guidance, onGuidanceChange, onRegenerate, onToggle, onConfirm, onClose }: {
+function AssetConversationCard({ assets, selected, onToggle, onConfirm }: {
   assets: GeneratedAsset[];
   selected: string[];
-  guidance: string;
-  onGuidanceChange: (value: string) => void;
-  onRegenerate: () => void;
   onToggle: (id: string) => void;
   onConfirm: () => void;
-  onClose: () => void;
 }) {
   const completed = assets.filter((asset) => asset.status === 'COMPLETED' && asset.imageUrl);
-  return <AgentDialog eyebrow="AGENT CHECKPOINT · VISUAL ASSETS" title="视觉候选已准备好" onClose={onClose} wide>
-    <p className="dialog-lead">视觉策划 Agent 已根据商品类目、已确认属性和目标平台决定本次需要的素材，不再套用固定三张模板。请选择要进入交付包的图片。</p>
+  return <div className="asset-conversation-card">
+    <header><span>需要你选择 · 视觉素材</span><h3>我为这个商品生成了 {completed.length} 张候选图</h3><p>请选择要进入交付包的图片。你可以选择一张或多张。</p></header>
     <div className="agent-asset-grid">{completed.map((asset) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
       <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{assetKindLabel(asset.kind)}</b></span>
       <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
-    <form className="asset-regeneration" onSubmit={(event) => { event.preventDefault(); if (guidance.trim()) onRegenerate(); }}>
-      <div><b>不满意这批素材？</b><span>直接描述你想调整的场景、构图、人物或光线，Agent 会重新规划并生成一批新候选。</span></div>
-      <textarea value={guidance} onChange={(event) => onGuidanceChange(event.target.value)} maxLength={500} rows={3} placeholder="例如：主图改为俯拍；增加一张户外通勤穿搭图；不要出现模特；整体使用柔和自然光……" />
-      <button className="ghost" type="submit" disabled={!guidance.trim()}>按我的要求重新生成</button>
-    </form>
-    <div className="dialog-footer"><span>已选择 {selected.length} 个方案</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认素材并继续</button></div>
-  </AgentDialog>;
+    <div className="asset-conversation-hint"><span>↳</span><div><b>不满意这批素材？</b><p>直接在下方对话框告诉我修改要求，例如“换成户外场景，不要模特”，我会重新规划并生成。</p></div></div>
+    <footer><span>已选择 {selected.length} 张</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认已选素材并继续</button></footer>
+  </div>;
 }
 
 function PublishDialog({ task, passport, selectedAssets, busy, onPublish, onClose }: {
@@ -239,12 +231,10 @@ export function AgentConversation() {
   const [busyLabel, setBusyLabel] = useState('正在读取最近任务…');
   const [error, setError] = useState('');
   const [composer, setComposer] = useState('');
-  const [assetOpen, setAssetOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
-  const [assetGuidance, setAssetGuidance] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -308,11 +298,10 @@ export function AgentConversation() {
     toolRunsRef.current = conversation.toolRuns;
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
-    setAssetGuidance('');
     setPendingFiles([]);
     if (composerFileInput.current) composerFileInput.current.value = '';
     setError(''); setComposer('');
-    setAssetOpen(false); setPublishOpen(false);
+    setPublishOpen(false);
     updateConversationList(conversation);
     if (!conversation.taskId) {
       const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
@@ -625,11 +614,8 @@ export function AgentConversation() {
         const completed = assets.filter((asset) => asset.status === 'COMPLETED');
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
-        setPhase('assets'); setAssetOpen(true);
-        append('agent', `我已经根据这个商品的类目、属性、目标平台和原始图片，动态规划并生成 ${completed.length} 张视觉素材。请选择要进入交付包的图片；如果方向不合适，也可以直接告诉我想换成什么场景。`, '等待素材选择', {
-          kind: 'assets',
-          items: completed.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '待选择' })),
-        });
+        setPhase('assets');
+        append('agent', `我已经根据这个商品的类目、属性、目标平台和原始图片，动态规划并生成 ${completed.length} 张视觉素材。候选图已经放在当前对话中；不满意的话，直接在下方告诉我想怎么修改。`, '等待素材选择');
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -805,22 +791,12 @@ export function AgentConversation() {
   };
 
   const confirmAssets = async () => {
-    setAssetOpen(false);
-    setAssetGuidance('');
     const chosen = generatedAssets.filter((asset) => selectedAssetsRef.current.includes(asset.id));
     append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
       kind: 'assets',
       items: chosen.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '已选择' })),
     });
     if (task) await runAgentTurn(task, `我已选择 ${chosen.length} 个视觉方案，请继续。`, { appendUser: false });
-  };
-
-  const regenerateAssets = async () => {
-    const guidance = assetGuidance.trim();
-    if (!task || !guidance) return;
-    setAssetGuidance('');
-    setAssetOpen(false);
-    await runAgentTurn(task, `我不满意当前视觉素材，请重新规划并生成一批新素材。我的修改要求：${guidance}`);
   };
 
   const publish = async () => {
@@ -967,7 +943,7 @@ export function AgentConversation() {
 
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
 
-          {phase === 'assets' && <div className="chat-action-card checkpoint success"><div className="checkpoint-icon">▣</div><div><span>视觉素材已生成</span><h3>{selectedAssets.length ? `已选择 ${selectedAssets.length} 张图片` : `${generatedAssets.filter((asset) => asset.status === 'COMPLETED').length} 张候选图等待选择`}</h3><p>候选图来自原始商品图片，并受已确认商品事实约束。</p></div><button type="button" onClick={() => setAssetOpen(true)}>打开选图卡</button></div>}
+          {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} /></article>}
 
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
 
@@ -990,12 +966,11 @@ export function AgentConversation() {
         <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
         {pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
         <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务' : '添加图片、表格或文档'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>
-        <input className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : pendingFiles.length ? '告诉 Agent 要处理附件还是用它们上新…' : phase === 'idle' ? '输入要求，或点击左侧＋添加附件…' : '直接告诉 Agent 你的要求…'} />
+        <input className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : pendingFiles.length ? '告诉 Agent 要处理附件还是用它们上新…' : phase === 'idle' ? '输入要求，或点击左侧＋添加附件…' : phase === 'assets' ? '不满意可直接说：换成户外场景、不要模特……' : '直接告诉 Agent 你的要求…'} />
         <button className="send" type="button" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
       </footer>
     </section>
 
-    {assetOpen && <AssetDialog assets={generatedAssets} selected={selectedAssets} guidance={assetGuidance} onGuidanceChange={setAssetGuidance} onRegenerate={() => void regenerateAssets()} onToggle={toggleAsset} onConfirm={confirmAssets} onClose={() => setAssetOpen(false)} />}
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
     {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}
   </main>;
