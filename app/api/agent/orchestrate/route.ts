@@ -28,7 +28,7 @@ interface RequestBody {
 
 function parseMessages(value: unknown): AgentModelMessage[] {
   if (!Array.isArray(value)) throw new Error('messages must be an array');
-  if (value.length === 0 || value.length > 48) throw new Error('对话消息数量需为 1–48 条');
+  if (value.length === 0 || value.length > 48) throw new Error('对话消息数量需为 1-48 条');
   return value.map((item): AgentModelMessage => {
     if (!item || typeof item !== 'object') throw new Error('对话消息格式无效');
     const record = item as Record<string, unknown>;

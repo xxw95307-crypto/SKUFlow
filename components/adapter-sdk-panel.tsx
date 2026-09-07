@@ -91,16 +91,16 @@ export function AdapterSdkPanel({
         <h3>通用适配器编译台</h3>
         <p>同一份商品护照，通过规则配置编译为任意已登记平台的结构化草稿。</p>
       </div>
-      <div className="sdk-version"><b>v{sdk?.sdkVersion ?? '—'}</b><small>接口 {sdk?.interfaceVersion ?? '—'}</small></div>
+      <div className="sdk-version"><b>v{sdk?.sdkVersion ?? '-'}</b><small>接口 {sdk?.interfaceVersion ?? '-'}</small></div>
       <button type="button" onClick={compileDrafts} disabled={busy || !sdk || passport.platformDrafts.length === 0}>
         {busy ? '编译中…' : '编译通用草稿'}
       </button>
     </div>
 
     <div className="sdk-contract-grid">
-      <article><b>{sdk?.adapters.length ?? '—'}</b><span>已注册 Adapter</span><small>注册表按优先级自动解析</small></article>
-      <article><b>{sdk ? Object.keys(sdk.coverage).length : '—'}</b><span>覆盖平台</span><small>不仅限于首批 4 个平台</small></article>
-      <article><b>{rule?.fields.length ?? '—'}</b><span>通用字段规则</span><small>{rule ? `${rule.id}@${rule.version}` : '正在读取配置'}</small></article>
+      <article><b>{sdk?.adapters.length ?? '-'}</b><span>已注册 Adapter</span><small>注册表按优先级自动解析</small></article>
+      <article><b>{sdk ? Object.keys(sdk.coverage).length : '-'}</b><span>覆盖平台</span><small>不仅限于首批 4 个平台</small></article>
+      <article><b>{rule?.fields.length ?? '-'}</b><span>通用字段规则</span><small>{rule ? `${rule.id}@${rule.version}` : '正在读取配置'}</small></article>
       <article><b>{passport.platformDrafts.length}</b><span>本任务草稿</span><small>按平台 × 市场独立编译</small></article>
     </div>
 

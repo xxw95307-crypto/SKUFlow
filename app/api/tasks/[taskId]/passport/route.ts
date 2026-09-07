@@ -35,7 +35,7 @@ function parseFactPatches(body: unknown): FactPatch[] {
   if (!body || typeof body !== 'object' || !('facts' in body) || !Array.isArray(body.facts)) {
     throw new Error('facts must be an array');
   }
-  if (body.facts.length === 0 || body.facts.length > 20) throw new Error('每次需更新 1–20 个事实字段');
+  if (body.facts.length === 0 || body.facts.length > 20) throw new Error('每次需更新 1-20 个事实字段');
 
   const keys = new Set<string>();
   return body.facts.map((item: unknown) => {
@@ -68,7 +68,7 @@ function parseFactPatches(body: unknown): FactPatch[] {
       ? (value === null ? null : 1)
       : Number(record.confidence);
     if (confidence !== null && (!Number.isFinite(confidence) || confidence < 0 || confidence > 1)) {
-      throw new Error(`事实字段 confidence 需为 0–1：${key}`);
+      throw new Error(`事实字段 confidence 需为 0-1：${key}`);
     }
 
     return { key, label, value, unit: unit || null, status, confidence };

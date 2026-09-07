@@ -38,7 +38,7 @@ function evidenceSource(fact: ProductFact, evidence: EvidenceRecord[], task: Tas
   const filename = task.files.find((file) => file.id === record.fileId)?.name ?? (record.fileId ? '源文件' : '用户输入');
   if (record.locator.kind === 'PAGE') return `${filename} · 第 ${record.locator.page} 页`;
   if (record.locator.kind === 'TABLE_RANGE') return `${filename} · ${record.locator.sheet ?? '工作表'} ${record.locator.range ?? ''}`.trim();
-  if (record.locator.kind === 'TEXT_LINES') return `${filename} · 行 ${record.locator.lineStart ?? '?'}–${record.locator.lineEnd ?? '?'}`;
+  if (record.locator.kind === 'TEXT_LINES') return `${filename} · 行 ${record.locator.lineStart ?? '?'}-${record.locator.lineEnd ?? '?'}`;
   return filename;
 }
 
