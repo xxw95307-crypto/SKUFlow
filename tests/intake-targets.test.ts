@@ -10,10 +10,10 @@ test('infers explicitly named platforms and markets from a chat request', () => 
   assert.equal(targets.marketSource, 'message');
 });
 
-test('uses the MVP defaults when the first message only asks to list the product', () => {
+test('requires seller selection when the message does not name a platform or market', () => {
   const targets = inferIntakeTargets('这些资料是同一个商品，帮我上新这款产品');
-  assert.deepEqual(targets.platforms, ['amazon', 'tiktok-shop', 'shopify', 'shopee']);
-  assert.deepEqual(targets.markets, ['美国']);
-  assert.equal(targets.platformSource, 'default');
-  assert.equal(targets.marketSource, 'default');
+  assert.deepEqual(targets.platforms, []);
+  assert.deepEqual(targets.markets, []);
+  assert.equal(targets.platformSource, 'missing');
+  assert.equal(targets.marketSource, 'missing');
 });

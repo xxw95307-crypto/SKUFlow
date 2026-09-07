@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import type { PlatformId } from '@/lib/domain/platform';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
-import { defaultPlatformIds, platformRegistry } from '@/lib/platforms/registry';
+import { platformRegistry } from '@/lib/platforms/registry';
 
 const richMockPlatforms = new Set<PlatformId>(['amazon', 'tiktok-shop', 'shopify', 'shopee']);
 
@@ -21,8 +21,8 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [] }: 
   initialFiles?: File[];
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [markets, setMarkets] = useState<string[]>(['美国']);
-  const [platforms, setPlatforms] = useState<PlatformId[]>(defaultPlatformIds);
+  const [markets, setMarkets] = useState<string[]>([]);
+  const [platforms, setPlatforms] = useState<PlatformId[]>([]);
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [busy, setBusy] = useState(false);

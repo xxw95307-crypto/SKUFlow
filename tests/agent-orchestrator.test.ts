@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { availableAgentTools, soleRequiredAgentTool } from '../lib/agents/commerce-orchestrator.ts';
+import { availableAgentTools, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '../lib/agents/commerce-orchestrator.ts';
 import { callBailianOrchestrator } from '../lib/ai/bailian-client.ts';
 import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
@@ -35,6 +35,18 @@ test('chat attachments expose inspection and task creation as separate Agent dec
     'create_listing_task_from_attachments',
     'start_listing_workflow',
   ]);
+});
+
+test('listing requests without explicit platform and market can only open seller selection', () => {
+  const attached = state({ taskId: null, intakePresented: false, pendingAttachmentCount: 2, fileCount: 0, draftCount: 0 });
+  const tools = restrictIntakeToolsForListingRequest(availableAgentTools(attached), attached, '帮我上新这款产品');
+  assert.deepEqual(tools.map((item) => item.function.name), ['start_listing_workflow']);
+});
+
+test('listing requests with explicit platform and market can create from attachments directly', () => {
+  const attached = state({ taskId: null, intakePresented: false, pendingAttachmentCount: 2, fileCount: 0, draftCount: 0 });
+  const tools = restrictIntakeToolsForListingRequest(availableAgentTools(attached), attached, '帮我上新到亚马逊美国站');
+  assert.deepEqual(tools.map((item) => item.function.name), ['create_listing_task_from_attachments']);
 });
 
 test('Agent generates assets before selection and requires explicit approval before publishing', () => {

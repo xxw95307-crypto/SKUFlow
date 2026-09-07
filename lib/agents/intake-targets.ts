@@ -1,11 +1,10 @@
 import type { PlatformId } from '../domain/platform.ts';
-import { defaultPlatformIds } from '../platforms/registry.ts';
 
 export interface IntakeTargets {
   platforms: PlatformId[];
   markets: string[];
-  platformSource: 'message' | 'default';
-  marketSource: 'message' | 'default';
+  platformSource: 'message' | 'missing';
+  marketSource: 'message' | 'missing';
 }
 
 const platformMatchers: Array<[PlatformId, RegExp]> = [
@@ -36,9 +35,9 @@ export function inferIntakeTargets(message: string): IntakeTargets {
   const matchedPlatforms = platformMatchers.filter(([, matcher]) => matcher.test(message)).map(([id]) => id);
   const matchedMarkets = marketMatchers.filter(([, matcher]) => matcher.test(message)).map(([market]) => market);
   return {
-    platforms: matchedPlatforms.length ? matchedPlatforms : [...defaultPlatformIds],
-    markets: matchedMarkets.length ? matchedMarkets : ['美国'],
-    platformSource: matchedPlatforms.length ? 'message' : 'default',
-    marketSource: matchedMarkets.length ? 'message' : 'default',
+    platforms: matchedPlatforms,
+    markets: matchedMarkets,
+    platformSource: matchedPlatforms.length ? 'message' : 'missing',
+    marketSource: matchedMarkets.length ? 'message' : 'missing',
   };
 }

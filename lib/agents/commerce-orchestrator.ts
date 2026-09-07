@@ -1,9 +1,10 @@
 import type { AgentToolDefinition, AgentToolName, AgentWorkflowState } from '../domain/agent-orchestrator.ts';
+import { inferIntakeTargets } from './intake-targets.ts';
 
 const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   inspect_chat_attachments: '读取本轮聊天附件并返回可供回答的文档内容、表格内容或图片理解结果。仅当用户是在询问、总结或核对附件，而不是要求创建商品上新任务时调用。',
-  create_listing_task_from_attachments: '把本轮聊天附件保存为一个新的商品上新任务，并根据用户消息识别目标平台和市场。仅当用户明确要求上新、发布商品或制作 Listing 时调用。',
-  start_listing_workflow: '展示平台、市场与资料填写卡片。仅当用户明确要上新，但尚未提供可直接建任务的附件，或明确希望通过表单补充目标与资料时调用。',
+  create_listing_task_from_attachments: '把本轮聊天附件保存为新的商品上新任务。仅当用户明确要求上新，并且已经在消息中明确指定至少一个平台和一个目标市场/站点时调用；不得使用默认平台或默认站点。',
+  start_listing_workflow: '在对话中展示平台、目标市场/站点与资料选择卡。用户明确要上新，但平台或站点任一未指定时必须调用；即使本轮已经附带资料，也要先让卖家主动选择。',
   parse_product_sources: '解析当前任务中的图片、PDF、表格和文本资料，形成统一内容块。',
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
@@ -58,6 +59,20 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   return [...new Set(names)].map(tool);
 }
 
+export function restrictIntakeToolsForListingRequest(
+  tools: AgentToolDefinition[],
+  state: AgentWorkflowState,
+  requestText: string,
+): AgentToolDefinition[] {
+  if (state.taskId || state.pendingAttachmentCount === 0) return tools;
+  const targets = inferIntakeTargets(requestText);
+  const hasExplicitTargets = targets.platformSource === 'message' && targets.marketSource === 'message';
+  const requiredTool: AgentToolName = hasExplicitTargets
+    ? 'create_listing_task_from_attachments'
+    : 'start_listing_workflow';
+  return tools.filter((item) => item.function.name === requiredTool);
+}
+
 export function soleRequiredAgentTool(
   tools: AgentToolDefinition[],
   requireTool: boolean,
@@ -71,8 +86,8 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 工作原则：
 0. 尚未创建商品任务时，你首先是正常的对话助手。附件只是对话上下文，绝不等于开始上新：
    - 用户询问、总结、翻译或核对本轮附件：调用 inspect_chat_attachments，然后基于工具结果回答，不创建任务。
-   - 用户明确要求用本轮附件上新、发布商品或制作 Listing：调用 create_listing_task_from_attachments。
-   - 用户明确要上新但没有附件，或明确希望补填平台、市场和资料：调用 start_listing_workflow 展示填写卡片。
+   - 用户明确要求用本轮附件上新，并且已经明确说出至少一个平台和一个目标市场/站点：调用 create_listing_task_from_attachments。
+   - 用户明确要上新，但平台或目标市场/站点任一没有说清楚：调用 start_listing_workflow 展示选择卡。即使附件已经齐全，也绝不能默认替卖家选择。
    - 普通咨询且无需读取附件：直接回答，不调用工具，不展示卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
 2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 视觉策划 Agent 动态规划并生成素材 → 人工选图 → 人工确认发布 → 创建 Mock 草稿。
@@ -83,6 +98,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 7. 每轮最多调用一个工具。工具返回后再根据最新状态决定下一步。
 8. 面向商家的自然语言使用简洁中文。调用工具时可以附一句简短说明，但不要伪造工具结果。
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；必须以用户本轮自然语言为准。
+9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
 10. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
 
 当前可信状态：

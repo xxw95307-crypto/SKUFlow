@@ -1,5 +1,5 @@
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, buildCommerceOrchestratorPrompt, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
@@ -155,7 +155,7 @@ function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModel
 }
 
 function requestsListingStart(messages: AgentModelMessage[], state: AgentWorkflowState): boolean {
-  if (state.taskId || state.intakePresented) return false;
+  if (state.taskId) return false;
   const lastUser = [...messages].reverse().find((message) => message.role === 'user');
   if (lastUser?.role !== 'user') return false;
   return /(?:我要|我想|帮我|开始|准备|需要).{0,16}(?:上新|发布商品|创建.{0,8}listing|制作.{0,8}listing)/i.test(lastUser.content)
@@ -172,8 +172,14 @@ export async function POST(request: Request) {
     const config = loadBailianConfig(bindings);
     const missing = missingBailianConfig(config);
     if (missing.length > 0) return Response.json({ error: `百炼运行时配置不完整：${missing.join(', ')}` }, { status: 503 });
-    const tools = withRegenerationTool(availableAgentTools(state), messages, state);
-    const requireTool = (body.requireAction === true || requestsListingStart(messages, state)) && tools.length > 0;
+    const listingStartRequested = requestsListingStart(messages, state);
+    const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+    const stateTools = availableAgentTools(state);
+    const targetAwareTools = listingStartRequested && lastUser?.role === 'user'
+      ? restrictIntakeToolsForListingRequest(stateTools, state, lastUser.content)
+      : stateTools;
+    const tools = withRegenerationTool(targetAwareTools, messages, state);
+    const requireTool = (body.requireAction === true || listingStartRequested) && tools.length > 0;
     const soleTool = soleRequiredAgentTool(tools, requireTool);
     let result;
     try {
