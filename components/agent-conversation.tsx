@@ -931,6 +931,12 @@ export function AgentConversation() {
             <div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}><RichMessageContent message={message} /></div>
           </article>)}
 
+          {phase === 'idle' && <div className="agent-starters" aria-label="快速开始">
+            <button type="button" onClick={() => setComposer('我想上新一款商品')}><span>01</span><b>上新一款商品</b><small>告诉 Agent 目标平台，或直接附上商品资料</small></button>
+            <button type="button" onClick={() => setComposer('请帮我检查这份商品资料')}><span>02</span><b>检查商品资料</b><small>识别图片、文档与属性之间可能存在的冲突</small></button>
+            <button type="button" onClick={() => setComposer('我想了解不同平台的 Listing 要求')}><span>03</span><b>咨询平台规则</b><small>了解不同平台的 Listing 字段与发布要求</small></button>
+          </div>}
+
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
 
           {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} /></div></div>}
