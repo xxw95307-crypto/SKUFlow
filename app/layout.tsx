@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './agent-workspace.css';
 
 export const metadata: Metadata = {
   title: 'SKUFlow AI｜跨境商品智能上新',

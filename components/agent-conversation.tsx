@@ -72,8 +72,8 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，我是 SKUFlow Agent。你可以点击左下角“＋”附上商品图片、表格和说明文档，再直接告诉我想上新到哪些平台；也可以先问我有关平台 Listing 的问题。',
-  meta: '等待你的消息',
+  text: '你好，林晓雨。今天想上新什么商品？',
+  meta: '直接描述需求，也可以先附上图片、表格或说明文档',
 }];
 
 function messageId(): string {
@@ -242,6 +242,7 @@ export function AgentConversation() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [railWidth, setRailWidth] = useState(DEFAULT_RAIL_WIDTH);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [contextOpen, setContextOpen] = useState(false);
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerFileInput = useRef<HTMLInputElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
@@ -288,6 +289,7 @@ export function AgentConversation() {
   };
 
   const applyConversation = async (conversation: AgentConversationRecord) => {
+    setContextOpen(false);
     conversationIdRef.current = conversation.id;
     setConversationId(conversation.id);
     const storedMessages = conversation.messages.length ? conversation.messages : initialMessages;
@@ -872,7 +874,7 @@ export function AgentConversation() {
   const approvedCount = passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED').length ?? 0;
   const publishedCount = passport?.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length ?? 0;
 
-  return <main className="agent-shell" style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
+  return <main className="agent-shell agent-shell-v2" style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
     <aside className="agent-rail">
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
       <button className="new-agent-task" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span>新建上新对话</button>
@@ -921,9 +923,15 @@ export function AgentConversation() {
     </aside>
 
     <section className="agent-main">
-      <header className="agent-topbar"><div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? '新对话' : '创建商品上新任务'}</h1></div><div className="agent-model"><span>百炼 Function Calling</span><b>qwen3.8-max · 工具已开启</b></div></header>
+      <header className="agent-topbar">
+        <div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? '新对话' : '创建商品上新任务'}</h1></div>
+        <div className="agent-topbar-actions">
+          <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>
+          {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
+        </div>
+      </header>
 
-      <div className={`agent-chat-layout ${phase === 'idle' ? 'idle' : ''}`}>
+      <div className={`agent-chat-layout ${phase === 'idle' ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           <div className="agent-date">今天 · Agent 工作区</div>
           {messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
@@ -959,13 +967,16 @@ export function AgentConversation() {
           <div ref={threadEnd} />
         </section>
 
-        {phase !== 'idle' && <aside className="agent-context">
-          <div className="context-head"><span>任务进度</span><b>{phase === 'complete' ? '已完成' : '进行中'}</b></div>
+        {phase !== 'idle' && <>
+          <button className="agent-context-scrim" type="button" aria-label="关闭任务进度" onClick={() => setContextOpen(false)} />
+          <aside className="agent-context" aria-label="任务进度">
+          <div className="context-head"><div><span>任务进度</span><b>{phase === 'complete' ? '已完成' : '进行中'}</b></div><button type="button" aria-label="关闭任务进度" onClick={() => setContextOpen(false)}>×</button></div>
           <ol className="agent-progress">{['接收资料', '商品理解', 'Listing 审核', '视觉选择', '发布交付'].map((label, index) => <li className={index < currentStep || phase === 'complete' ? 'done' : index === currentStep ? 'current' : ''} key={label}><span>{index < currentStep || phase === 'complete' ? '✓' : index + 1}</span><div><b>{label}</b><small>{index < currentStep || phase === 'complete' ? '已完成' : index === currentStep ? '当前阶段' : '由 Agent 继续'}</small></div></li>)}</ol>
           {task && <div className="context-summary"><span>当前商品</span><h3>{task.productName}</h3><div><b>{visibleFacts.length}</b><small>属性</small><b>{openConflictCount}</b><small>冲突</small><b>{approvedCount}</b><small>已审核</small></div><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join(' · ')}</p></div>}
           {passport && <details className="agent-evidence"><summary>查看商品事实与证据</summary><div>{visibleFacts.slice(0, 12).map((fact) => <p key={fact.id}><b>{fact.label}</b><span>{displayValue(fact.value, fact.unit)}</span></p>)}{visibleFacts.length > 12 && <small>还有 {visibleFacts.length - 12} 项属性已收起</small>}</div></details>}
           <div className="context-safety"><span>◈</span><div><b>人工门禁已开启</b><small>冲突与发布永远需要你确认</small></div></div>
-        </aside>}
+          </aside>
+        </>}
       </div>
 
       <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''}`}>
