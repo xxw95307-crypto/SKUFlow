@@ -190,10 +190,13 @@ function PublishDialog({ task, passport, selectedAssets, busy, onPublish, onClos
   onClose: () => void;
 }) {
   const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED');
+  const shopifyCount = approved.filter((draft) => draft.platformId === 'shopify').length;
+  const mockCount = approved.length - shopifyCount;
+  const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
   return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose}>
     <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 个平台 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
-    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿</dd></div><div><dt>发布模式</dt><dd>Mock 平台草稿</dd></div></dl>
-    <div className="publish-warning"><b>当前 Demo 边界</b><span>本地化和真实平台 API 尚未连接；本次只会创建 Mock 草稿，不会修改真实店铺。</span></div>
+    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
+    <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若测试店铺未配置，Agent 会暂停并提示所需连接信息。</span></div>
     <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || approved.length === 0} onClick={onPublish}>{busy ? '发布中…' : `确认并创建 ${approved.length} 个草稿`}</button></div>
   </AgentDialog>;
 }
@@ -623,19 +626,25 @@ export function AgentConversation() {
       }
       if (name === 'open_publish_confirmation') {
         setPhase('publish'); setPublishOpen(true);
-        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用发布工具。', '等待最终确认', {
+        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用测试发布工具。Shopify 会创建未公开的 Dev Store 草稿。', '等待最终确认', {
           kind: 'publish',
-          items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · Mock 发布`, status: '待确认' }],
+          items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · 测试草稿`, status: '待确认' }],
         });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
       if (name === 'publish_mock_drafts') {
         if (!publishApproved) throw new Error('发布工具缺少本轮商家明确授权');
-        setProgressStep(4); setBusyLabel('Agent 正在创建 Mock 平台草稿…');
-        const payload = await responseJson<{ passport: ProductPassport; message?: string; results: unknown[] }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), 'Mock 草稿创建失败');
+        setProgressStep(4); setBusyLabel('Agent 正在创建平台测试草稿…');
+        const payload = await responseJson<{
+          passport: ProductPassport;
+          message?: string;
+          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; adminUrl?: string | null; warnings?: string[] }>;
+        }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), '平台测试草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
-        append('agent', `发布工具已完成，已创建 ${payload.results.length} 个平台草稿。`, '发布记录已保存', {
+        const shopifyCreated = payload.results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
+        const warningCount = payload.results.reduce((count, item) => count + (item.warnings?.length ?? 0), 0);
+        append('agent', `测试发布工具已完成，已创建 ${payload.results.length} 个平台草稿。${shopifyCreated ? `其中 ${shopifyCreated} 个已写入 Shopify Dev Store，保持未公开状态。` : ''}${warningCount ? `另有 ${warningCount} 条非阻塞提示可在发布记录中核对。` : ''}`, '发布记录已保存', {
           kind: 'publish',
           items: payload.passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').map((draft) => ({
             id: draft.id,
@@ -810,7 +819,7 @@ export function AgentConversation() {
         items: [{ id: task.id, label: task.productName, value: `${passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED').length ?? 0} 个平台 Listing`, status: '已授权' }],
       });
       await runAgentTurn(task, '我已检查并明确确认发布，请调用发布工具。', { publishApproved: true, appendUser: false });
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Mock 草稿创建失败'); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '平台测试草稿创建失败'); }
     finally { setActionBusy(false); }
   };
 

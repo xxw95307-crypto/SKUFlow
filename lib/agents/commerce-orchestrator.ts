@@ -14,7 +14,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_visual_assets: '先调用视觉策划 Agent，根据商品、平台和商家本轮要求动态规划 2–4 张素材（必须含一张主图），再以原始商品图为参考调用百炼图像模型执行。',
   open_asset_selection: '向商家展示已经真实生成并保存的视觉素材候选，让商家选择交付素材。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
-  publish_mock_drafts: '在商家明确确认后，把已审核的 Listing 创建为 Mock 平台草稿。',
+  publish_mock_drafts: '在商家明确确认后创建平台测试草稿：Shopify 使用官方 Dev Store API 创建未公开 DRAFT，其他平台暂时使用本地 Mock。',
 };
 
 function tool(name: AgentToolName): AgentToolDefinition {
@@ -90,7 +90,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
    - 用户明确要上新，但平台或目标市场/站点任一没有说清楚：调用 start_listing_workflow 展示选择卡。即使附件已经齐全，也绝不能默认替卖家选择。
    - 普通咨询且无需读取附件：直接回答，不调用工具，不展示卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
-2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 视觉策划 Agent 动态规划并生成素材 → 人工选图 → 人工确认发布 → 创建 Mock 草稿。
+2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 视觉策划 Agent 动态规划并生成素材 → 人工选图 → 人工确认发布 → 创建平台测试草稿。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
 4. 发现图文冲突时只能调用 open_conflict_review，在对话中逐项询问商家，绝不能替商家选择，也不要使用弹窗打断对话。
 5. Listing 必须由商家审核；素材必须由商家选择；发布必须得到本轮明确授权。不要绕过人工门禁。

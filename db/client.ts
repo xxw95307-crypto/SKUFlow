@@ -8,6 +8,10 @@ export interface AppBindings {
   BAILIAN_BASE_URL?: string;
   BAILIAN_MODEL?: string;
   BAILIAN_IMAGE_MODEL?: string;
+  SHOPIFY_DEV_STORE_DOMAIN?: string;
+  SHOPIFY_DEV_CLIENT_ID?: string;
+  SHOPIFY_DEV_CLIENT_SECRET?: string;
+  SHOPIFY_API_VERSION?: string;
 }
 
 let schemaPromise: Promise<void> | null = null;

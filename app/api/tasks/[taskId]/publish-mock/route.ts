@@ -2,41 +2,94 @@ import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
+import { loadShopifyDevConfig, publishShopifyDevDraft } from '@/lib/platforms/shopify-dev';
 import { getProductPassport } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
+
+interface DeliveryResult {
+  platformId: string;
+  market: string;
+  draftId: string;
+  status: 'DRAFT_CREATED';
+  mode: 'SHOPIFY_DEV' | 'MOCK';
+  adminUrl?: string | null;
+  warnings?: string[];
+}
+
+async function saveCreatedDraft(DB: D1Database, input: {
+  taskId: string;
+  draftId: string;
+  payload: ListingDraftPayload;
+  now: string;
+}): Promise<void> {
+  await DB.prepare(
+    `UPDATE platform_drafts SET status = 'DRAFT_CREATED', payload_json = ?, updated_at = ?
+     WHERE id = ? AND task_id = ? AND status = 'APPROVED'`,
+  ).bind(JSON.stringify(input.payload), input.now, input.draftId, input.taskId).run();
+}
 
 export async function POST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
-    const { DB } = getBindings();
+    const bindings = getBindings();
+    const { DB } = bindings;
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
     const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload));
-    if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建 Mock 草稿' }, { status: 409 });
-    const now = new Date().toISOString();
-    const results = publishable.map((draft) => ({
-      draft,
-      mockDraftId: `mock_${draft.platformId.replace(/-/g, '_')}_${crypto.randomUUID()}`,
-    }));
-    await DB.batch(results.map(({ draft, mockDraftId }) => {
+    if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建测试草稿' }, { status: 409 });
+
+    const hasShopify = publishable.some((draft) => draft.platformId === 'shopify');
+    const shopifyConfig = hasShopify ? loadShopifyDevConfig(bindings) : null;
+    const results: DeliveryResult[] = [];
+
+    for (const draft of publishable) {
+      const now = new Date().toISOString();
+      const currentPayload = draft.payload as unknown as ListingDraftPayload;
+      if (draft.platformId === 'shopify' && shopifyConfig) {
+        const publication = await publishShopifyDevDraft({
+          config: shopifyConfig,
+          payload: currentPayload,
+          draftId: draft.id,
+          now,
+        });
+        const payload: ListingDraftPayload = { ...currentPayload, testPublication: publication };
+        await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
+        results.push({
+          platformId: draft.platformId,
+          market: draft.market,
+          draftId: publication.productId,
+          status: 'DRAFT_CREATED',
+          mode: 'SHOPIFY_DEV',
+          adminUrl: publication.adminUrl,
+          warnings: publication.warnings,
+        });
+        continue;
+      }
+
+      const mockDraftId = `mock_${draft.platformId.replace(/-/g, '_')}_${crypto.randomUUID()}`;
       const payload: ListingDraftPayload = {
-        ...(draft.payload as unknown as ListingDraftPayload),
+        ...currentPayload,
         mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now },
       };
-      return DB.prepare(
-        `UPDATE platform_drafts SET status = 'DRAFT_CREATED', payload_json = ?, updated_at = ?
-         WHERE id = ? AND task_id = ? AND status = 'APPROVED'`,
-      ).bind(JSON.stringify(payload), now, draft.id, taskId);
-    }));
+      await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
+      results.push({ platformId: draft.platformId, market: draft.market, draftId: mockDraftId, status: 'DRAFT_CREATED', mode: 'MOCK' });
+    }
+
+    const realCount = results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
+    const mockCount = results.length - realCount;
     return Response.json({
-      mode: 'MOCK',
-      message: '模拟平台草稿创建成功，未发送至真实平台',
-      results: results.map(({ draft, mockDraftId }) => ({ platformId: draft.platformId, market: draft.market, draftId: mockDraftId, status: 'DRAFT_CREATED' })),
+      mode: realCount ? (mockCount ? 'MIXED' : 'SHOPIFY_DEV') : 'MOCK',
+      message: [
+        realCount ? `${realCount} 个 Shopify Dev Store 未发布草稿已创建` : '',
+        mockCount ? `${mockCount} 个其他平台本地 Mock 草稿已创建` : '',
+      ].filter(Boolean).join('；'),
+      results,
       passport: await getProductPassport(DB, taskId) as ProductPassport,
     });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : 'Unable to create mock platform drafts' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unable to create platform test drafts';
+    return Response.json({ error: message }, { status: message.includes('尚未配置') ? 503 : 500 });
   }
 }

@@ -48,6 +48,16 @@ export interface ListingDraftPayload {
     status: 'DRAFT_CREATED';
     createdAt: string;
   };
+  testPublication?: {
+    provider: 'SHOPIFY_DEV';
+    productId: string;
+    variantId: string | null;
+    handle: string | null;
+    adminUrl: string | null;
+    status: 'DRAFT_CREATED';
+    createdAt: string;
+    warnings: string[];
+  };
 }
 
 export interface GeneratedListingDraft {
