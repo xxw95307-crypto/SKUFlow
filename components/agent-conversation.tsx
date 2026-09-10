@@ -882,16 +882,34 @@ export function AgentConversation() {
   const openConflictCount = passport?.conflicts.filter((conflict) => conflict.status === 'OPEN').length ?? 0;
   const approvedCount = passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED').length ?? 0;
   const publishedCount = passport?.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length ?? 0;
+  const showWelcomeWorkspace = phase === 'idle' && messages.length === 1 && messages[0]?.id === 'welcome';
+
+  const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
+
+  const composerPlaceholder = phase === 'processing'
+    ? 'Agent 正在执行工具...'
+    : pendingFiles.length
+      ? '告诉 Agent 要处理附件，还是用这些资料上新...'
+      : phase === 'idle'
+        ? '描述你要上新的商品、目标平台，或先上传商品资料...'
+        : phase === 'assets'
+          ? '不满意可以直接说：换成户外场景、不要模特...'
+          : '直接告诉 Agent 你的要求...';
 
   return <main className="agent-shell agent-shell-v2" style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
-    <aside className="agent-rail">
+    <aside className="agent-rail" aria-label="SKUFlow 导航">
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
-      <button className="new-agent-task" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span>新建上新对话</button>
-      <div className="agent-rail-label">上新会话</div>
-      <div className="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
+      <nav className="agent-primary-nav" aria-label="工作区">
+        <a className="active" href="#agent-workspace"><span>⌂</span>AI 上新</a>
+        <a href="#conversation-list"><span>□</span>任务记录</a>
+        <button type="button" disabled={phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
+      </nav>
+      <div className="agent-rail-label">最近对话</div>
+      <div className="conversation-list" id="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
         <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
         <button className="conversation-delete" type="button" disabled={phase === 'processing'} aria-label={`删除会话：${item.title}`} title="删除会话" onClick={() => setDeleteCandidate(item)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v6h2v-6h-2Zm4 0v6h2v-6h-2Z" /></svg></button>
       </div>)}</div>
+      <div className="agent-rail-links"><span>帮助中心</span><span>偏好设置</span></div>
       <div className="agent-rail-note"><i /> <b>Agent 自动推进</b><p>只在事实冲突、主观选择和最终发布时向你提问。</p></div>
       <div className="agent-user"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div></div>
       <button
@@ -931,27 +949,43 @@ export function AgentConversation() {
       ><span /></button>
     </aside>
 
-    <section className="agent-main">
+    <section className="agent-main" id="agent-workspace">
       <header className="agent-topbar">
-        <div><span className="agent-online"><i /> SKUFlow Agent 在线</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? '新对话' : '创建商品上新任务'}</h1></div>
+        <div><span className="agent-online"><i /> SKUFlow Agent</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? 'AI 上新工作台' : '创建商品上新任务'}</h1></div>
         <div className="agent-topbar-actions">
-          <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>
+          {phase !== 'idle' && <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>}
           {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
+          <button className="topbar-new-chat" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span> 新建对话</button>
         </div>
       </header>
 
       <div className={`agent-chat-layout ${phase === 'idle' ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
-          <div className="agent-date">今天 · Agent 工作区</div>
-          {messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
+          {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
+          {!showWelcomeWorkspace && messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
             <span className="chat-avatar">{message.role === 'agent' ? 'AI' : '林'}</span>
             <div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}><RichMessageContent message={message} /></div>
           </article>)}
 
-          {phase === 'idle' && <div className="agent-starters" aria-label="快速开始">
-            <button type="button" onClick={() => setComposer('我想上新一款商品')}><span>01</span><b>上新一款商品</b><small>告诉 Agent 目标平台，或直接附上商品资料</small></button>
-            <button type="button" onClick={() => setComposer('请帮我检查这份商品资料')}><span>02</span><b>检查商品资料</b><small>识别图片、文档与属性之间可能存在的冲突</small></button>
-            <button type="button" onClick={() => setComposer('我想了解不同平台的 Listing 要求')}><span>03</span><b>咨询平台规则</b><small>了解不同平台的 Listing 字段与发布要求</small></button>
+          {showWelcomeWorkspace && <div className="agent-welcome-workspace">
+            <div className="agent-welcome-copy"><small>欢迎使用 SKUFlow</small><h2>今天想上新什么商品？</h2><p>把商品图片、参数表和说明文档交给我，我会整理属性、生成各平台 Listing，并在关键节点请你确认。</p></div>
+            <div className={`welcome-composer ${pendingFiles.length ? 'has-files' : ''}`}>
+              <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
+              {composerAttachments}
+              <textarea rows={4} className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={composerPlaceholder} />
+              <div className="welcome-composer-toolbar">
+                <div><span className="composer-mode">◇ 智能规划</span><button type="button" onClick={() => composerFileInput.current?.click()}>＋ 添加资料</button><button type="button" onClick={() => composerFileInput.current?.click()}>▧ 上传图片</button><button type="button" disabled title="即将支持">⌁ 语音消息</button></div>
+                <small>{composer.length}/2000</small>
+                <button className="send" type="button" aria-label="发送消息" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
+              </div>
+            </div>
+            <div className="ready-prompt-title">从常用任务开始</div>
+            <div className="agent-starters" aria-label="快速开始">
+              <button type="button" onClick={() => setComposer('我想上新一款商品')}><span>＋</span><b>上新一款商品</b><small>上传商品资料，由 Agent 完成多平台上新流程</small></button>
+              <button type="button" onClick={() => setComposer('请帮我检查这份商品资料')}><span>◎</span><b>分析商品资料</b><small>提取属性，并识别图片与文档中的事实冲突</small></button>
+              <button type="button" onClick={() => setComposer('我想了解不同平台的 Listing 要求')}><span>▤</span><b>咨询平台规则</b><small>了解平台字段、内容规范与发布限制</small></button>
+              <button type="button" onClick={() => setComposer('请帮我优化这款商品的 Listing')}><span>◇</span><b>优化 Listing</b><small>改写标题、卖点、描述与平台营销内容</small></button>
+            </div>
           </div>}
 
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
@@ -988,13 +1022,13 @@ export function AgentConversation() {
         </>}
       </div>
 
-      <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''}`}>
+      {!showWelcomeWorkspace && <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''}`}>
         <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
-        {pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
+        {composerAttachments}
         <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务' : '添加图片、表格或文档'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>
-        <input className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendMessage(); }} placeholder={phase === 'processing' ? 'Agent 正在执行工具…' : pendingFiles.length ? '告诉 Agent 要处理附件还是用它们上新…' : phase === 'idle' ? '输入要求，或点击左侧＋添加附件…' : phase === 'assets' ? '不满意可直接说：换成户外场景、不要模特……' : '直接告诉 Agent 你的要求…'} />
+        <textarea rows={1} className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={composerPlaceholder} />
         <button className="send" type="button" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
-      </footer>
+      </footer>}
     </section>
 
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
