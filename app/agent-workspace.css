@@ -588,6 +588,9 @@ body {
 }
 
 .agent-shell-v2 .welcome-composer .agent-composer-input {
+  grid-area: auto;
+  grid-column: 1;
+  grid-row: 2;
   width: 100%;
   min-height: 105px;
   resize: none;
@@ -607,6 +610,8 @@ body {
 }
 
 .agent-shell-v2 .welcome-composer-toolbar {
+  grid-column: 1;
+  grid-row: 3;
   min-height: 48px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1150,6 +1155,8 @@ body {
 }
 
 .agent-shell-v2 .welcome-composer .composer-attachments {
+  grid-column: 1;
+  grid-row: 1;
   padding: 11px 12px 0;
 }
 
