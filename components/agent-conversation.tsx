@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
+import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
   AgentModelMessage,
@@ -479,8 +480,7 @@ export function AgentConversation() {
         const body = new FormData();
         attachmentFiles.forEach((file) => body.append('files', file));
         const payload = await responseJson<Record<string, unknown>>(await fetch('/api/agent/inspect-attachments', { method: 'POST', body }), '附件读取失败');
-        setPendingFiles([]);
-        if (composerFileInput.current) composerFileInput.current.value = '';
+        // Keep the source files available if the seller asks to list them next.
         markToolRun(call, 'COMPLETED');
         return { result: payload, checkpoint: false, consumedAttachments: true };
       }
@@ -489,6 +489,12 @@ export function AgentConversation() {
         if (attachmentFiles.length === 0) throw new Error('本轮没有可用于创建任务的附件');
         setBusyLabel('Agent 正在安全保存资料并创建商品任务…');
         const body = new FormData();
+        const targets = inferConversationTargets(modelHistory.current);
+        if (!targets.platforms.length || !targets.markets.length) {
+          throw new Error('请先明确目标平台和市场，现有附件会保留。');
+        }
+        body.set('platforms', JSON.stringify(targets.platforms));
+        body.set('markets', JSON.stringify(targets.markets));
         body.set('request', requestText);
         attachmentFiles.forEach((file) => body.append('files', file));
         const payload = await responseJson<{
@@ -524,8 +530,14 @@ export function AgentConversation() {
         };
       }
       if (name === 'start_listing_workflow') {
+        const targets = inferConversationTargets(modelHistory.current);
+        if (attachmentFiles.length && targets.platforms.length && targets.markets.length) {
+          markToolRun(call, 'COMPLETED');
+          return executeTool({ ...call, function: { name: 'create_listing_task_from_attachments', arguments: '{}' } }, currentTask, publishApproved, attachmentFiles, requestText);
+        }
         setPhase('intake');
-        append('agent', '好的，我们开始创建商品上新任务。请先选择目标市场和平台，再上传同一个商品的全部资料。', '等待平台与资料');
+        const missing = [!targets.platforms.length ? '目标平台' : '', !targets.markets.length ? '目标市场' : '', !attachmentFiles.length ? '商品资料' : ''].filter(Boolean);
+        append('agent', `${attachmentFiles.length ? `已收到 ${attachmentFiles.length} 份商品资料，无需重复上传。` : ''}还需要确认${missing.join('、')}。你可以直接在对话里告诉我，也可以使用下方选择卡。`, '仅补充缺失信息');
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -713,6 +725,7 @@ export function AgentConversation() {
           await persistConversation(activeTask?.id ?? null, payload.state.publishedDraftCount > 0 ? 'COMPLETED' : 'ACTIVE');
           return;
         }
+        modelHistory.current = history;
         const execution = await executeTool(call, activeTask, options.publishApproved === true, activeFiles, userText);
         if (execution.task) activeTask = execution.task;
         if (execution.consumedAttachments) activeFiles = [];
@@ -751,7 +764,7 @@ export function AgentConversation() {
     await runAgentTurn(
       createdTask,
       `已提交 ${createdTask.files.length} 份同一商品资料，目标平台：${createdTask.platforms.map((id) => platformNames.get(id) ?? id).join('、')}。请自主完成内部步骤，只在需要我决定时暂停。`,
-      { resetHistory: true, appendUser: false },
+      { appendUser: false },
     );
   };
 
@@ -992,7 +1005,7 @@ export function AgentConversation() {
 
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
 
-          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>你只需要提供这些</span><b>目标市场、平台和原始资料</b><p>商品名称、属性、标题和卖点都由 Agent 后续自动生成。</p></div><div className="embedded-intake"><TaskIntake onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} /></div></div>}
+          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>}
 
           {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 

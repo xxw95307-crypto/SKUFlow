@@ -25,7 +25,7 @@ test('orchestrator exposes only tools valid for the trusted workflow state', () 
 test('a blank conversation only exposes the tool that opens the listing intake', () => {
   const blank = state({ taskId: null, intakePresented: false, fileCount: 0, draftCount: 0 });
   assert.deepEqual(availableAgentTools(blank).map((item) => item.function.name), ['start_listing_workflow']);
-  assert.deepEqual(availableAgentTools({ ...blank, intakePresented: true }), []);
+  assert.deepEqual(availableAgentTools({ ...blank, intakePresented: true }).map((item) => item.function.name), ['start_listing_workflow']);
 });
 
 test('chat attachments expose inspection and task creation as separate Agent decisions', () => {

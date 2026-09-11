@@ -41,3 +41,28 @@ export function inferIntakeTargets(message: string): IntakeTargets {
     marketSource: matchedMarkets.length ? 'message' : 'missing',
   };
 }
+
+// Only seller messages supply targeting; assistant suggestions and filenames
+// are not seller choices. Later explicit choices replace earlier ones.
+export function inferConversationTargets(messages: Array<{ role: string; content: string | null }>): IntakeTargets {
+  let targets = inferIntakeTargets('');
+  for (const message of messages) {
+    if (message.role !== 'user' || !message.content) continue;
+    const text = message.content.split('\n\n[本轮聊天附件：')[0];
+    const next = inferIntakeTargets(text);
+    // Ambiguous mentions are not confirmed choices. Ask again instead of
+    // silently retaining a target that the seller may have rejected.
+    if (/[?？]|不要|不选|不做|不想|取消|是否|哪个好|怎么样|区别|\b(?:not|instead|which)\b/i.test(text)) {
+      if (next.platforms.length) { targets.platforms = []; targets.platformSource = 'missing'; }
+      if (next.markets.length) { targets.markets = []; targets.marketSource = 'missing'; }
+      continue;
+    }
+    targets = {
+      platforms: next.platforms.length ? next.platforms : targets.platforms,
+      markets: next.markets.length ? next.markets : targets.markets,
+      platformSource: next.platforms.length ? 'message' : targets.platformSource,
+      marketSource: next.markets.length ? 'message' : targets.marketSource,
+    };
+  }
+  return targets;
+}

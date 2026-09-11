@@ -4,7 +4,7 @@ import { inferIntakeTargets } from './intake-targets.ts';
 const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   inspect_chat_attachments: '读取本轮聊天附件并返回可供回答的文档内容、表格内容或图片理解结果。仅当用户是在询问、总结或核对附件，而不是要求创建商品上新任务时调用。',
   create_listing_task_from_attachments: '把本轮聊天附件保存为新的商品上新任务。仅当用户明确要求上新，并且已经在消息中明确指定至少一个平台和一个目标市场/站点时调用；不得使用默认平台或默认站点。',
-  start_listing_workflow: '在对话中展示平台、目标市场/站点与资料选择卡。用户明确要上新，但平台或站点任一未指定时必须调用；即使本轮已经附带资料，也要先让卖家主动选择。',
+  start_listing_workflow: '仅在用户有上新意图且仍缺少必要信息时，展示只包含缺失项的对话卡。结合本会话此前的选择和附件；已有资料无需重传，目标和资料齐全时直接创建任务。',
   parse_product_sources: '解析当前任务中的图片、PDF、表格和文本资料，形成统一内容块。',
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
@@ -32,7 +32,7 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   if (!state.taskId) {
     const names: AgentToolName[] = [];
     if (state.pendingAttachmentCount > 0) names.push('inspect_chat_attachments', 'create_listing_task_from_attachments');
-    if (!state.intakePresented) names.push('start_listing_workflow');
+    names.push('start_listing_workflow');
     return names.map(tool);
   }
   const names: AgentToolName[] = [];
@@ -97,7 +97,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 6. 只有工具列表中出现的工具才允许调用。不要重复执行已经完成的步骤，除非用户明确要求重新生成。
 7. 每轮最多调用一个工具。工具返回后再根据最新状态决定下一步。
 8. 面向商家的自然语言使用简洁中文。调用工具时可以附一句简短说明，但不要伪造工具结果。
-9. 不要因为检测到附件就自行假设商品、平台或任务意图；必须以用户本轮自然语言为准。
+9. 不要因为检测到附件就自行假设商品、平台或任务意图；结合本会话用户的明确要求和后续补答判断；普通咨询不能触发上新。
 9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
 10. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
 

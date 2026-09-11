@@ -15,14 +15,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function TaskIntake({ onNext, agentManaged = false, initialFiles = [] }: {
+export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], initialTargets }: {
   onNext: (task: TaskSnapshot) => void;
   agentManaged?: boolean;
   initialFiles?: File[];
+  initialTargets?: { platforms: PlatformId[]; markets: string[] };
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [markets, setMarkets] = useState<string[]>([]);
-  const [platforms, setPlatforms] = useState<PlatformId[]>([]);
+  const [markets, setMarkets] = useState<string[]>(initialTargets?.markets ?? []);
+  const [platforms, setPlatforms] = useState<PlatformId[]>(initialTargets?.platforms ?? []);
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
@@ -110,23 +111,23 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [] }: 
   };
 
   return <section className="panel upload-panel">
-    <div className="section-heading"><div><span>ONE PRODUCT · ALL SOURCES</span><h2>上传同一个商品的全部资料</h2><p>图片、说明书和参数表会被统一处理，直接生成可核对的商品属性。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>
+    {!agentManaged && <div className="section-heading"><div><span>ONE PRODUCT · ALL SOURCES</span><h2>上传同一个商品的全部资料</h2><p>图片、说明书和参数表会被统一处理，直接生成可核对的商品属性。</p></div><em>最多 12 个文件 · 合计 40 MB</em></div>}
 
-    <div className="single-product-note"><b>一次任务对应一个商品</b><span>无需提前填写商品名称。请把该商品的图片、参数表、说明书和其他资料一起上传，模型会自动命名、合并属性并检查冲突。</span></div>
+    {!agentManaged && <div className="single-product-note"><b>一次任务对应一个商品</b><span>无需提前填写商品名称。请把该商品的图片、参数表、说明书和其他资料一起上传，模型会自动命名、合并属性并检查冲突。</span></div>}
 
     <div className="intake-fields">
-      <fieldset><legend>目标市场</legend><div className="choice-row">{marketOptions.map((market) => <button type="button" className={markets.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(market)} key={market}>{market}</button>)}</div></fieldset>
-      <fieldset><legend>目标平台 <small>12 个平台均可走 Mock 流程</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>
+      {(!agentManaged || !initialTargets?.markets.length) && <fieldset><legend>目标市场</legend><div className="choice-row">{marketOptions.map((market) => <button type="button" className={markets.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(market)} key={market}>{market}</button>)}</div></fieldset>}
+      {(!agentManaged || !initialTargets?.platforms.length) && <fieldset><legend>目标平台 <small>12 个平台均可走 Mock 流程</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>}
     </div>
 
-    <div className="dropzone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+    {(!agentManaged || files.length === 0) && <div className="dropzone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
       <input ref={fileInput} className="visually-hidden" type="file" multiple accept={acceptedTypes} onChange={(event) => event.target.files && addFiles(event.target.files)} />
       <div className="upload-icon">↑</div><h3>拖入供应商资料，或点击选择文件</h3><p>支持图片、PDF、Excel、CSV、Word 和文本资料</p><button type="button">选择本地文件</button>
-    </div>
+    </div>}
 
     <div className="file-list">{files.length === 0 ? <div className="empty-files"><b>尚未选择文件</b><span>建议至少包含商品主图与一份参数资料</span></div> : files.map((file, index) => <div className="file-row" key={`${file.name}:${file.size}`}><span className="file-icon image">{file.name.split('.').pop()?.slice(0, 3).toUpperCase()}</span><div><b>{file.name}</b><small>{formatBytes(file.size)} · 等待安全上传</small></div><button className="remove-file" type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>移除</button></div>)}</div>
 
     {error && <div className="form-error" role="alert">{error}</div>}
-    {task ? <div className="task-created"><div><span>✓</span><div><b>{busy ? progress : TASK_STATUS_LABELS[task.status]}</b><small>{task.files.length} 个文件属于同一个商品</small></div></div>{!agentManaged && <button type="button" onClick={continueTask} disabled={busy}>{busy ? '处理中…' : '继续生成商品档案 →'}</button>}</div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? progress : agentManaged ? '上传资料并交给 Agent' : '上传资料并生成商品档案'} <span>{agentManaged ? '由 Agent 自主选择下一步工具' : '自动提取属性与检查冲突'}</span></button>}
+    {task ? <div className="task-created"><div><span>✓</span><div><b>{busy ? progress : TASK_STATUS_LABELS[task.status]}</b><small>{task.files.length} 个文件属于同一个商品</small></div></div>{!agentManaged && <button type="button" onClick={continueTask} disabled={busy}>{busy ? '处理中…' : '继续生成商品档案 →'}</button>}</div> : <button className="wide-action" type="button" onClick={createTask} disabled={busy}>{busy ? progress : agentManaged ? '确认并继续' : '上传资料并生成商品档案'} <span>{agentManaged ? '由 Agent 自主选择下一步工具' : '自动提取属性与检查冲突'}</span></button>}
   </section>;
 }

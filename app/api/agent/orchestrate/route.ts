@@ -13,6 +13,7 @@ import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 import { getLatestCompletedVisionRuns } from '@/lib/server/vision-analysis-store';
 import { listLatestGeneratedAssets } from '@/lib/server/generated-asset-store';
+import { inferConversationTargets } from '@/lib/agents/intake-targets';
 
 export const dynamic = 'force-dynamic';
 
@@ -175,8 +176,9 @@ export async function POST(request: Request) {
     const listingStartRequested = requestsListingStart(messages, state);
     const lastUser = [...messages].reverse().find((message) => message.role === 'user');
     const stateTools = availableAgentTools(state);
+    const knownTargets = inferConversationTargets(messages);
     const targetAwareTools = listingStartRequested && lastUser?.role === 'user'
-      ? restrictIntakeToolsForListingRequest(stateTools, state, lastUser.content)
+      ? restrictIntakeToolsForListingRequest(stateTools, state, [...knownTargets.platforms, ...knownTargets.markets].join(' '))
       : stateTools;
     const tools = withRegenerationTool(targetAwareTools, messages, state);
     const requireTool = (body.requireAction === true || listingStartRequested) && tools.length > 0;
@@ -184,7 +186,7 @@ export async function POST(request: Request) {
     let result;
     try {
       result = await callBailianOrchestrator(config, {
-        systemPrompt: buildCommerceOrchestratorPrompt(state),
+        systemPrompt: buildCommerceOrchestratorPrompt(state) + `\n本会话用户已明确提及的目标：${JSON.stringify(knownTargets)}。结合完整上下文判断这些是否为当前上新选择；不是选择或含否定、疑问时先用自然语言澄清。资料和目标齐全时直接创建任务；缺少目标时仅询问缺失项，不要求重新上传现有附件。用户在补答平台或市场时，沿用之前的上新意图和附件。`,
         messages,
         tools,
         requireTool,
