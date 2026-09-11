@@ -724,7 +724,9 @@ export function AgentConversation() {
         }];
         modelHistory.current = history;
         await persistConversation(activeTask?.id ?? null, execution.completed ? 'COMPLETED' : 'ACTIVE');
-        if (execution.checkpoint) return;
+        // A successful publication already supplies the final result. Do not
+        // let a redundant model response turn a completed delivery into an error.
+        if (execution.completed || execution.checkpoint) return;
       }
       throw new Error('Agent 连续执行步骤过多，已安全暂停');
     } catch (caught) {
