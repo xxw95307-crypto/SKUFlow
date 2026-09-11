@@ -1,3 +1,4 @@
+import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
@@ -15,6 +16,7 @@ interface DeliveryResult {
   mode: 'SHOPIFY_DEV' | 'MOCK';
   adminUrl?: string | null;
   warnings?: string[];
+  verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
 }
 
 async function saveCreatedDraft(DB: D1Database, input: {
@@ -48,6 +50,10 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       const now = new Date().toISOString();
       const currentPayload = draft.payload as unknown as ListingDraftPayload;
       if (draft.platformId === 'shopify' && shopifyConfig) {
+        const liveSchema = await fetchShopifyListingSchema(shopifyConfig, { market: draft.market });
+        if (currentPayload.schema.mode !== 'SHOPIFY_API') throw new Error('这份 Shopify 审核稿使用旧版 Mock 字段，请重新生成并确认实际接口审核稿后发布。');
+        const supported = new Set(liveSchema.fields.map((field) => field.key));
+        if (currentPayload.schema.fields.some((field) => !supported.has(field.key))) throw new Error('Shopify 可写字段已发生变化，请重新生成审核稿。');
         const publication = await publishShopifyDevDraft({
           config: shopifyConfig,
           payload: currentPayload,
@@ -64,6 +70,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
           mode: 'SHOPIFY_DEV',
           adminUrl: publication.adminUrl,
           warnings: publication.warnings,
+          verification: publication.verification,
         });
         continue;
       }

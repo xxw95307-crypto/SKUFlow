@@ -1,3 +1,5 @@
+import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
+import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
 import { ensureSchema, getBindings } from '@/db/client';
 import { callBailianListingGeneration } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
@@ -43,15 +45,15 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const categoryLabel = typeof categoryFact?.value === 'string' ? categoryFact.value : '通用商品';
     const productNameFact = passport.facts.find((fact) => fact.key === 'product.name' && fact.value !== null && fact.status !== 'CONFLICT');
     const productName = typeof productNameFact?.value === 'string' ? productNameFact.value : task.product_name;
-    const targets = passport.platformDrafts.map((draft) => ({
+    const targets = await Promise.all(passport.platformDrafts.map(async (draft) => ({
       draftId: draft.id,
-      schema: resolveMockListingSchema({
+      schema: draft.platformId === 'shopify' ? await fetchShopifyListingSchema(loadShopifyDevConfig(bindings), { market: draft.market, categoryLabel }) : resolveMockListingSchema({
         platformId: draft.platformId,
         market: draft.market,
         categoryId: draft.categoryId,
         categoryLabel,
       }),
-    }));
+    })));
     const modelResponse = await callBailianListingGeneration(config, {
       productName,
       facts: passport.facts,

@@ -651,7 +651,7 @@ export function AgentConversation() {
         const payload = await responseJson<{
           passport: ProductPassport;
           message?: string;
-          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; adminUrl?: string | null; warnings?: string[] }>;
+          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }> }>;
         }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), '平台测试草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
         const shopifyCreated = payload.results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
@@ -666,6 +666,9 @@ export function AgentConversation() {
             status: '成功',
           })),
         });
+        for (const result of payload.results.filter((item) => item.mode === 'SHOPIFY_DEV')) {
+          append('agent', `Shopify 字段核对：${(result.verification ?? []).map((item) => `${item.field}：${item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : item.status === 'NOT_SYNCED' ? '未同步' : '核对失败'}`).join('；')}。${result.warnings?.join('；') ?? ''}`, '发布核对结果');
+        }
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false, completed: true };
       }

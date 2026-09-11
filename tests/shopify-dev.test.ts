@@ -67,6 +67,10 @@ test('Shopify connector exchanges credentials, creates draft, and updates the in
       return Response.json({ access_token: 'test-token', expires_in: 86399 });
     }
     const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+    if (body.query.includes('VerifySkuFlowProduct')) {
+      const expected = buildShopifyProductInput(listing(), 'draft_1');
+      return Response.json({ data: { product: { ...expected, id: 'gid://shopify/Product/123', variants: { nodes: [{ id: 'gid://shopify/ProductVariant/456', price: '19.90', inventoryItem: { sku: 'A101-PINK' } }] } } } });
+    }
     if (body.query.includes('CreateSkuFlowProduct')) {
       return Response.json({ data: { productCreate: {
         product: { id: 'gid://shopify/Product/123', title: '测试商品', handle: 'test-product', status: 'DRAFT', variants: { nodes: [{ id: 'gid://shopify/ProductVariant/456' }] } },
@@ -82,7 +86,7 @@ test('Shopify connector exchanges credentials, creates draft, and updates the in
     payload: listing(), draftId: 'draft_1', now: '2026-09-08T00:00:00.000Z',
   }, fetchMock);
 
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
   assert.equal(requests[0]?.url, 'https://demo-store.myshopify.com/admin/oauth/access_token');
   assert.match(String(requests[0]?.init?.body), /grant_type=client_credentials/);
   const createBody = JSON.parse(String(requests[1]?.init?.body)) as { variables: { product: { status: string } } };
@@ -91,6 +95,7 @@ test('Shopify connector exchanges credentials, creates draft, and updates the in
   const variantBody = JSON.parse(String(requests[2]?.init?.body)) as { variables: { variants: Array<{ price: string; inventoryItem: { sku: string } }> } };
   assert.equal(variantBody.variables.variants[0]?.price, '19.9');
   assert.equal(variantBody.variables.variants[0]?.inventoryItem.sku, 'A101-PINK');
+  assert.ok(publication.verification?.filter((item) => item.status !== 'NOT_SYNCED').every((item) => item.status === 'MATCH'));
   assert.equal(publication.productId, 'gid://shopify/Product/123');
   assert.equal(publication.adminUrl, 'https://demo-store.myshopify.com/admin/products/123');
   assert.match(publication.warnings[0] ?? '', /库存数量暂存/);

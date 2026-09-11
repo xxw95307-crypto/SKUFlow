@@ -27,6 +27,7 @@ export interface ShopifyDevPublication {
   status: 'DRAFT_CREATED';
   createdAt: string;
   warnings: string[];
+  verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
 }
 
 type ShopifyGraphqlEnvelope<T> = {
@@ -130,7 +131,7 @@ async function responseMessage(response: Response): Promise<string> {
   }
 }
 
-async function exchangeAccessToken(config: ShopifyDevConfig, fetchImpl: typeof fetch): Promise<string> {
+export async function exchangeAccessToken(config: ShopifyDevConfig, fetchImpl: typeof fetch): Promise<string> {
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
     client_id: config.clientId,
@@ -147,7 +148,7 @@ async function exchangeAccessToken(config: ShopifyDevConfig, fetchImpl: typeof f
   return payload.access_token;
 }
 
-async function shopifyGraphql<T>(config: ShopifyDevConfig, token: string, query: string, variables: Record<string, unknown>, fetchImpl: typeof fetch): Promise<T> {
+export async function shopifyGraphql<T>(config: ShopifyDevConfig, token: string, query: string, variables: Record<string, unknown>, fetchImpl: typeof fetch): Promise<T> {
   const response = await fetchImpl(`https://${config.storeDomain}/admin/api/${config.apiVersion}/graphql.json`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'X-Shopify-Access-Token': token },
@@ -217,6 +218,32 @@ export async function publishShopifyDevDraft(input: {
   if (numericField(input.payload.fields, 'inventory_quantity') !== undefined) {
     warnings.push('库存数量暂存于 SKUFlow，当前测试连接未修改 Shopify 库存地点数量。');
   }
+  const verification: NonNullable<ShopifyDevPublication['verification']> = [];
+  try {
+    const readback = await shopifyGraphql<{ product: Record<string, any> | null }>(input.config, token, `query VerifySkuFlowProduct($id: ID!) { product(id: $id) { id status title descriptionHtml vendor productType tags seo { title description } variants(first: 1) { nodes { id price inventoryItem { sku } } } } }`, { id: product.id }, fetchImpl);
+    if (!readback.product) throw new Error('Shopify 回读未返回商品');
+    const actual = readback.product;
+    const expected = buildShopifyProductInput(input.payload, input.draftId);
+    const compare = (field: string, want: unknown, got: unknown) => {
+      if (want === undefined) return;
+      const normalize = (value: unknown) => Array.isArray(value) ? [...value].sort() : value;
+      verification.push({ field, expected: want, actual: got, status: JSON.stringify(normalize(want)) === JSON.stringify(normalize(got)) ? 'MATCH' : 'MISMATCH' });
+    };
+    for (const key of ['title', 'descriptionHtml', 'vendor', 'productType', 'tags', 'status']) compare(key, expected[key], actual[key]);
+    const seo = expected.seo as Record<string, unknown> | undefined;
+    if (seo) for (const key of ['title', 'description']) compare(`seo.${key}`, seo[key], actual.seo?.[key]);
+    const variant = actual.variants?.nodes?.find((item: { id: string }) => item.id === variantId);
+    compare('variant.sku', sku, variant?.inventoryItem?.sku);
+    compare('variant.price', price, variant?.price === undefined ? undefined : Number(variant.price));
+    for (const item of verification.filter((item) => item.status === 'MISMATCH')) warnings.push(`${item.field} 回读值与提交值不一致，请检查 Shopify 草稿。`);
+  } catch (error) {
+    verification.push({ field: 'product', status: 'UNVERIFIED' });
+    warnings.push(`草稿已创建，但回读核对失败：${error instanceof Error ? error.message : '未知错误'}。请勿重复创建。`);
+  }
+  const syncedKeys = new Set(['title', 'body_html', 'vendor', 'product_type', 'tags', 'seo_title', 'seo_description', 'variant_sku', 'variant_price']);
+  for (const key of Object.keys(input.payload.fields)) if (!syncedKeys.has(key)) verification.push({ field: key, status: 'NOT_SYNCED', expected: input.payload.fields[key] });
+  for (const field of ['商品图片/媒体', '目标市场与语言配置']) verification.push({ field, status: 'NOT_SYNCED' });
+  warnings.push('商品图片/媒体及目标市场与语言配置未同步。');
   const numericProductId = product.id.split('/').pop();
   return {
     provider: 'SHOPIFY_DEV',
@@ -227,5 +254,6 @@ export async function publishShopifyDevDraft(input: {
     status: 'DRAFT_CREATED',
     createdAt: input.now ?? new Date().toISOString(),
     warnings,
+    verification,
   };
 }

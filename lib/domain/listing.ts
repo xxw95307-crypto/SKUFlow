@@ -21,7 +21,7 @@ export interface ListingFieldDefinition {
 }
 
 export interface MockListingSchema {
-  mode: 'MOCK';
+  mode: 'MOCK' | 'SHOPIFY_API';
   platformId: PlatformId;
   platformName: string;
   market: string;
@@ -30,10 +30,13 @@ export interface MockListingSchema {
   categoryLabel: string;
   schemaVersion: string;
   fields: ListingFieldDefinition[];
+  unsupportedFields?: string[];
+  storeDomain?: string;
+  fetchedAt?: string;
 }
 
 export interface ListingDraftPayload {
-  mode: 'MOCK';
+  mode: 'MOCK' | 'SHOPIFY_API';
   reviewLocale: 'zh-CN';
   schema: MockListingSchema;
   fields: Record<string, unknown>;
@@ -57,6 +60,7 @@ export interface ListingDraftPayload {
     status: 'DRAFT_CREATED';
     createdAt: string;
     warnings: string[];
+    verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
   };
 }
 

@@ -117,7 +117,7 @@ export function compileMockListingDraft(input: {
     }
   }
   const payload: ListingDraftPayload = {
-    mode: 'MOCK',
+    mode: input.schema.mode,
     reviewLocale: 'zh-CN',
     schema: input.schema,
     fields,
@@ -135,5 +135,5 @@ export function compileMockListingDraft(input: {
 export function isListingDraftPayload(value: unknown): value is ListingDraftPayload {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  return record.mode === 'MOCK' && Boolean(record.schema && typeof record.schema === 'object') && Boolean(record.fields && typeof record.fields === 'object');
+  return (record.mode === 'MOCK' || record.mode === 'SHOPIFY_API') && Boolean(record.schema && typeof record.schema === 'object') && Boolean(record.fields && typeof record.fields === 'object');
 }
