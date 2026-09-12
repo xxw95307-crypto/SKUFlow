@@ -1,0 +1,141 @@
+import { exchangeAccessToken, shopifyGraphql, buildShopifyProductInput, type ShopifyDevConfig, type ShopifyDevPublication } from './shopify-dev.ts';
+import type { ListingDraftPayload } from '../domain/listing.ts';
+export interface ShopifyVariantRow { options: string; sku: string; price: string | number; quantity?: string | number; barcode?: string; weight?: string | number }
+export interface ShopifyMediaInput { name: string; contentType: string; bytes: ArrayBuffer; alt: string }
+type Verification = NonNullable<ShopifyDevPublication['verification']>;
+const present = (v: unknown) => v !== undefined && v !== null && v !== '';
+export function validateShopifyFields(f: Record<string, any>): string[] {
+  const errors: string[] = [];
+  if (!f.title?.trim()) errors.push('请填写商品标题');
+  for (const key of ['taxable','requires_shipping','inventory_tracked']) if (typeof f[key] !== 'boolean') errors.push(`请确认${({taxable:'是否收税',requires_shipping:'是否需要运输',inventory_tracked:'是否跟踪库存'} as any)[key]}`);
+  const rows = Array.isArray(f.variants) && f.variants.length ? f.variants : [{sku:f.variant_sku,price:f.variant_price,quantity:f.inventory_quantity,weight:f.shipping_weight}];
+  const seen = new Set<string>();
+  for (const [i,row] of rows.entries()) {
+    if (!row || typeof row !== 'object') { errors.push('规格数据格式无效');continue; }
+    if (typeof row.sku !== 'string' || !row.sku.trim()) errors.push(`第 ${i+1} 个规格缺少 SKU`);
+    if (!present(row.price) || !Number.isFinite(Number(row.price)) || Number(row.price)<0) errors.push(`第 ${i+1} 个规格缺少有效售价`);
+    for (const key of ['quantity','weight']) if (present(row[key]) && (!Number.isFinite(Number(row[key])) || Number(row[key])<0 || (key==='quantity' && !Number.isInteger(Number(row[key]))))) errors.push(`第 ${i+1} 个规格的${key==='quantity'?'库存':'重量'}无效`);
+    if (f.requires_shipping && !present(row.weight ?? f.shipping_weight)) errors.push(`第 ${i+1} 个规格需要运输重量`);
+    if (f.inventory_tracked && !present(row.quantity)) errors.push(`第 ${i+1} 个规格需要库存数量`);
+    if (present(row.quantity) && (!f.inventory_tracked || !f.inventory_location)) errors.push('填写库存数量时必须开启跟踪并选择库存地点');
+    let signature = 'default';try { if(row.options) signature=Object.entries(parseOptions(row.options)).sort().map(p=>p.join('=')).join(';'); } catch(e) { errors.push((e as Error).message); } if (seen.has(signature)) errors.push('规格组合不能重复'); seen.add(signature);
+  }
+  if (f.variants?.length) {
+    try { const parsed = f.variants.map((r: ShopifyVariantRow)=>parseOptions(r.options)); const names = Object.keys(parsed[0]).sort().join(); if(parsed.some((r: Record<string,string>)=>Object.keys(r).sort().join()!==names)) errors.push('每个变体必须使用相同的规格名称'); } catch(e) { errors.push((e as Error).message); }
+  }
+  if(f.country_of_origin && !/^[A-Z]{2}$/.test(f.country_of_origin)) errors.push('原产国请使用两位大写国家代码，如 CN');
+  if(f.hs_code && !/^\d{6,10}$/.test(f.hs_code)) errors.push('HS 编码必须为 6–10 位数字');
+  if(rows.length>100) errors.push('当前一次最多发布 100 个变体');
+  return [...new Set(errors)];
+}
+function parseOptions(text: string): Record<string,string> {
+  const pairs = String(text||'').split(/[;；]/).map(p=>p.trim()).filter(Boolean).map(p=>p.split(/[=＝]/).map(v=>v.trim()));
+  if(!pairs.length || pairs.length>3 || pairs.some(p=>p.length!==2 || !p[0] || !p[1]) || new Set(pairs.map(p=>p[0])).size!==pairs.length) throw new Error('规格请填写如“颜色=红色；尺码=M”，最多三个规格名称');
+  return Object.fromEntries(pairs);
+}
+export function buildIntegratedProduct(payload: ListingDraftPayload, draftId: string, files: unknown[] = []) {
+  const f = payload.fields as Record<string, any>;
+  const errors=validateShopifyFields(f); if(errors.length) throw new Error(errors.join('；'));
+  const product = buildShopifyProductInput(payload,draftId);
+  for(const [key,target] of Object.entries({category_id:'category',handle:'handle',template_suffix:'templateSuffix',collection_ids:'collections'})) if(present(f[key])) product[target]=f[key];
+  const rows: ShopifyVariantRow[] = f.variants?.length ? f.variants : [{options:'Title=Default Title',sku:f.variant_sku,price:f.variant_price,quantity:f.inventory_quantity,barcode:f.barcode,weight:f.shipping_weight}];
+  const opts=rows.map(r=>parseOptions(r.options));
+  product.productOptions=Object.keys(opts[0]).map((name,i)=>({name,position:i+1,values:[...new Set(opts.map(o=>o[name]))].map(name=>({name}))}));
+  product.variants=rows.map((r,i)=>({optionValues:Object.entries(opts[i]).map(([optionName,name])=>({optionName,name})),sku:r.sku.trim(),price:String(r.price),
+    ...(present(r.barcode || f.barcode)?{barcode:r.barcode || f.barcode}:{}),
+    ...(present(f.compare_at_price)?{compareAtPrice:String(f.compare_at_price)}:{}),taxable:f.taxable,
+    ...(f.inventory_policy?{inventoryPolicy:f.inventory_policy}:{}),
+    inventoryItem:{tracked:f.inventory_tracked,requiresShipping:f.requires_shipping,
+      ...(present(r.weight ?? f.shipping_weight)?{measurement:{weight:{value:Number(r.weight ?? f.shipping_weight),unit:'KILOGRAMS'}}}:{}),
+      ...(present(f.unit_cost)?{cost:String(f.unit_cost)}:{}),...(f.country_of_origin?{countryCodeOfOrigin:f.country_of_origin}:{}),...(f.hs_code?{harmonizedSystemCode:f.hs_code}:{})},
+    ...(present(r.quantity)?{inventoryQuantities:[{locationId:f.inventory_location,name:'available',quantity:Number(r.quantity)}]}:{})}));
+  if(files.length) product.files=files;
+  return product;
+}
+export async function shopifyLookup(config: ShopifyDevConfig, kind: string, search = '', fetchImpl: typeof fetch = fetch) {
+  const token=await exchangeAccessToken(config,fetchImpl);
+  if(kind==='categories') {
+    const d=await shopifyGraphql<any>(config,token,'query($s:String){taxonomy{categories(first:100,search:$s){nodes{id fullName}}}}',{s:search || null},fetchImpl);
+    return d.taxonomy.categories.nodes.map((n:any)=>({value:n.id,label:n.fullName}));
+  }
+  if(kind==='collections') {
+    const d=await shopifyGraphql<any>(config,token,'query($q:String){collections(first:100,query:$q){nodes{id title}}}',{q:search || null},fetchImpl);
+    return d.collections.nodes.map((n:any)=>({value:n.id,label:n.title}));
+  }
+  if(kind==='locations') {
+    const d=await shopifyGraphql<any>(config,token,'{locations(first:100){nodes{id name isActive}}}',{},fetchImpl);
+    return d.locations.nodes.filter((n:any)=>n.isActive).map((n:any)=>({value:n.id,label:n.name}));
+  }
+  throw new Error('不支持的选项类型');
+}
+async function uploadMedia(config: ShopifyDevConfig, token:string, media:ShopifyMediaInput[], fetchImpl:typeof fetch) {
+  const files=[];
+  for(const item of media) {
+    const d=await shopifyGraphql<any>(config,token,`mutation($input:[StagedUploadInput!]!){stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}} userErrors{message}}}`,{input:[{filename:item.name,mimeType:item.contentType,httpMethod:'POST',resource:'PRODUCT_IMAGE'}]},fetchImpl);
+    if(d.stagedUploadsCreate.userErrors.length) throw new Error(d.stagedUploadsCreate.userErrors.map((e:any)=>e.message).join('；'));
+    const target=d.stagedUploadsCreate.stagedTargets[0];if(!target)throw new Error('Shopify 未返回上传地址');
+    const form=new FormData();for(const p of target.parameters)form.append(p.name,p.value);form.append('file',new Blob([item.bytes],{type:item.contentType}),item.name);
+    const response=await fetchImpl(target.url,{method:'POST',body:form});if(!response.ok)throw new Error(`图片上传失败 ${response.status}`);
+    files.push({originalSource:target.resourceUrl,contentType:'IMAGE',alt:item.alt});
+  }
+  return files;
+}
+export async function publishIntegratedShopify(input:{config:ShopifyDevConfig;payload:ListingDraftPayload;draftId:string;media:ShopifyMediaInput[];onCreated?:(productId:string)=>Promise<void>},fetchImpl:typeof fetch=fetch):Promise<ShopifyDevPublication> {
+  const {config,payload,draftId}=input;
+  const expected=buildIntegratedProduct(payload,draftId);
+  const token=await exchangeAccessToken(config,fetchImpl);
+  const access=await shopifyGraphql<any>(config,token,'{currentAppInstallation{accessScopes{handle}}}',{},fetchImpl);
+  const scopes=access.currentAppInstallation.accessScopes.map((s:any)=>s.handle);
+  const quantities=(expected.variants as any[]).some(v=>v.inventoryQuantities?.length);
+  if(quantities && (!scopes.includes('write_inventory') || !scopes.includes('read_locations')))throw new Error('请先授权 Shopify 库存写入和地点读取权限（write_inventory、read_locations），再发布');
+  if(quantities) { const locations=await shopifyLookup(config,'locations','',fetchImpl); if(!locations.some((l:any)=>l.value===payload.fields.inventory_location))throw new Error('库存地点无效或已停用'); }
+  expected.files=input.media.map(m=>({alt:m.alt}));
+  // Idempotent recovery: a previous request may have created the product before
+  // its response was persisted. Never create another product for that draft.
+  const existing=await shopifyGraphql<any>(config,token,'query($q:String!){products(first:2,query:$q){nodes{id}}}',{q:`tag:skuflow-draft-${draftId}`},fetchImpl);
+  let id=existing.products.nodes[0]?.id as string|undefined;
+  if(existing.products.nodes.length>1)throw new Error('检测到重复草稿，请先在 Shopify 核对');
+  if(!id) {
+    const files=await uploadMedia(config,token,input.media,fetchImpl);if(files.length)expected.files=files;else delete expected.files;
+    const d=await shopifyGraphql<any>(config,token,`mutation($input:ProductSetInput!){productSet(input:$input,synchronous:true){product{id} userErrors{field message}}}`,{input:expected},fetchImpl);
+    if(d.productSet.userErrors.length)throw new Error(d.productSet.userErrors.map((e:any)=>`${e.field?.join('.')}: ${e.message}`).join('；'));
+    id=d.productSet.product?.id;if(!id)throw new Error('Shopify 未返回商品 ID');
+  }
+  await input.onCreated?.(id);
+  const warnings:string[]=[];let verification:Verification=[];let variantId:string|null=null;let handle:string|null=null;
+  try {
+    const actual=await readIntegratedProduct(config,token,id,quantities,fetchImpl);
+    verification=compareIntegratedProduct(expected,actual);
+    variantId=actual.variants.nodes[0]?.id??null;handle=actual.handle;
+    for(const v of verification)if(v.status!=='MATCH')warnings.push(`${v.field}：${v.status==='PENDING'?'Shopify 正在处理媒体，稍后需重新核对':'与提交值不一致'}`);
+  }catch(e){verification=[{field:'product',status:'UNVERIFIED'}];warnings.push(`草稿已创建，回读失败：${(e as Error).message}。重试会核对原草稿，不会重新创建。`);}
+  warnings.push('销售渠道、市场本地化和分类/自定义元字段尚未写入；商品保持 DRAFT。');
+  return {provider:'SHOPIFY_DEV',productId:id,variantId,handle,adminUrl:`https://${config.storeDomain}/admin/products/${id.split('/').pop()}`,status:'DRAFT_CREATED',createdAt:new Date().toISOString(),warnings,verification,submittedProduct:{...expected,files:input.media.map(m=>({alt:m.alt}))}};
+}
+export function compareIntegratedProduct(expected:Record<string,any>,actual:any):Verification {
+  const result:Verification=[];
+  const check=(field:string,e:unknown,a:unknown)=>{if(e===undefined)return;const norm=(v:unknown)=>Array.isArray(v)?[...v].sort():v;result.push({field,expected:e,actual:a,status:JSON.stringify(norm(e))===JSON.stringify(norm(a))?'MATCH':'MISMATCH'});};
+  for(const key of ['title','descriptionHtml','vendor','productType','tags','status','handle','templateSuffix'])check(key,expected[key],actual[key]);
+  check('category',expected.category,actual.category?.id);check('collections',expected.collections,actual.collections.nodes.map((n:any)=>n.id));
+  for(const key of ['title','description'])check(`seo.${key}`,expected.seo?.[key],actual.seo?.[key]);
+  check('变体数量',expected.variants.length,actual.variants.nodes.length);
+  for(const [i,v] of expected.variants.entries()) {
+    const a=actual.variants.nodes.find((n:any)=>v.optionValues.every((o:any)=>n.selectedOptions.some((s:any)=>s.name===o.optionName&&s.value===o.name)));
+    for(const key of ['sku','barcode','taxable','inventoryPolicy'])check(`规格${i+1}.${key}`,v[key],a?.[key]);
+    for(const key of ['price','compareAtPrice'])check(`规格${i+1}.${key}`,v[key]===undefined?undefined:Number(v[key]),a?.[key]===undefined?undefined:Number(a[key]));
+    for(const key of ['tracked','requiresShipping','countryCodeOfOrigin','harmonizedSystemCode'])check(`规格${i+1}.${key}`,v.inventoryItem[key],a?.inventoryItem?.[key]);
+    check(`规格${i+1}.成本`,v.inventoryItem.cost===undefined?undefined:Number(v.inventoryItem.cost),a?.inventoryItem?.unitCost?Number(a.inventoryItem.unitCost.amount):undefined);
+    const weight=a?.inventoryItem?.measurement?.weight;const factor:Record<string,number>={KILOGRAMS:1,GRAMS:0.001,POUNDS:0.45359237,OUNCES:0.028349523125};
+    check(`规格${i+1}.运输重量kg`,v.inventoryItem.measurement?.weight.value,weight?Math.round(weight.value*factor[weight.unit]*1e6)/1e6:undefined);
+    for(const q of v.inventoryQuantities??[])check(`规格${i+1}.地点库存`,q.quantity,a?.inventoryItem.inventoryLevels.nodes.find((l:any)=>l.location.id===q.locationId)?.quantities.find((q:any)=>q.name==='available')?.quantity);
+  }
+  if(expected.files?.length){check('媒体数量',expected.files.length,actual.media.nodes.length);for(const f of expected.files){const m=actual.media.nodes.find((m:any)=>m.alt===f.alt);result.push({field:`图片 ${f.alt}`,status:m?.status==='READY'?'MATCH':m?.status==='FAILED'||!m?'MISMATCH':'PENDING',expected:'READY',actual:m?.status});}}
+  return result;
+}
+
+export async function readIntegratedProduct(config:ShopifyDevConfig,token:string,id:string,quantities:boolean,fetchImpl:typeof fetch=fetch) {
+    const inventory = quantities ? 'inventoryLevels(first:100){nodes{location{id} quantities(names:["available"]){name quantity}}}' : '';
+    const query=`query($id:ID!){product(id:$id){id title descriptionHtml vendor productType tags status handle templateSuffix category{id} collections(first:100){nodes{id}} seo{title description} media(first:100){nodes{id alt status}} variants(first:100){nodes{id sku barcode price compareAtPrice taxable inventoryPolicy selectedOptions{name value} inventoryItem{tracked requiresShipping countryCodeOfOrigin harmonizedSystemCode unitCost{amount} measurement{weight{value unit}} ${inventory}}}}}}`;
+    const data=await shopifyGraphql<any>(config,token,query,{id},fetchImpl);
+    if(!data.product)throw new Error('未返回商品');return data.product;
+}

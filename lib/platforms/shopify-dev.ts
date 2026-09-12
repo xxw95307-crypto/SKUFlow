@@ -27,7 +27,8 @@ export interface ShopifyDevPublication {
   status: 'DRAFT_CREATED';
   createdAt: string;
   warnings: string[];
-  verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
+  submittedProduct?: Record<string, any>;
+    verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
 }
 
 type ShopifyGraphqlEnvelope<T> = {

@@ -1,6 +1,6 @@
 import type { PlatformId } from './platform';
 
-export type ListingFieldType = 'string' | 'text' | 'number' | 'string_array';
+export type ListingFieldType = 'string' | 'text' | 'number' | 'string_array' | 'boolean' | 'variants';
 export type ListingFieldSource = 'PRODUCT_FACT' | 'AI_GENERATED' | 'AI_INFERRED' | 'SELLER_INPUT';
 
 export interface ListingFieldDefinition {
@@ -18,6 +18,9 @@ export interface ListingFieldDefinition {
   unit?: string;
   placeholder?: string;
   helpText?: string;
+  options?: Array<{ value: string; label: string }>;
+  lookup?: string;
+  group?: string;
 }
 
 export interface MockListingSchema {
@@ -33,6 +36,7 @@ export interface MockListingSchema {
   unsupportedFields?: string[];
   storeDomain?: string;
   fetchedAt?: string;
+  accessScopes?: string[];
 }
 
 export interface ListingDraftPayload {
@@ -60,6 +64,7 @@ export interface ListingDraftPayload {
     status: 'DRAFT_CREATED';
     createdAt: string;
     warnings: string[];
+    submittedProduct?: Record<string, any>;
     verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
   };
 }

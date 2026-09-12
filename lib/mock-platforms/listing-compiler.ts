@@ -1,3 +1,4 @@
+import { validateShopifyFields } from '../platforms/shopify-integrated.ts';
 import type { ListingDraftPayload, ListingFieldDefinition, ListingFieldSource, MockListingSchema } from '../domain/listing';
 import type { DraftValidationIssue, PlatformDraft, ProductFact, ProductPassport } from '../domain/product-passport';
 
@@ -65,7 +66,7 @@ export function validateMockListing(
   confirmedInferences: string[] = [],
 ): DraftValidationIssue[] {
   const confirmed = new Set(confirmedInferences);
-  return schema.fields.flatMap((field) => {
+  const issues = schema.fields.flatMap((field) => {
     const actualSource = fieldSources[field.key] ?? field.source;
     const issues = validateField({ ...field, source: actualSource }, fields[field.key]);
     if (!isEmpty(fields[field.key]) && actualSource === 'AI_INFERRED' && !confirmed.has(field.key)) {
@@ -78,6 +79,8 @@ export function validateMockListing(
     }
     return issues;
   });
+  if (schema.mode === 'SHOPIFY_API') for(const message of validateShopifyFields(fields)) issues.push({code:'shopify_input',path:'variants',severity:'error',message});
+  return issues;
 }
 
 export function compileMockListingDraft(input: {
@@ -95,7 +98,23 @@ export function compileMockListingDraft(input: {
   const confirmed = new Set(input.existingPayload ? confirmedInferredFields(input.existingPayload) : []);
   for (const field of input.schema.fields) {
     if (field.source === 'PRODUCT_FACT' && field.factKey) {
-      const fact = factByKey.get(field.factKey);
+      let fact = factByKey.get(field.factKey);
+      if (!fact && input.schema.mode === 'SHOPIFY_API') {
+        const matchers: Record<string, RegExp> = {barcode:/barcode|条码|EAN|UPC/i, hs_code:/hs.?code|海关编码|HS编码/i, shipping_weight:/shipping.weight|gross.weight|运输重量|毛重/i, country_of_origin:/country.*origin|原产国|产地/i};
+        const matcher=matchers[field.key];
+        const candidates=matcher ? input.passport.facts.filter(f=>usableFact(f)&&matcher.test(`${f.key} ${f.label}`)) : [];
+        if(candidates.length===1) {
+          const candidate=candidates[0];
+          if(field.key==='shipping_weight') {
+            const unit=candidate.unit?.toLowerCase();const value=Number(candidate.value);
+            if(Number.isFinite(value)&&value>=0&&['kg','千克','公斤','g','克'].includes(unit??'')) fact={...candidate,value:['g','克'].includes(unit!)?value/1000:value,unit:null};
+          } else if(field.key==='country_of_origin') {
+            const countries:Record<string,string>={'中国':'CN','China':'CN','美国':'US','日本':'JP','德国':'DE','英国':'GB','巴西':'BR'};
+            const code=countries[String(candidate.value)] || (/^[A-Z]{2}$/.test(String(candidate.value))?String(candidate.value):undefined);
+            if(code)fact={...candidate,value:code,unit:null};
+          } else fact=candidate;
+        }
+      }
       if (usableFact(fact)) {
         fields[field.key] = renderFact(fact);
         fieldSources[field.key] = 'PRODUCT_FACT';

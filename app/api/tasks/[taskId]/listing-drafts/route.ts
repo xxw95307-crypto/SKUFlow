@@ -13,6 +13,8 @@ export const dynamic = 'force-dynamic';
 
 function normalizeFieldValue(field: ListingFieldDefinition, value: unknown): unknown {
   if (value === null || value === undefined || value === '') return undefined;
+  if (field.type === 'boolean') return typeof value === 'boolean' ? value : undefined;
+  if (field.type === 'variants') return Array.isArray(value) ? value : [];
   if (field.type === 'number') {
     const number = typeof value === 'number' ? value : Number(String(value).trim());
     return Number.isFinite(number) ? number : value;
@@ -44,6 +46,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
     const draft = passport.platformDrafts.find((item) => item.id === draftId);
     if (!draft) return Response.json({ error: 'Listing draft not found' }, { status: 404 });
+    if (draft.status === 'DRAFT_CREATED') return Response.json({error:'已发布草稿不可重新确认，请新建任务修改商品'},{status:409});
     if (!isListingDraftPayload(draft.payload)) return Response.json({ error: '请先生成该平台的 Listing' }, { status: 409 });
 
     const incoming = body.fields as Record<string, unknown>;

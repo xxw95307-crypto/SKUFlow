@@ -1,3 +1,4 @@
+import { publishIntegratedShopify, type ShopifyMediaInput } from '@/lib/platforms/shopify-integrated';
 import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
@@ -37,6 +38,16 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const { taskId } = await context.params;
     const bindings = getBindings();
     const { DB } = bindings;
+    const body = await _request.json().catch(()=>({})) as {selectedAssetIds?:unknown};
+    const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
+    if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 张图片'},{status:400});
+    const media: ShopifyMediaInput[] = [];
+    for(const id of selectedIds) {
+      const asset=await DB.prepare("SELECT object_key,content_type,title FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'").bind(taskId,id).first<{object_key:string;content_type:string;title:string}>();
+      if(!asset) return Response.json({error:'选中的图片不属于当前任务或尚未生成'},{status:400});
+      const object=await bindings.UPLOADS.get(asset.object_key);if(!object)return Response.json({error:'找不到选中图片文件'},{status:409});
+      media.push({name:`${id}.png`,contentType:asset.content_type,bytes:await object.arrayBuffer(),alt:`${asset.title} · ${id}`});
+    }
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
     const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload));
@@ -50,15 +61,17 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
       const now = new Date().toISOString();
       const currentPayload = draft.payload as unknown as ListingDraftPayload;
       if (draft.platformId === 'shopify' && shopifyConfig) {
+        if (!media.length) throw new Error('请选择要同步到 Shopify 的商品图片');
         const liveSchema = await fetchShopifyListingSchema(shopifyConfig, { market: draft.market });
         if (currentPayload.schema.mode !== 'SHOPIFY_API') throw new Error('这份 Shopify 审核稿使用旧版 Mock 字段，请重新生成并确认实际接口审核稿后发布。');
         const supported = new Set(liveSchema.fields.map((field) => field.key));
         if (currentPayload.schema.fields.some((field) => !supported.has(field.key))) throw new Error('Shopify 可写字段已发生变化，请重新生成审核稿。');
-        const publication = await publishShopifyDevDraft({
+        const publication = await publishIntegratedShopify({
           config: shopifyConfig,
           payload: currentPayload,
           draftId: draft.id,
-          now,
+          media,
+          onCreated: async(productId) => { await DB.prepare('UPDATE platform_drafts SET payload_json=? WHERE id=? AND task_id=?').bind(JSON.stringify({...currentPayload, pendingShopifyProductId:productId}),draft.id,taskId).run(); },
         });
         const payload: ListingDraftPayload = { ...currentPayload, testPublication: publication };
         await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });

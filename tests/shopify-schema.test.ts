@@ -5,7 +5,7 @@ import { publishShopifyDevDraft } from '../lib/platforms/shopify-dev.ts';
 const config = { storeDomain: 'test.myshopify.com', clientId: 'id', clientSecret: 'secret', apiVersion: '2026-07' };
 test('live schema includes only returned API fields and uses shop currency without mock fallback', async () => {
   const mock: typeof fetch = async (url) => String(url).includes('access_token') ? Response.json({access_token:'x'}) : Response.json({data: Object.fromEntries([
-    ['shop', {currencyCode:'JPY'}], ...['ProductCreateInput','SEOInput','ProductVariantsBulkInput','InventoryItemInput'].map(name => [name,{inputFields:[{name: name === 'ProductVariantsBulkInput' ? 'price' : name === 'InventoryItemInput' ? 'sku' : 'title',description:'',type:{kind:'SCALAR',name:'String'}}]}])
+    ['shop', {currencyCode:'JPY'}], ...['ProductCreateInput','SEOInput','ProductVariantsBulkInput','InventoryItemInput','ProductSetInput','ProductVariantSetInput','ProductSetInventoryInput','FileSetInput','WeightInput'].map(name => [name,{inputFields:[{name: name === 'ProductVariantsBulkInput' ? 'price' : name === 'InventoryItemInput' ? 'sku' : 'title',description:'',type:{kind:'SCALAR',name:'String'}}]}])
   ])});
   const schema = await fetchShopifyListingSchema(config,{market:'日本'},mock);
   assert.equal(schema.mode,'SHOPIFY_API');

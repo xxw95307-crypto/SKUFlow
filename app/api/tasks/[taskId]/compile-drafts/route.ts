@@ -85,7 +85,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
         draftId: draft.id,
         platformId: draft.platformId,
         market: draft.market,
-        adapterId: `${draft.platformId}-mock-adapter`,
+        adapterId: draft.platformId === 'shopify' ? 'shopify-admin-api' : `${draft.platformId}-mock-adapter`,
         mappedFields: result.mappedFields,
         issues: result.validationIssues,
         status,
@@ -96,7 +96,7 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const refreshedPassport = await getProductPassport(bindings.DB, taskId) as ProductPassport;
     return Response.json({
       passport: refreshedPassport,
-      provider: { mode: 'MOCK_PLATFORM_API', model: modelResponse.model },
+      provider: { mode: targets.some(t=>t.schema.mode==='SHOPIFY_API') ? 'PLATFORM_API' : 'MOCK_PLATFORM_API', model: modelResponse.model },
       summary: {
         compiledDrafts: summaries.length,
         validatedDrafts: summaries.filter((item) => item.status === 'VALIDATED').length,

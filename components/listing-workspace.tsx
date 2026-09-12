@@ -1,5 +1,6 @@
 'use client';
 
+import { ShopifyLookupEditor, ShopifyVariantsEditor } from '@/components/shopify-field-editors';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { ListingFieldDefinition, ListingFieldSource } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
@@ -15,6 +16,8 @@ const sourceLabels = {
 } as const;
 
 function editableValue(field: ListingFieldDefinition, value: unknown): string {
+  if(field.type==='boolean') return value===true?'是':value===false?'否':'';
+  if(field.type==='variants') return Array.isArray(value)&&value.length ? `${value.length} 个规格` : '单一规格';
   if (field.type === 'string_array') return Array.isArray(value) ? value.join('\n') : '';
   return value === undefined || value === null ? '' : String(value);
 }
@@ -25,7 +28,7 @@ function ListingFieldEditor({ field, value, source, confirmed, issue, onChange, 
   source: ListingFieldSource;
   confirmed: boolean;
   issue?: string;
-  onChange: (value: string) => void;
+  onChange: (value: unknown) => void;
   onConfirm: (confirmed: boolean) => void;
 }) {
   const readOnly = source === 'PRODUCT_FACT';
@@ -35,14 +38,14 @@ function ListingFieldEditor({ field, value, source, confirmed, issue, onChange, 
     placeholder: field.placeholder ?? (source === 'AI_GENERATED' || source === 'AI_INFERRED' ? '由 Listing Agent 生成' : ''),
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),
   };
-  return <label className={`listing-field ${issue ? 'has-error' : ''}`}>
+  return <div className={`listing-field ${issue ? 'has-error' : ''}`}>
     <span><b>{field.label}{field.required && <i>*</i>}</b><em className={source.toLowerCase()}>{source === 'AI_INFERRED' && !confirmed ? 'AI 推断·待确认' : sourceLabels[source]}</em></span>
-    {field.type === 'text' || field.type === 'string_array'
+    {field.lookup ? <ShopifyLookupEditor field={field} value={value} onChange={onChange}/> : field.type==='variants' ? <ShopifyVariantsEditor value={value} onChange={onChange}/> : field.type==='boolean' ? <select aria-label={field.label} value={value===true?'true':value===false?'false':''} onChange={e=>onChange(e.target.value===''?undefined:e.target.value==='true')}><option value="">请选择</option><option value="true">是</option><option value="false">否</option></select> : field.options ? <select aria-label={field.label} value={String(value??'')} onChange={e=>onChange(e.target.value)}><option value="">请选择</option>{field.options.map(o=><option value={o.value} key={o.value}>{o.label}</option>)}</select> : field.type === 'text' || field.type === 'string_array'
       ? <textarea {...common} rows={field.type === 'string_array' ? 5 : 6} />
       : <input {...common} inputMode={field.type === 'number' ? 'decimal' : 'text'} />}
     <small>{issue ?? field.helpText ?? (field.type === 'string_array' ? '每行一条' : field.maxLength ? `最多 ${field.maxLength} 个字符` : ' ')}</small>
     {source === 'AI_INFERRED' && <span className="inference-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirm(event.target.checked)} />我已核对该推断值</span>}
-  </label>;
+  </div>;
 }
 
 export function ListingWorkspace({ task, onAssets, conversation = false }: {
@@ -164,11 +167,11 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
     {message && <div className="form-success" role="status">{message}</div>}
     <div className={`platform-tabs dynamic ${conversation ? 'conversation-tabs' : ''}`}>{passport?.platformDrafts.map((draft) => <button className={selectedDraft?.id === draft.id ? 'active' : ''} onClick={() => { setSelectedDraftId(draft.id); setDetailsOpen(false); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market} · {draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'}</small></button>)}</div>
 
-    {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成各平台中文审校稿”，系统将调用 Mock Schema 接口，并让百炼用中文填写每个平台的营销字段。</p></div> : <>
+    {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成各平台中文审校稿”，系统将获取平台字段（Shopify 使用真实接口），并让百炼用中文填写每个平台的营销字段。</p></div> : <>
       <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · {listing.schema.mode === 'SHOPIFY_API' ? '按审核原文写入' : `发布时再转换为 ${listing.schema.locale}`} · {listing.schema.categoryLabel}</span></div>{!conversation && <code>{listing.schema.schemaVersion}</code>}</div>
       {listing.schema.platformId === 'shopify' && listing.schema.mode === 'MOCK' && <p role="alert">这是旧版 Mock 审核稿，请重新生成 Listing 获取 Shopify 实际字段后再确认发布。</p>}
-      {listing.schema.mode === 'SHOPIFY_API' && <div className="single-product-note"><b>字段来源：Shopify 实际接口 · {listing.schema.storeDomain}</b><span>按店铺币种写入售价，商品保持草稿状态。未同步能力：{listing.schema.unsupportedFields?.join('、')}。发布后逐项回读核对。</span></div>}
-      {listing.testPublication?.verification && <div className="single-product-note"><b>Shopify 回读核对</b><ul>{listing.testPublication.verification.map((item) => <li key={item.field}>{item.field}：{item.status === 'MATCH' ? '已核对一致' : item.status === 'MISMATCH' ? '值不一致' : item.status === 'NOT_SYNCED' ? '未同步' : '未能核对'}</li>)}</ul></div>}
+      {listing.schema.mode === 'SHOPIFY_API' && <div className="single-product-note"><b>字段来源：Shopify 实际接口 · {listing.schema.storeDomain}</b><span>商品、变体、地点库存、运输及所选图片将在发布时同步；库存需授权读写与地点权限。尚未接入：{listing.schema.unsupportedFields?.join('、')}。发布后逐项回读核对。</span></div>}
+      {listing.testPublication?.verification && <div className="single-product-note"><b>Shopify 回读核对</b><ul>{listing.testPublication.verification.map((item) => <li key={item.field}>{item.field}：{item.status === 'MATCH' ? '已核对一致' : item.status === 'MISMATCH' ? '值不一致' : item.status === 'NOT_SYNCED' ? '未同步' : item.status === 'PENDING' ? '平台处理中' : '未能核对'}</li>)}</ul></div>}
       {conversation && !detailsOpen && <dl className="listing-conversation-preview">{listing.schema.fields.slice(0, 5).map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{editableValue(field, fields[field.key]) || '待补充'}</dd><span>{sourceLabels[fieldSources[field.key] ?? field.source]}</span></div>)}</dl>}
       {(!conversation || detailsOpen) && <div className="listing-form-grid">{listing.schema.fields.map((field) => <ListingFieldEditor
         key={field.key}

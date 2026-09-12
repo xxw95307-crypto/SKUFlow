@@ -8,7 +8,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   parse_product_sources: '解析当前任务中的图片、PDF、表格和文本资料，形成统一内容块。',
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
-  generate_platform_listings: '读取所选平台的 Mock Listing 字段，并由 Listing Agent 生成各平台中文审校稿。',
+  generate_platform_listings: '读取所选平台字段（Shopify 使用真实接口），并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
   generate_visual_assets: '先调用视觉策划 Agent，根据商品、平台和商家本轮要求动态规划 2–4 张素材（必须含一张主图），再以原始商品图为参考调用百炼图像模型执行。',

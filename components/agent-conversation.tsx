@@ -652,7 +652,7 @@ export function AgentConversation() {
           passport: ProductPassport;
           message?: string;
           results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }> }>;
-        }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST' }), '平台测试草稿创建失败');
+        }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({selectedAssetIds:selectedAssetsRef.current}) }), '平台测试草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
         const shopifyCreated = payload.results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
         const warningCount = payload.results.reduce((count, item) => count + (item.warnings?.length ?? 0), 0);
@@ -667,7 +667,7 @@ export function AgentConversation() {
           })),
         });
         for (const result of payload.results.filter((item) => item.mode === 'SHOPIFY_DEV')) {
-          append('agent', `Shopify 字段核对：${(result.verification ?? []).map((item) => `${item.field}：${item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : item.status === 'NOT_SYNCED' ? '未同步' : '核对失败'}`).join('；')}。${result.warnings?.join('；') ?? ''}`, '发布核对结果');
+          append('agent', `Shopify 字段核对：${(result.verification ?? []).map((item) => `${item.field}：${item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : item.status === 'NOT_SYNCED' ? '未同步' : item.status === 'PENDING' ? '平台处理中' : '核对失败'}`).join('；')}。${result.warnings?.join('；') ?? ''}`, '发布核对结果');
         }
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false, completed: true };
@@ -771,6 +771,10 @@ export function AgentConversation() {
     );
   };
 
+  const recheckShopify = async () => {
+    if(!task)return;
+    try {const data=await responseJson<{passport:ProductPassport;results:Array<{market:string;verification:Array<{field:string;status:string}>}>}>(await fetch(`/api/tasks/${task.id}/verify-shopify`,{method:'POST'}),'Shopify 回读失败');setPassport(data.passport);for(const r of data.results)append('agent',`${r.market}草稿核对：${r.verification.map(v=>`${v.field}：${v.status==='MATCH'?'一致':v.status==='PENDING'?'处理中':'需要检查'}`).join('；')}`,'回读核对');await persistConversation(task.id,'COMPLETED');}catch(e){append('agent',`核对失败：${(e as Error).message}。已创建的商品不受影响。`);}
+  };
   const resumeTask = async () => {
     if (!task) return;
     await runAgentTurn(task, `继续处理当前商品任务：${task.productName}。请根据真实任务状态自主选择下一步工具。`);
@@ -1022,7 +1026,7 @@ export function AgentConversation() {
 
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
 
-          {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>交付完成</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
+          {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>草稿已创建</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button type="button" onClick={recheckShopify}>重新核对 Shopify</button><button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 
           {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{task && <button type="button" onClick={resumeTask}>重试当前步骤</button>}</div>}
           <div ref={threadEnd} />
