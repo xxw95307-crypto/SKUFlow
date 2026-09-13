@@ -100,6 +100,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     listLatestGeneratedAssets(DB, taskId),
   ]);
   const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith('asset_dynamic_'));
+  const videos=await DB.prepare("SELECT id FROM video_jobs WHERE task_id=? AND status='SUCCEEDED'").bind(taskId).all<{id:string}>();
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
@@ -116,8 +117,8 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     generatedDraftCount: generatedDrafts.length,
     approvedDraftCount: approvedDrafts.length,
     publishedDraftCount: passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length,
-    generatedAssetCount: completedAssets.length,
-    selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length,
+    generatedAssetCount: completedAssets.length + videos.results.length,
+    selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length + videos.results.filter(v=>selectedAssetIds.has(v.id)).length,
     publishApproved: body.publishApproved === true,
   };
 }
@@ -126,12 +127,12 @@ function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModel
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
   const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : undefined;
   const requested = lastUser?.role === 'user'
-    && /重新生成|重写|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片|视频)|生成.*(?:素材|图片|视频)/.test(lastUser.content);
+    && /封面|排序|顺序|视频.*放.*第|重新生成|重写|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片|视频)|生成.*(?:素材|图片|视频)/.test(lastUser.content);
   if (!requested || state.factCount === 0 || state.openConflictCount > 0 || state.publishedDraftCount > 0) return tools;
   const completedAfterRequest = new Set(messages.slice(lastUserIndex + 1)
     .filter((message) => message.role === 'tool')
     .map((message) => message.role === 'tool' ? message.name : null));
-  const visualRequested = state.generatedAssetCount > 0 || (lastUser.role === 'user' && /素材|图片|视频|video|视觉|主图|场景图/.test(lastUser.content));
+  const visualRequested = state.generatedAssetCount > 0 || (lastUser.role === 'user' && /封面|排序|顺序|素材|图片|视频|video|视觉|主图|场景图/.test(lastUser.content));
   if (visualRequested && state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
     if (completedAfterRequest.has('generate_visual_assets')) return tools;
     return [{

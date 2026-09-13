@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,submitWanVideo,queryWanVideo} from '../lib/ai/wan-video.ts';
 const c={apiKey:'test-secret',baseUrl:'https://dashscope.aliyuncs.com/api/v1',model:'wan2.7-i2v'};
 const plan={title:'商品展示',prompt:'保持商品结构一致，缓慢推进镜头',duration:5,resolution:'720P' as const,sourceFileId:'original',shots:['商品全貌','细节']};
-test('video configuration never falls back to text token plan credentials',()=>{
- assert.equal(loadWanVideoConfig({}).apiKey,'');assert.throws(()=>requireWanConfig(loadWanVideoConfig({})),/单独配置/);
+test('video configuration reuses authorized Bailian key but always uses native video endpoint',()=>{
+ assert.equal(loadWanVideoConfig({}).apiKey,'');assert.equal(loadWanVideoConfig({BAILIAN_API_KEY:'shared'}).apiKey,'shared');assert.equal(loadWanVideoConfig({BAILIAN_API_KEY:'shared'}).baseUrl,'https://dashscope.aliyuncs.com/api/v1');assert.throws(()=>requireWanConfig(loadWanVideoConfig({})),/配置/);
  assert.throws(()=>requireWanConfig({...c,baseUrl:'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'}),/compatible-mode/);
 });
 test('plan must reference an original task image and supported duration',()=>{

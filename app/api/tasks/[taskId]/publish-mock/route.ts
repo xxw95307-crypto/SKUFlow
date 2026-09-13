@@ -1,3 +1,5 @@
+import {getSelectedMedia} from '@/lib/server/media-candidates';
+import {parseMediaOrderPlan,sameMediaSelection} from '@/lib/agents/media-ordering';
 import { publishIntegratedShopify, type ShopifyMediaInput } from '@/lib/platforms/shopify-integrated';
 import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { ensureSchema, getBindings } from '@/db/client';
@@ -38,22 +40,30 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const { taskId } = await context.params;
     const bindings = getBindings();
     const { DB } = bindings;
-    const body = await _request.json().catch(()=>({})) as {selectedAssetIds?:unknown};
+    const body = await _request.json().catch(()=>({})) as {selectedAssetIds?:unknown;mediaPlanId?:string};
     const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
-    if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 张图片'},{status:400});
+    if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 项媒体'},{status:400});
     const media: ShopifyMediaInput[] = [];
-    for(const id of selectedIds) {
-      const asset=await DB.prepare("SELECT object_key,content_type,title FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'").bind(taskId,id).first<{object_key:string;content_type:string;title:string}>();
-      if(!asset) return Response.json({error:'选中的图片不属于当前任务或尚未生成'},{status:400});
-      const object=await bindings.UPLOADS.get(asset.object_key);if(!object)return Response.json({error:'找不到选中图片文件'},{status:409});
-      media.push({name:`${id}.png`,contentType:asset.content_type,bytes:await object.arrayBuffer(),alt:`${asset.title} · ${id}`});
-    }
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
     const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload));
     if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建测试草稿' }, { status: 409 });
 
     const hasShopify = publishable.some((draft) => draft.platformId === 'shopify');
+    if(hasShopify) {
+      const row=await DB.prepare("SELECT plan_json FROM media_order_plans WHERE task_id=? AND id=? AND status='CONFIRMED'").bind(taskId,body.mediaPlanId??'').first<{plan_json:string}>();
+      if(!row)throw new Error('请先在对话中确认封面和媒体顺序，再发布');
+      const latest=await DB.prepare('SELECT id FROM media_order_plans WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(taskId).first<{id:string}>();
+      if(latest?.id!==body.mediaPlanId)throw new Error('媒体编排已有新版，请确认最新版');
+      const candidates=await getSelectedMedia(DB,taskId,selectedIds);
+      const plan=parseMediaOrderPlan(JSON.parse(row.plan_json),candidates);
+      if(!sameMediaSelection(plan,selectedIds))throw new Error('选中的媒体已改变，请重新编排并确认');
+      for(const item of plan.items) {
+        const c=candidates.find(c=>c.id===item.id)!;
+        const object=await bindings.UPLOADS.get(c.objectKey);if(!object)throw new Error('找不到选中的媒体文件');
+        media.push({name:`${c.id}.${c.type==='VIDEO'?'mp4':'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
+      }
+    }
     const shopifyConfig = hasShopify ? loadShopifyDevConfig(bindings) : null;
     const results: DeliveryResult[] = [];
 

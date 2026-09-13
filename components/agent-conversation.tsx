@@ -1,4 +1,5 @@
 'use client';
+import { MediaOrderReview } from '@/components/media-order-review';
 import { VideoConversation } from '@/components/video-conversation';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -115,6 +116,7 @@ function assetKindLabel(kind: GeneratedAsset['kind']): string {
     FEATURE: '卖点视觉',
     SCALE: '尺寸感展示',
     PACKAGING: '包装展示',
+    VIDEO: '商品视频',
   }[kind];
 }
 
@@ -171,7 +173,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm }: {
   onToggle: (id: string) => void;
   onConfirm: () => void;
 }) {
-  const completed = assets.filter((asset) => asset.status === 'COMPLETED' && asset.imageUrl);
+  const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
   return <div className="asset-conversation-card">
     <header><span>需要你选择 · 视觉素材</span><h3>我为这个商品生成了 {completed.length} 张候选图</h3><p>请选择要进入交付包的图片。你可以选择一张或多张。</p></header>
     <div className="agent-asset-grid">{completed.map((asset) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
@@ -179,7 +181,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm }: {
       <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
     <div className="asset-conversation-hint"><span>↳</span><div><b>不满意这批素材？</b><p>直接在下方对话框告诉我修改要求，例如“换成户外场景，不要模特”，我会重新规划并生成。</p></div></div>
-    <footer><span>已选择 {selected.length} 张</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认已选素材并继续</button></footer>
+    <footer><span>已选择 {selected.length} 项</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认已选素材并继续</button></footer>
   </div>;
 }
 
@@ -239,6 +241,9 @@ export function AgentConversation() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [mediaGuidance,setMediaGuidance] = useState('');
+  const mediaPlanRef = useRef<string | null>(null);
+  const [mediaPlanReady,setMediaPlanReady] = useState(false);
   const [videoRevision,setVideoRevision] = useState(0);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
@@ -285,7 +290,8 @@ export function AgentConversation() {
 
   const fetchGeneratedAssets = async (taskId: string): Promise<GeneratedAsset[]> => {
     const payload = await responseJson<{ assets: GeneratedAsset[] }>(await fetch(`/api/tasks/${taskId}/generated-assets`), '视觉素材读取失败');
-    return payload.assets;
+    const videos=await responseJson<{jobs:any[]}>(await fetch(`/api/tasks/${taskId}/videos`),'视频素材读取失败');
+    return [...payload.assets,...videos.jobs.filter(j=>j.status==='SUCCEEDED').map(j=>({id:j.id,taskId,sourceFileId:j.plan.sourceFileId,batchId:'video',kind:'VIDEO' as const,title:j.plan.title,note:j.plan.shots.join('；'),model:'wan2.7-i2v',status:'COMPLETED' as const,width:null,height:null,error:null,createdAt:'',completedAt:null,imageUrl:j.videoUrl}))];
   };
 
   const updateConversationList = (conversation: AgentConversationRecord | ConversationSummary) => {
@@ -304,6 +310,7 @@ export function AgentConversation() {
     setMessages(messagesRef.current);
     modelHistory.current = conversation.modelHistory;
     toolRunsRef.current = conversation.toolRuns;
+    mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance('');
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
     setPendingFiles([]);
@@ -610,6 +617,10 @@ export function AgentConversation() {
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
       }
+      if (name === 'generate_visual_assets' && /封面|排序|顺序|(?:视频|图片).*放.*第/.test(requestText)) {
+        mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance(requestText);setPhase('publish');setPublishOpen(false);
+        append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
+      }
       if (name === 'generate_visual_assets' && /视频|video/i.test(requestText)) {
         const result=await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText})}),'视频方案规划失败');
         setVideoRevision(v=>v+1);setPhase('assets');
@@ -645,7 +656,12 @@ export function AgentConversation() {
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
       if (name === 'open_publish_confirmation') {
-        setPhase('publish'); setPublishOpen(true);
+        if(currentTask.platforms.includes('shopify')) {
+          setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…');
+          await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
+        }
+        setPhase('publish'); setPublishOpen(!currentTask.platforms.includes('shopify'));
+        mediaPlanRef.current=null;setMediaPlanReady(false);
         append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用测试发布工具。Shopify 会创建未公开的 Dev Store 草稿。', '等待最终确认', {
           kind: 'publish',
           items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · 测试草稿`, status: '待确认' }],
@@ -660,7 +676,7 @@ export function AgentConversation() {
           passport: ProductPassport;
           message?: string;
           results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }> }>;
-        }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({selectedAssetIds:selectedAssetsRef.current}) }), '平台测试草稿创建失败');
+        }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({selectedAssetIds:selectedAssetsRef.current,mediaPlanId:mediaPlanRef.current}) }), '平台测试草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
         const shopifyCreated = payload.results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
         const warningCount = payload.results.reduce((count, item) => count + (item.warnings?.length ?? 0), 0);
@@ -832,7 +848,9 @@ export function AgentConversation() {
   };
 
   const confirmAssets = async () => {
-    const chosen = generatedAssets.filter((asset) => selectedAssetsRef.current.includes(asset.id));
+    const available=task?await fetchGeneratedAssets(task.id):generatedAssets;
+    setGeneratedAssets(available);
+    const chosen = available.filter((asset) => selectedAssetsRef.current.includes(asset.id));
     append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
       kind: 'assets',
       items: chosen.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '已选择' })),
@@ -901,6 +919,7 @@ export function AgentConversation() {
   };
 
   const toggleAsset = (id: string) => {
+    mediaPlanRef.current=null;setMediaPlanReady(false);
     const next = selectedAssetsRef.current.includes(id)
       ? selectedAssetsRef.current.filter((item) => item !== id)
       : [...selectedAssetsRef.current, id];
@@ -1030,10 +1049,12 @@ export function AgentConversation() {
 
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
 
-          {task && ['assets','publish','complete'].includes(phase) && <article className="chat-message agent"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision}/></article>}
+          {task && ['assets','publish','complete'].includes(phase) && <article className="chat-message agent"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase !== 'complete'}/></article>}
           {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} /></article>}
 
-          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
+          {phase === 'publish' && <button type="button" onClick={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}}>重新选择图片和视频</button>}
+          {phase === 'publish' && task?.platforms.includes('shopify') && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
+          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" disabled={Boolean(task?.platforms.includes('shopify') && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
 
           {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>草稿已创建</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button type="button" onClick={recheckShopify}>重新核对 Shopify</button><button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 

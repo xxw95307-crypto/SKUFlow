@@ -1,10 +1,10 @@
 export interface WanVideoConfig { apiKey:string; baseUrl:string; model:string }
 export interface VideoPlan {title:string;prompt:string;duration:number;resolution:'720P'|'1080P';sourceFileId:string;shots:string[]}
-export function loadWanVideoConfig(e:{BAILIAN_VIDEO_API_KEY?:string;BAILIAN_VIDEO_BASE_URL?:string;BAILIAN_VIDEO_MODEL?:string}):WanVideoConfig {
- return {apiKey:e.BAILIAN_VIDEO_API_KEY?.trim()??'',baseUrl:e.BAILIAN_VIDEO_BASE_URL?.trim().replace(/\/$/,'')??'',model:e.BAILIAN_VIDEO_MODEL?.trim()||'wan2.7-i2v'};
+export function loadWanVideoConfig(e:{BAILIAN_API_KEY?:string;BAILIAN_VIDEO_API_KEY?:string;BAILIAN_VIDEO_BASE_URL?:string;BAILIAN_VIDEO_MODEL?:string}):WanVideoConfig {
+ return {apiKey:e.BAILIAN_VIDEO_API_KEY?.trim()||e.BAILIAN_API_KEY?.trim()||'',baseUrl:e.BAILIAN_VIDEO_BASE_URL?.trim().replace(/\/$/,'')||'https://dashscope.aliyuncs.com/api/v1',model:e.BAILIAN_VIDEO_MODEL?.trim()||'wan2.7-i2v'};
 }
 export function requireWanConfig(c:WanVideoConfig) {
- if(!c.apiKey||!c.baseUrl)throw new Error('视频服务未配置：需要单独配置 BAILIAN_VIDEO_API_KEY 和 BAILIAN_VIDEO_BASE_URL（百炼 /api/v1 地址）；比赛文本与图片额度不能视为视频额度。');
+ if(!c.apiKey||!c.baseUrl)throw new Error('视频服务未配置：需要配置 BAILIAN_API_KEY 或 BAILIAN_VIDEO_API_KEY；视频使用百炼 /api/v1 接口，调用权限与费用由百炼服务决定。');
  const u=new URL(c.baseUrl);if(u.protocol!=='https:'||!u.hostname.endsWith('.aliyuncs.com')||!u.pathname.endsWith('/api/v1')||u.username||u.password||u.search||u.hash||u.hostname.startsWith('token-plan.'))throw new Error('视频接口必须为百炼 HTTPS /api/v1 地址，不能使用聊天 compatible-mode 或 token-plan 地址');
  if(!/^wan2\.7-i2v(?:-\d{4}-\d{2}-\d{2})?$/.test(c.model))throw new Error('当前视频连接器仅支持 wan2.7-i2v 系列');
 }

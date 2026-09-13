@@ -1,6 +1,6 @@
 export const GENERATED_ASSET_KINDS = ['HERO', 'LIFESTYLE', 'DETAIL', 'MODEL', 'FEATURE', 'SCALE', 'PACKAGING'] as const;
 
-export type GeneratedAssetKind = (typeof GENERATED_ASSET_KINDS)[number];
+export type GeneratedAssetKind = (typeof GENERATED_ASSET_KINDS)[number] | 'VIDEO';
 export type GeneratedAssetStatus = 'COMPLETED' | 'FAILED';
 
 export interface GeneratedAsset {

@@ -94,7 +94,7 @@ export function parseAssetPlan(value: string): AssetGenerationSpec[] {
     const note = plainText(record.note).slice(0, 120);
     const instruction = plainText(record.instruction).slice(0, 1_200);
     const size = plainText(record.size);
-    if (!GENERATED_ASSET_KINDS.includes(kind as GeneratedAssetKind) || !title || !note || !instruction) continue;
+    if (!GENERATED_ASSET_KINDS.includes(kind as (typeof GENERATED_ASSET_KINDS)[number]) || !title || !note || !instruction) continue;
     if (!ALLOWED_SIZES.includes(size as AssetGenerationSpec['size'])) continue;
     assets.push({ kind: kind as GeneratedAssetKind, title, note, instruction, size: size as AssetGenerationSpec['size'] });
   }
