@@ -45,6 +45,8 @@ export interface ListingDraftPayload {
   schema: MockListingSchema;
   fields: Record<string, unknown>;
   fieldSources: Record<string, ListingFieldSource>;
+  fieldEvidence?: Record<string, ListingFieldEvidence>;
+  fieldNotes?: Record<string, string>;
   confirmedInferredFields: string[];
   source: {
     passportId: string;
@@ -72,6 +74,15 @@ export interface ListingDraftPayload {
 export interface GeneratedListingDraft {
   draftId: string;
   fields: Record<string, unknown>;
+  suppliedFields?: Record<string, { value: unknown; evidence: ListingFieldEvidence }>;
+  fieldNotes?: Record<string, string>;
+}
+
+export interface ListingFieldEvidence {
+  sourceId: string;
+  sourceLabel: string;
+  sourceKind: 'DOCUMENT' | 'USER_INPUT' | 'FACT';
+  quote: string;
 }
 
 export interface ListingGenerationOutput {

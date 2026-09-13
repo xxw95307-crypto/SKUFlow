@@ -52,20 +52,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
     const incoming = body.fields as Record<string, unknown>;
     const fieldSources = listingFieldSources(draft.payload);
     const fields: Record<string, unknown> = {};
+    const fieldEvidence = {...draft.payload.fieldEvidence};
+    const fieldNotes = {...draft.payload.fieldNotes};
     for (const field of draft.payload.schema.fields) {
       const actualSource = fieldSources[field.key] ?? field.source;
       const value = normalizeFieldValue(
         field,
-        actualSource === 'PRODUCT_FACT' ? draft.payload.fields[field.key] : incoming[field.key],
+        actualSource === 'PRODUCT_FACT' && !fieldEvidence[field.key] ? draft.payload.fields[field.key] : incoming[field.key],
       );
       if (value !== undefined) fields[field.key] = value;
+      if (JSON.stringify(value) !== JSON.stringify(normalizeFieldValue(field,draft.payload.fields[field.key]))) {
+        fieldSources[field.key] = 'SELLER_INPUT';
+        delete fieldEvidence[field.key];
+        delete fieldNotes[field.key];
+      }
     }
     const requestedConfirmations = Array.isArray(body.confirmedInferredFields)
       ? body.confirmedInferredFields.filter((key): key is string => typeof key === 'string' && fieldSources[key] === 'AI_INFERRED')
       : confirmedInferredFields(draft.payload);
     const issues = validateMockListing(draft.payload.schema, fields, fieldSources, requestedConfirmations);
     const hasErrors = issues.some((issue) => issue.severity === 'error');
-    const payload = { ...draft.payload, fields, fieldSources, confirmedInferredFields: requestedConfirmations };
+    const payload = { ...draft.payload, fields, fieldSources, fieldEvidence, fieldNotes, confirmedInferredFields: requestedConfirmations };
     delete payload.mockPublication;
     const status = action === 'approve' && !hasErrors ? 'APPROVED' : hasErrors ? 'NEEDS_REVIEW' : 'VALIDATED';
     const now = new Date().toISOString();

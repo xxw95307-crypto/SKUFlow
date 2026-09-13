@@ -51,7 +51,7 @@ export async function fetchShopifyListingSchema(config: ShopifyDevConfig, input:
   add('ProductVariantSetInput','inventoryPolicy',{key:'inventory_policy',label:'缺货时是否继续销售',type:'string',source:'SELLER_INPUT',required:false,options:[{value:'DENY',label:'停止销售'},{value:'CONTINUE',label:'允许继续销售'}]});
   add('ProductSetInventoryInput','locationId',{key:'inventory_location',label:'库存地点',type:'string',source:'SELLER_INPUT',required:false,lookup:'locations',helpText:scopes.includes('write_inventory') ? '请明确选择本次写入的库存地点' : '需授权 write_inventory 和 read_locations 才能同步库存'});
   add('ProductSetInventoryInput','quantity',{key:'inventory_quantity',label:'库存数量',type:'number',source:'SELLER_INPUT',required:false});
-  add('ProductSetInput','variants',{key:'variants',label:'尺码/颜色等变体',type:'variants',source:'SELLER_INPUT',required:false,helpText:'没有不同规格可留空。每行一个实际销售规格，分别填写 SKU、售价与库存；不自动拼出未经确认的组合'});
+  add('ProductSetInput','variants',{key:'variants',label:'尺码/颜色等变体',type:'variants',unit:data.shop.currencyCode,source:'SELLER_INPUT',required:false,helpText:'没有不同规格可留空。每行一个实际销售规格，分别填写 SKU、售价与库存；不自动拼出未经确认的组合'});
   if (!fields.some((field) => field.key === 'title')) throw new Error('Shopify 缺少可写入的标题字段');
   return { mode: 'SHOPIFY_API', platformId: 'shopify', platformName: 'Shopify', market: input.market,
     locale: 'zh-CN', categoryId: 'shopify-product', categoryLabel: input.categoryLabel || '商品',

@@ -1,3 +1,7 @@
+import { shopifyLookup } from '@/lib/platforms/shopify-integrated';
+import { getParseResults } from '@/lib/server/parse-store';
+import { buildFactExtractionContext } from '@/lib/agents/fact-extraction';
+import type { ListingEvidenceSource } from '@/lib/agents/listing-evidence';
 import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
 import { ensureSchema, getBindings } from '@/db/client';
@@ -20,8 +24,10 @@ interface DraftCompileSummary {
   status: 'NEEDS_REVIEW' | 'VALIDATED';
 }
 
-export async function POST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
+    const body = await request.json().catch(() => ({}));
+    const prefillOnly = body?.prefillOnly === true;
     await ensureSchema();
     const { taskId } = await context.params;
     const bindings = getBindings();
@@ -45,7 +51,9 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     const categoryLabel = typeof categoryFact?.value === 'string' ? categoryFact.value : '通用商品';
     const productNameFact = passport.facts.find((fact) => fact.key === 'product.name' && fact.value !== null && fact.status !== 'CONFLICT');
     const productName = typeof productNameFact?.value === 'string' ? productNameFact.value : task.product_name;
-    const targets = await Promise.all(passport.platformDrafts.map(async (draft) => ({
+    const editableDrafts = passport.platformDrafts.filter(d => !['APPROVED','DRAFT_CREATED'].includes(d.status));
+    if (!editableDrafts.length) return Response.json({error:'所有草稿已确认，不能自动改写。'},{status:409});
+    const targets = await Promise.all(editableDrafts.map(async (draft) => ({
       draftId: draft.id,
       schema: draft.platformId === 'shopify' ? await fetchShopifyListingSchema(loadShopifyDevConfig(bindings), { market: draft.market, categoryLabel }) : resolveMockListingSchema({
         platformId: draft.platformId,
@@ -54,23 +62,44 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
         categoryLabel,
       }),
     })));
+    const parsedSources = buildFactExtractionContext((await getParseResults(bindings.DB, taskId)).filter(r => r.status !== 'FAILED')).items;
+    const evidenceSources: ListingEvidenceSource[] = parsedSources.map(item => ({id:item.ref,label:item.filename,kind:'DOCUMENT',text:item.excerpt}));
+    const conversation = await bindings.DB.prepare('SELECT messages_json FROM agent_conversations WHERE task_id = ? ORDER BY updated_at DESC LIMIT 1').bind(taskId).first<{messages_json:string}>();
+    if (conversation) {
+      const messages = JSON.parse(conversation.messages_json);
+      for (const m of Array.isArray(messages) ? messages.slice(-60) : []) {
+        if(m.role === 'user' && typeof m.text === 'string' && m.text.trim()) evidenceSources.push({id:`message:${m.id}`,label:'卖家对话',kind:'USER_INPUT',text:m.text.slice(0,8000)});
+      }
+    }
+    for (const fact of passport.facts.filter(f => f.value !== null && !['MISSING','CONFLICT'].includes(f.status))) {
+      evidenceSources.push({id:`fact:${fact.id}`,label:fact.label,kind:fact.sourceKind === 'USER_INPUT' ? 'USER_INPUT' : 'FACT',text:`${fact.label}: ${typeof fact.value === 'object' ? JSON.stringify(fact.value) : fact.value} ${fact.unit ?? ''}`});
+    }
+    for (const target of targets.filter(t => t.schema.mode === 'SHOPIFY_API')) {
+      for (const field of target.schema.fields.filter(f => f.lookup)) {
+        try { field.options = await shopifyLookup(loadShopifyDevConfig(bindings),field.lookup!,field.lookup === 'categories' ? categoryLabel : ''); }
+        catch { field.options = []; } // Unavailable options must be selected later; never invent IDs.
+      }
+    }
     const modelResponse = await callBailianListingGeneration(config, {
       productName,
       facts: passport.facts,
-      drafts: targets,
+      evidenceSources,
+      drafts: prefillOnly ? targets.map(t => ({...t,schema:{...t.schema,fields:t.schema.fields.filter(f => f.source !== 'AI_GENERATED').map(f => ({...f,allowAiInference:false}))}})) : targets,
     });
-    const generatedByDraft = new Map(modelResponse.output.drafts.map((draft) => [draft.draftId, draft.fields]));
+    const generatedByDraft = new Map(modelResponse.output.drafts.map((draft) => [draft.draftId, draft]));
 
     const writes = [];
     const summaries: DraftCompileSummary[] = [];
-    for (const draft of passport.platformDrafts) {
+    for (const draft of editableDrafts) {
       const target = targets.find((item) => item.draftId === draft.id)!;
       const existingPayload = isListingDraftPayload(draft.payload) ? draft.payload : undefined;
       const result = compileMockListingDraft({
         passport,
         draft,
         schema: target.schema,
-        generatedFields: generatedByDraft.get(draft.id),
+        generatedFields: generatedByDraft.get(draft.id)?.fields,
+        suppliedFields: generatedByDraft.get(draft.id)?.suppliedFields,
+        fieldNotes: generatedByDraft.get(draft.id)?.fieldNotes,
         existingPayload,
       });
       const status = result.validationIssues.some((issue) => issue.severity === 'error') ? 'NEEDS_REVIEW' as const : 'VALIDATED' as const;

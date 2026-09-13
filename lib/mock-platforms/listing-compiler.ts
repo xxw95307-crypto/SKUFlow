@@ -1,5 +1,6 @@
+import { listingRequirement } from '../agents/listing-evidence.ts';
 import { validateShopifyFields } from '../platforms/shopify-integrated.ts';
-import type { ListingDraftPayload, ListingFieldDefinition, ListingFieldSource, MockListingSchema } from '../domain/listing';
+import type { GeneratedListingDraft, ListingDraftPayload, ListingFieldDefinition, ListingFieldSource, MockListingSchema } from '../domain/listing';
 import type { DraftValidationIssue, PlatformDraft, ProductFact, ProductPassport } from '../domain/product-passport';
 
 function usableFact(fact: ProductFact | undefined): fact is ProductFact {
@@ -68,7 +69,7 @@ export function validateMockListing(
   const confirmed = new Set(confirmedInferences);
   const issues = schema.fields.flatMap((field) => {
     const actualSource = fieldSources[field.key] ?? field.source;
-    const issues = validateField({ ...field, source: actualSource }, fields[field.key]);
+    const issues = validateField({ ...field, required: schema.mode === 'SHOPIFY_API' ? listingRequirement(field, fields) : field.required, source: actualSource }, fields[field.key]);
     if (!isEmpty(fields[field.key]) && actualSource === 'AI_INFERRED' && !confirmed.has(field.key)) {
       issues.push({
         code: 'ai_inference_confirmation_required',
@@ -89,6 +90,8 @@ export function compileMockListingDraft(input: {
   schema: MockListingSchema;
   generatedFields?: Record<string, unknown>;
   existingPayload?: ListingDraftPayload;
+  suppliedFields?: GeneratedListingDraft['suppliedFields'];
+  fieldNotes?: Record<string, string>;
 }): { payload: ListingDraftPayload; validationIssues: DraftValidationIssue[]; mappedFields: number } {
   const factByKey = new Map(input.passport.facts.map((fact) => [fact.key, fact]));
   const fields: Record<string, unknown> = { ...(input.existingPayload?.fields ?? {}) };
@@ -135,12 +138,25 @@ export function compileMockListingDraft(input: {
       fieldSources[field.key] = 'SELLER_INPUT';
     }
   }
+  const fieldEvidence = { ...input.existingPayload?.fieldEvidence };
+  const fieldNotes = { ...input.fieldNotes };
+  for (const field of input.schema.fields) {
+    const supplied = input.suppliedFields?.[field.key];
+    if (!supplied || field.source === 'AI_GENERATED' || (!isEmpty(fields[field.key]) && fieldSources[field.key] !== 'AI_INFERRED')) continue;
+    if (field.factKey && factByKey.get(field.factKey)?.status === 'CONFLICT') continue;
+    fields[field.key] = supplied.value;
+    fieldSources[field.key] = 'PRODUCT_FACT';
+    fieldEvidence[field.key] = supplied.evidence;
+    delete fieldNotes[field.key];
+  }
   const payload: ListingDraftPayload = {
     mode: input.schema.mode,
     reviewLocale: 'zh-CN',
     schema: input.schema,
     fields,
     fieldSources,
+    fieldEvidence,
+    fieldNotes,
     confirmedInferredFields: [...confirmed],
     source: { passportId: input.passport.id, passportVersion: input.passport.version },
   };
