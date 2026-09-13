@@ -1,13 +1,14 @@
+import { withAuthentication } from '@/lib/server/auth';
 import {ensureSchema,getBindings} from '@/db/client';
 import {getProductPassport} from '@/lib/server/passport-store';
 import {loadBailianConfig} from '@/lib/config/bailian';
 import {loadWanVideoConfig,parseVideoPlan,requireWanConfig,submitWanVideo,queryWanVideo} from '@/lib/ai/wan-video';
 export const dynamic='force-dynamic';
 const publicJob=(r:any)=>({id:r.id,status:r.status,plan:JSON.parse(r.plan_json),error:r.error,videoUrl:r.status==='SUCCEEDED'?`/api/tasks/${r.task_id}/videos/${r.id}/file`:null});
-export async function GET(_r:Request,ctx:{params:Promise<{taskId:string}>}) {
+async function handleGET(_r:Request,ctx:{params:Promise<{taskId:string}>}) {
  try {await ensureSchema();const {taskId}=await ctx.params;const b=getBindings();const rows=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? ORDER BY created_at DESC LIMIT 12').bind(taskId).all();const c=loadWanVideoConfig(b);return Response.json({jobs:rows.results.map(publicJob),configured:!!c.apiKey&&!!c.baseUrl});}catch(e){return Response.json({error:(e as Error).message},{status:500});}
 }
-export async function POST(req:Request,ctx:{params:Promise<{taskId:string}>}) {
+async function handlePOST(req:Request,ctx:{params:Promise<{taskId:string}>}) {
  try {await ensureSchema();const {taskId}=await ctx.params;const b=getBindings();const p=await getProductPassport(b.DB,taskId);if(!p)return Response.json({error:'任务不存在'},{status:404});
  if(p.conflicts.some(c=>c.status==='OPEN')||!p.platformDrafts.length||p.platformDrafts.some(d=>!['APPROVED','DRAFT_CREATED'].includes(d.status)))return Response.json({error:'请先确认商品事实与所有 Listing，再规划视频'},{status:409});
  const body:any=await req.json().catch(()=>({}));const guidance=String(body.guidance??'').slice(0,1000);
@@ -18,7 +19,7 @@ export async function POST(req:Request,ctx:{params:Promise<{taskId:string}>}) {
  const id=`video_${crypto.randomUUID()}`;await b.DB.prepare("INSERT INTO video_jobs (id,task_id,source_file_id,plan_json,status,created_at) VALUES (?,?,?,?,'DRAFT',?)").bind(id,taskId,plan.sourceFileId,JSON.stringify(plan),new Date().toISOString()).run();return Response.json({job:{id,status:'DRAFT',plan,videoUrl:null}});
  }catch(e){return Response.json({error:(e as Error).message},{status:502});}
 }
-export async function PATCH(req:Request,ctx:{params:Promise<{taskId:string}>}) {
+async function handlePATCH(req:Request,ctx:{params:Promise<{taskId:string}>}) {
  try {await ensureSchema();const {taskId}=await ctx.params;const {id,action}=await req.json() as {id:string;action:string};if(!['start','refresh'].includes(action))return Response.json({error:'无效操作'},{status:400});const b=getBindings();let job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first<any>();if(!job)return Response.json({error:'视频任务不存在'},{status:404});const c=loadWanVideoConfig(b);
  if(action==='start'&&job.status==='DRAFT') {
  requireWanConfig(c);const p=await getProductPassport(b.DB,taskId);if(!p||p.conflicts.some(v=>v.status==='OPEN')||p.platformDrafts.some(d=>!['APPROVED','DRAFT_CREATED'].includes(d.status)))throw new Error('请先完成 Listing 确认');
@@ -35,3 +36,7 @@ export async function PATCH(req:Request,ctx:{params:Promise<{taskId:string}>}) {
  job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first();return Response.json({job:publicJob(job)});
  }catch(e){return Response.json({error:(e as Error).message},{status:502});}
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);
+export const PATCH = withAuthentication(handlePATCH);

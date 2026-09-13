@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
 import { callBailianAssetPlanning, callBailianImageGeneration } from '@/lib/ai/bailian-client';
@@ -36,7 +37,7 @@ async function requestOptions(request: Request): Promise<{ force: boolean; guida
   }
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -49,7 +50,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   }
 }
 
-export async function POST(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -137,3 +138,6 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
     return Response.json({ error: message }, { status: message === '请求 JSON 格式无效' ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);

@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { VISION_ANALYSIS_PROMPT_VERSION } from '@/lib/agents/vision-analysis';
 import { callBailianVisionAnalysis, hashVisionInput } from '@/lib/ai/bailian-client';
@@ -44,7 +45,7 @@ async function parseForce(request: Request): Promise<boolean> {
   }
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -73,7 +74,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   }
 }
 
-export async function POST(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -183,3 +184,6 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
     );
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);

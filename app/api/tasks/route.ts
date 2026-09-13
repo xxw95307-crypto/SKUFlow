@@ -1,3 +1,4 @@
+import { currentAccount, withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { inferIntakeTargets } from '@/lib/agents/intake-targets';
 import type { PlatformId } from '@/lib/domain/platform';
@@ -67,14 +68,15 @@ function validateFile(file: File): void {
   if (file.size > MAX_FILE_SIZE) throw new Error(`单个文件不能超过 15 MB：${file.name}`);
 }
 
-export async function GET() {
+async function handleGET() {
   try {
     await ensureSchema();
     const { DB } = getBindings();
+    const account = (await currentAccount())!;
     const result = await DB.prepare(
       `SELECT id, product_name, status, markets_json, platforms_json, created_at, updated_at
-       FROM tasks ORDER BY updated_at DESC LIMIT 20`,
-    ).all<TaskRow>();
+       FROM tasks WHERE id IN (SELECT resource_id FROM resource_owners WHERE kind='task' AND user_id=?) ORDER BY updated_at DESC LIMIT 20`,
+    ).bind(account.id).all<TaskRow>();
 
     return Response.json({ tasks: result.results.map((row) => mapTaskRow(row)) });
   } catch (error) {
@@ -85,12 +87,13 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const storedObjectKeys: string[] = [];
 
   try {
     await ensureSchema();
     const { DB, UPLOADS } = getBindings();
+    const account = (await currentAccount())!;
     const form = await request.formData();
     const requestText = typeof form.get('request') === 'string' ? String(form.get('request')).slice(0, 4_000) : '';
     const inferredTargets = inferIntakeTargets(requestText);
@@ -134,6 +137,7 @@ export async function POST(request: Request) {
     }
 
     const writes = [
+      DB.prepare("INSERT INTO resource_owners (kind,resource_id,user_id) VALUES ('task',?,?)").bind(taskId,account.id),
       DB.prepare(
         `INSERT INTO tasks (id, product_name, status, markets_json, platforms_json, created_at, updated_at)
          VALUES (?, ?, 'CREATED', ?, ?, ?, ?)`,
@@ -188,3 +192,6 @@ export async function POST(request: Request) {
     return Response.json({ error: message }, { status: clientError ? 400 : 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);

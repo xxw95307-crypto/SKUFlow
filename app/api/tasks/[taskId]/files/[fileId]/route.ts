@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 
 export const dynamic = 'force-dynamic';
@@ -7,7 +8,7 @@ interface FileRow {
   content_type: string;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string; fileId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string; fileId: string }> }) {
   try {
     await ensureSchema();
     const { taskId, fileId } = await context.params;
@@ -32,3 +33,5 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to load file' }, { status: 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);

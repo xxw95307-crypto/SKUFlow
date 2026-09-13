@@ -1,9 +1,10 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { getBindings } from '@/db/client';
 import { getShopifyDevStatus } from '@/lib/platforms/shopify-dev';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function handleGET() {
   try {
     return Response.json(getShopifyDevStatus(getBindings()));
   } catch (error) {
@@ -14,3 +15,5 @@ export async function GET() {
     }, { status: 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);

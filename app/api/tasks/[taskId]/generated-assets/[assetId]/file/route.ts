@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ interface AssetFileRow {
   status: string;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string; assetId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string; assetId: string }> }) {
   try {
     await ensureSchema();
     const { taskId, assetId } = await context.params;
@@ -34,3 +35,5 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to load asset' }, { status: 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);

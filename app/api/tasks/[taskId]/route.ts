@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import type { PlatformId } from '@/lib/domain/platform';
 import { isTaskStatus, type TaskEvent, type TaskFile, type TaskFileStatus, type TaskSnapshot, type TaskStatus } from '@/lib/domain/task';
@@ -72,7 +73,7 @@ async function getTask(taskId: string): Promise<TaskSnapshot | null> {
   };
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -87,7 +88,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   }
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -119,3 +120,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
     return Response.json({ error: message }, { status: invalidTransition ? 409 : 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const PATCH = withAuthentication(handlePATCH);

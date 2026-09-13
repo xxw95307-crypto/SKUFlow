@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { buildFactExtractionContext, FACT_EXTRACTION_PROMPT_VERSION } from '@/lib/agents/fact-extraction';
 import { callBailianFactExtraction, hashExtractionInput } from '@/lib/ai/bailian-client';
@@ -23,7 +24,7 @@ interface TaskRow {
   status: TaskStatus;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -49,7 +50,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   }
 }
 
-export async function POST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   let DB: D1Database | null = null;
   let runId: string | null = null;
   try {
@@ -164,3 +165,6 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     return Response.json({ error: message }, { status: conflict ? 409 : providerError ? 502 : 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);

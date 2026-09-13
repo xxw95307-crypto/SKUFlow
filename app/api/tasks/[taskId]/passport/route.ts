@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import {
   isFactStatus,
@@ -117,7 +118,7 @@ function evidenceExcerpt(value: FactValue): string {
   return serialized.slice(0, 500);
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -133,7 +134,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   }
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -278,3 +279,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
     return Response.json({ error: message }, { status: notFound ? 404 : clientError ? 400 : 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const PATCH = withAuthentication(handlePATCH);

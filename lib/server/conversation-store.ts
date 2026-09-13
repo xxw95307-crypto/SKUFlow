@@ -47,10 +47,11 @@ function record(row: ConversationRow): AgentConversationRecord {
 const SELECT_COLUMNS = `id, task_id, title, status, messages_json, model_history_json,
   tool_runs_json, selected_assets_json, created_at, updated_at`;
 
-export async function listConversations(DB: D1Database): Promise<ConversationSummary[]> {
-  const result = await DB.prepare(
-    `SELECT ${SELECT_COLUMNS} FROM agent_conversations ORDER BY created_at DESC, id DESC LIMIT 50`,
-  ).all<ConversationRow>();
+export async function listConversations(DB: D1Database, userId: string): Promise<ConversationSummary[]> {
+  const query = DB.prepare(
+    `SELECT ${SELECT_COLUMNS} FROM agent_conversations WHERE id IN (SELECT resource_id FROM resource_owners WHERE kind='conversation' AND user_id=?) ORDER BY created_at DESC, id DESC LIMIT 50`,
+  );
+  const result = await query.bind(userId).all<ConversationRow>();
   return result.results.map(summary);
 }
 
@@ -67,15 +68,17 @@ export async function deleteConversation(DB: D1Database, id: string): Promise<vo
 export async function createConversation(DB: D1Database, input: {
   id: string;
   taskId: string | null;
+  userId: string;
   title: string;
   messages: ConversationMessage[];
   now: string;
 }): Promise<AgentConversationRecord> {
-  await DB.prepare(
+  const write = DB.prepare(
     `INSERT INTO agent_conversations
      (id, task_id, title, status, messages_json, model_history_json, tool_runs_json, selected_assets_json, created_at, updated_at)
      VALUES (?, ?, ?, 'ACTIVE', ?, '[]', '[]', '[]', ?, ?)`,
-  ).bind(input.id, input.taskId, input.title, JSON.stringify(input.messages), input.now, input.now).run();
+  ).bind(input.id, input.taskId, input.title, JSON.stringify(input.messages), input.now, input.now);
+  await DB.batch([write, DB.prepare("INSERT INTO resource_owners (kind,resource_id,user_id) VALUES ('conversation',?,?)").bind(input.id,input.userId)]);
   return await getConversation(DB, input.id) as AgentConversationRecord;
 }
 

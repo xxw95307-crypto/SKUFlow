@@ -1,8 +1,9 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function handleGET() {
   try {
     await ensureSchema();
     const { DB, UPLOADS } = getBindings();
@@ -22,3 +23,5 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withAuthentication(handleGET);

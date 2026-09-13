@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { summarizeParseResults, type UnifiedParseResult } from '@/lib/domain/document-parsing';
 import type { TaskFileStatus, TaskStatus } from '@/lib/domain/task';
@@ -33,7 +34,7 @@ async function parseRequestOptions(request: Request): Promise<{ force: boolean }
   }
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -50,7 +51,7 @@ export async function GET(_request: Request, context: { params: Promise<{ taskId
   }
 }
 
-export async function POST(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -161,3 +162,6 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
     return Response.json({ error: message }, { status: clientError ? 400 : conflict ? 409 : 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);

@@ -1,3 +1,4 @@
+import { currentAccount, withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import type { ConversationMessage } from '@/lib/domain/conversation';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
@@ -13,16 +14,16 @@ const welcomeMessages: ConversationMessage[] = [{
   meta: '等待你的消息',
 }];
 
-export async function GET() {
+async function handleGET() {
   try {
     await ensureSchema();
-    return Response.json({ conversations: await listConversations(getBindings().DB) });
+    return Response.json({ conversations: await listConversations(getBindings().DB, (await currentAccount())!.id) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to list conversations' }, { status: 500 });
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     await ensureSchema();
     const body = await request.json().catch(() => ({})) as { taskId?: unknown };
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
     const conversation = await createConversation(DB, {
       id: `conversation_${crypto.randomUUID()}`,
       taskId,
+      userId: (await currentAccount())!.id,
       title,
       messages: welcomeMessages,
       now,
@@ -49,3 +51,6 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to create conversation' }, { status: 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const POST = withAuthentication(handlePOST);

@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { isAgentToolName, type AgentModelMessage } from '@/lib/domain/agent-orchestrator';
 import {
@@ -89,7 +90,7 @@ function parseToolRuns(value: unknown): ConversationToolRun[] {
   });
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ conversationId: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ conversationId: string }> }) {
   try {
     await ensureSchema();
     const { conversationId } = await context.params;
@@ -101,7 +102,7 @@ export async function GET(_request: Request, context: { params: Promise<{ conver
   }
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ conversationId: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ conversationId: string }> }) {
   try {
     await ensureSchema();
     const { conversationId } = await context.params;
@@ -139,7 +140,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ conve
   }
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ conversationId: string }> }) {
+async function handleDELETE(_request: Request, context: { params: Promise<{ conversationId: string }> }) {
   try {
     await ensureSchema();
     const { conversationId } = await context.params;
@@ -152,3 +153,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ con
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to delete conversation' }, { status: 500 });
   }
 }
+
+export const GET = withAuthentication(handleGET);
+export const PATCH = withAuthentication(handlePATCH);
+export const DELETE = withAuthentication(handleDELETE);

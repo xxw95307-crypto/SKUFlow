@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { getBindings } from '@/db/client';
 import { callBailianVisionAnalysis } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
@@ -23,7 +24,7 @@ function capText(value: string, remaining: number): string {
   return value.length <= remaining ? value : `${value.slice(0, Math.max(0, remaining - 12))}\n[内容已截断]`;
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     const form = await request.formData();
     const files = form.getAll('files').filter((item): item is File => item instanceof File);
@@ -102,3 +103,5 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : '附件读取失败' }, { status: 500 });
   }
 }
+
+export const POST = withAuthentication(handlePOST);

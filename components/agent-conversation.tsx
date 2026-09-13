@@ -1,4 +1,6 @@
 'use client';
+
+import type { AccountIdentity } from '@/lib/domain/identity';
 import { MediaOrderReview } from '@/components/media-order-review';
 import { VideoConversation } from '@/components/video-conversation';
 
@@ -75,7 +77,7 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，林晓雨。今天想上新什么商品？',
+  text: '你好，我是 SKUFlow Agent。今天想上新什么商品？',
   meta: '直接描述需求，也可以先附上图片、表格或说明文档',
 }];
 
@@ -229,7 +231,8 @@ function listingTitle(payload: ListingDraftPayload): string {
   return '中文 Listing 已生成';
 }
 
-export function AgentConversation() {
+export function AgentConversation({ account }: { account: AccountIdentity }) {
+  const avatar = Array.from(account.name)[0]?.toUpperCase() || "用";
   const [phase, setPhase] = useState<AgentPhase>('loading');
   const [progressStep, setProgressStep] = useState(0);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
@@ -960,7 +963,7 @@ export function AgentConversation() {
       </div>)}</div>
       <div className="agent-rail-links"><span>帮助中心</span><span>偏好设置</span></div>
       <div className="agent-rail-note"><i /> <b>Agent 自动推进</b><p>只在事实冲突、主观选择和最终发布时向你提问。</p></div>
-      <div className="agent-user"><span>林</span><div><b>林晓雨</b><small>品牌运营</small></div></div>
+      <div className="agent-user"><span>{avatar}</span><div><a href="/login" title="查看账号"><b>{account.name}</b></a><small title={account.email}>{account.email}</small><a className="account-signout" href="/signout-with-chatgpt?return_to=/login" target="_top">退出登录</a></div></div>
       <button
         className="agent-rail-resizer"
         type="button"
@@ -1012,7 +1015,7 @@ export function AgentConversation() {
         <section className="agent-thread" aria-label="Agent 对话">
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
           {!showWelcomeWorkspace && messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
-            <span className="chat-avatar">{message.role === 'agent' ? 'AI' : '林'}</span>
+            <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
             <div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}><RichMessageContent message={message} /></div>
           </article>)}
 

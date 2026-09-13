@@ -15,6 +15,7 @@ export interface AppBindings {
   SHOPIFY_DEV_CLIENT_ID?: string;
   SHOPIFY_DEV_CLIENT_SECRET?: string;
   SHOPIFY_API_VERSION?: string;
+  LEGACY_DATA_OWNER_EMAIL?: string;
 }
 
 let schemaPromise: Promise<void> | null = null;

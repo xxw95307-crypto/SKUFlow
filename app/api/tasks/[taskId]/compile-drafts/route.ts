@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { shopifyLookup } from '@/lib/platforms/shopify-integrated';
 import { getParseResults } from '@/lib/server/parse-store';
 import { buildFactExtractionContext } from '@/lib/agents/fact-extraction';
@@ -24,7 +25,7 @@ interface DraftCompileSummary {
   status: 'NEEDS_REVIEW' | 'VALIDATED';
 }
 
-export async function POST(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     const body = await request.json().catch(() => ({})) as {prefillOnly?:boolean};
     const prefillOnly = body?.prefillOnly === true;
@@ -140,3 +141,5 @@ export async function POST(request: Request, context: { params: Promise<{ taskId
     return Response.json({ error: message }, { status: /百炼|Listing Agent/.test(message) ? 502 : 500 });
   }
 }
+
+export const POST = withAuthentication(handlePOST);

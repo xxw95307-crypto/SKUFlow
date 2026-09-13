@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import { platformRegistry } from '@/lib/platforms/registry';
 import {
@@ -9,7 +10,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request, context: { params: Promise<{ platformId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ platformId: string }> }) {
   try {
     const { platformId } = await context.params;
     if (!platformRegistry.some((platform) => platform.id === platformId)) {
@@ -41,3 +42,5 @@ export async function POST(request: Request, context: { params: Promise<{ platfo
     return Response.json({ error: error instanceof Error ? error.message : 'Mock Listing request failed' }, { status: 500 });
   }
 }
+
+export const POST = withAuthentication(handlePOST);

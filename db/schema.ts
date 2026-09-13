@@ -224,4 +224,7 @@ export const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_video_jobs_task ON video_jobs(task_id,created_at DESC)`,
   `CREATE TABLE IF NOT EXISTS media_order_plans (id TEXT PRIMARY KEY,task_id TEXT NOT NULL,status TEXT NOT NULL,plan_json TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE)`,
   `CREATE INDEX IF NOT EXISTS idx_media_order_plans_task ON media_order_plans(task_id,created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS resource_owners (kind TEXT NOT NULL CHECK(kind IN ('task','conversation')), resource_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY(kind,resource_id))`,
+  `CREATE INDEX IF NOT EXISTS resource_owners_user ON resource_owners(user_id,kind,resource_id)`,
+  `CREATE TABLE IF NOT EXISTS account_migrations (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0)`,
 ] as const;

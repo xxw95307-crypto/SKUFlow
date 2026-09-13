@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingFieldDefinition } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
@@ -26,7 +27,7 @@ function normalizeFieldValue(field: ListingFieldDefinition, value: unknown): unk
   return String(value).trim().slice(0, 8_000);
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -90,3 +91,5 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
     return Response.json({ error: error instanceof Error ? error.message : 'Unable to update listing draft' }, { status: 500 });
   }
 }
+
+export const PATCH = withAuthentication(handlePATCH);

@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import {getSelectedMedia} from '@/lib/server/media-candidates';
 import {parseMediaOrderPlan,sameMediaSelection} from '@/lib/agents/media-ordering';
 import { publishIntegratedShopify, type ShopifyMediaInput } from '@/lib/platforms/shopify-integrated';
@@ -34,7 +35,7 @@ async function saveCreatedDraft(DB: D1Database, input: {
   ).bind(JSON.stringify(input.payload), input.now, input.draftId, input.taskId).run();
 }
 
-export async function POST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
@@ -123,3 +124,5 @@ export async function POST(_request: Request, context: { params: Promise<{ taskI
     return Response.json({ error: message }, { status: message.includes('尚未配置') ? 503 : 500 });
   }
 }
+
+export const POST = withAuthentication(handlePOST);

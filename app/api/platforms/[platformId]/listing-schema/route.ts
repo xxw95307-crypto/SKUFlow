@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { getBindings } from '@/db/client';
 import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
@@ -7,7 +8,7 @@ import { resolveMockListingSchema } from '@/lib/mock-platforms/schemas';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request, context: { params: Promise<{ platformId: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ platformId: string }> }) {
   const { platformId: rawPlatformId } = await context.params;
   const profile = platformRegistry.find((platform) => platform.id === rawPlatformId);
   if (!profile) return Response.json({ error: 'Unknown platform' }, { status: 404 });
@@ -31,3 +32,5 @@ export async function GET(request: Request, context: { params: Promise<{ platfor
     }),
   });
 }
+
+export const GET = withAuthentication(handleGET);

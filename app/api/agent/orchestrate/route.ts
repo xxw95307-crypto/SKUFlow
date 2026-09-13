@@ -1,3 +1,4 @@
+import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { availableAgentTools, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
@@ -164,7 +165,7 @@ function requestsListingStart(messages: AgentModelMessage[], state: AgentWorkflo
     || /(?:上新|发布).{0,10}(?:一款|一个|商品|产品)/i.test(lastUser.content);
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     await ensureSchema();
     const body = await request.json() as RequestBody;
@@ -230,3 +231,5 @@ export async function POST(request: Request) {
     return Response.json({ error: message }, { status: notFound ? 404 : clientError ? 400 : /百炼|Agent/.test(message) ? 502 : 500 });
   }
 }
+
+export const POST = withAuthentication(handlePOST);
