@@ -8,6 +8,9 @@ export interface AppBindings {
   BAILIAN_BASE_URL?: string;
   BAILIAN_MODEL?: string;
   BAILIAN_IMAGE_MODEL?: string;
+  BAILIAN_VIDEO_API_KEY?: string;
+  BAILIAN_VIDEO_BASE_URL?: string;
+  BAILIAN_VIDEO_MODEL?: string;
   SHOPIFY_DEV_STORE_DOMAIN?: string;
   SHOPIFY_DEV_CLIENT_ID?: string;
   SHOPIFY_DEV_CLIENT_SECRET?: string;

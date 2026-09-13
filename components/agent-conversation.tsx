@@ -1,4 +1,5 @@
 'use client';
+import { VideoConversation } from '@/components/video-conversation';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -238,6 +239,7 @@ export function AgentConversation() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [videoRevision,setVideoRevision] = useState(0);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -607,6 +609,12 @@ export function AgentConversation() {
         });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
+      }
+      if (name === 'generate_visual_assets' && /视频|video/i.test(requestText)) {
+        const result=await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText})}),'视频方案规划失败');
+        setVideoRevision(v=>v+1);setPhase('assets');
+        append('agent','视频方案已放在当前对话中，请核对镜头、时长和清晰度，确认后启动生成。','等待视频方案确认',{kind:'assets'});
+        markToolRun(call,'COMPLETED');return {result:{ok:true,videoPlanId:result.job.id},checkpoint:true};
       }
       if (name === 'generate_visual_assets') {
         setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…');
@@ -1022,6 +1030,7 @@ export function AgentConversation() {
 
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
 
+          {task && ['assets','publish','complete'].includes(phase) && <article className="chat-message agent"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision}/></article>}
           {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} /></article>}
 
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}

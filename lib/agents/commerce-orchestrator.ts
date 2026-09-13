@@ -11,7 +11,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_platform_listings: '读取所选平台字段（Shopify 使用真实接口），并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
-  generate_visual_assets: '先调用视觉策划 Agent，根据商品、平台和商家本轮要求动态规划 2–4 张素材（必须含一张主图），再以原始商品图为参考调用百炼图像模型执行。',
+  generate_visual_assets: '根据商品、平台和本轮要求规划视觉素材。用户明确请求视频时，规划 wan2.7-i2v 视频方案并在对话中请商家确认，不能声称视频已生成；其他情况生成图片候选。',
   open_asset_selection: '向商家展示已经真实生成并保存的视觉素材候选，让商家选择交付素材。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
   publish_mock_drafts: '在商家明确确认后创建平台测试草稿：Shopify 使用官方 Dev Store API 创建未公开 DRAFT，其他平台暂时使用本地 Mock。',
@@ -99,7 +99,8 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 8. 面向商家的自然语言使用简洁中文。调用工具时可以附一句简短说明，但不要伪造工具结果。
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；结合本会话用户的明确要求和后续补答判断；普通咨询不能触发上新。
 9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
-10. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
+10. 视频请求和视频修改要求调用 generate_visual_assets 生成方案卡。视频生成需方案确认，图片与视频是不同候选，视频目前仅支持下载，不自动发布。
+11. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
 
 当前可信状态：
 ${JSON.stringify(state, null, 2)}`;

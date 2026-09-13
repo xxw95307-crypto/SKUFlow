@@ -26,7 +26,7 @@ interface DraftCompileSummary {
 
 export async function POST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
-    const body = await request.json().catch(() => ({}));
+    const body = await request.json().catch(() => ({})) as {prefillOnly?:boolean};
     const prefillOnly = body?.prefillOnly === true;
     await ensureSchema();
     const { taskId } = await context.params;
