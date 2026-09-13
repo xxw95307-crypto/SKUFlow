@@ -62,10 +62,14 @@ export function parseSuppliedFields(raw: unknown, fields: ListingFieldDefinition
           Object.entries(row).every(([k,v]) => k === 'options' || (['sku','price','quantity','barcode','weight'].includes(k) && (emptyListingValue(v) || supported(v, quote))));
       });
     }
-    if (field.unit && /^[A-Z]{3}$/.test(field.unit) && !(currencyNames[field.unit] ?? new RegExp(`\\b${field.unit}\\b`)).test(quote)) {
+    if ((field.key === 'shipping_weight' || (field.type === 'variants' && Array.isArray(value) && value.some(row => !emptyListingValue(row?.weight)))) && !/\bkg\b|公斤|千克/i.test(quote)) {
+      valid = false; fieldNotes[field.key] = '运输重量的单位尚未明确为 kg，请核对；不会把克或面料克重直接当作千克。';
+    }
+    const hasMoney = field.type !== 'variants' || (Array.isArray(value) && value.some(row => !emptyListingValue(row?.price)));
+    if (hasMoney && field.unit && /^[A-Z]{3}$/.test(field.unit) && !(currencyNames[field.unit] ?? new RegExp(`\\b${field.unit}\\b`)).test(quote)) {
       valid = false; fieldNotes[field.key] = `资料币种未明确为 ${field.unit}，请确认，系统不会自行换算。`;
     }
-    if (field.unit && /^[A-Z]{3}$/.test(field.unit) && Object.entries(currencyNames).some(([code, pattern]) => code !== field.unit && pattern.test(quote))) {
+    if (hasMoney && field.unit && /^[A-Z]{3}$/.test(field.unit) && Object.entries(currencyNames).some(([code, pattern]) => code !== field.unit && pattern.test(quote))) {
       valid = false; fieldNotes[field.key] = '证据中包含其他币种，请明确本次使用的价格与币种。';
     }
     if (['variant_price','standard_price','price'].includes(field.key) && /成本|采购|建议|cost|wholesale|recommended/i.test(quote) && !/实际售价|销售价|零售价|售价|selling price|retail price/i.test(quote)) {
