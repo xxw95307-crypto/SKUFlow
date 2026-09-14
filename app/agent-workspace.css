@@ -531,6 +531,19 @@ body {
 }
 
 /* Welcome workspace */
+.description-content { color: #35453c; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.description-content p { margin: 0 0 12px; }
+.description-content ul, .description-content ol { margin: 8px 0 14px; padding-left: 24px; }
+.description-content ul { list-style: disc; }
+.description-content ol { list-style: decimal; }
+.description-content h2, .description-content h3, .description-content h4 { margin: 16px 0 8px; font-size: 15px; font-weight: 700; }
+.description-content table { border-collapse: collapse; width: 100%; }
+.description-content td, .description-content th { padding: 6px 10px; border: 1px solid #dce5df; text-align: left; }
+.description-editor { width: 100%; min-height: 190px; max-height: 380px; overflow: auto; padding: 14px; border: 1px solid #cbdad1; border-radius: 7px; background: #fff; outline: none; }
+.description-editor:focus { border-color: #7eaf94; box-shadow: 0 0 0 3px rgba(67,132,99,.08); }
+.description-editor[aria-readonly="true"] { background: #f7f9f7; }
+.description-content > :last-child { margin-bottom: 0; }
+
 .account-page {
   min-height: 100dvh;
   display: grid;

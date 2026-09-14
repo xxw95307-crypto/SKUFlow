@@ -1,3 +1,4 @@
+import { descriptionHtml } from '../domain/description.ts';
 import type { AppBindings } from '../../db/client.ts';
 import type { ListingDraftPayload } from '../domain/listing.ts';
 
@@ -114,7 +115,7 @@ export function buildShopifyProductInput(payload: ListingDraftPayload, draftId: 
   const seoDescription = textField(fields, 'seo_description');
   return {
     title,
-    descriptionHtml: textField(fields, 'body_html'),
+    descriptionHtml: textField(fields, 'body_html') ? descriptionHtml(fields.body_html) : undefined,
     vendor: textField(fields, 'vendor'),
     productType: textField(fields, 'product_type'),
     tags,
