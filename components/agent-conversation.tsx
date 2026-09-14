@@ -622,6 +622,21 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
       }
+      if (name === 'revise_product_video') {
+        setBusyLabel('视频 Agent 正在根据上一条方案和你的要求修改视频…');
+        const payload = await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`, {
+          method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText}),
+        }), '视频修改规划失败');
+        const started = await fetch(`/api/tasks/${currentTask.id}/videos`, {method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id:payload.job.id,action:'start'})});
+        setVideoRevision(v=>v+1);
+        await responseJson(started,'修改后的视频生成未成功启动');
+        mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);
+        const images=selectedAssetsRef.current.filter(id=>!id.startsWith('video_'));
+        selectedAssetsRef.current=images;setSelectedAssets(images);setPhase('assets');
+        append('agent','已按你的修改要求重新规划并提交新视频，原有图片保留。请在下方查看新方案和生成进度，完成后可预览并选择。','视频生成中');
+        markToolRun(call,'COMPLETED');
+        return {result:{ok:true,videoId:payload.job.id},checkpoint:true};
+      }
       if (name === 'generate_visual_assets' && /封面|排序|顺序|(?:视频|图片).*放.*第/.test(requestText)) {
         mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance(requestText);setPhase('publish');setPublishOpen(false);
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};

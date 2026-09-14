@@ -52,8 +52,8 @@ test('listing requests with explicit platform and market can create from attachm
 test('Agent generates assets before selection and requires explicit approval before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
   assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['generate_visual_assets']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['generate_visual_assets', 'open_asset_selection']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['generate_visual_assets', 'open_publish_confirmation']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['generate_visual_assets', 'revise_product_video', 'open_asset_selection']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['generate_visual_assets', 'revise_product_video', 'open_publish_confirmation']);
   assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['publish_mock_drafts']);
 });
 
@@ -91,4 +91,11 @@ test('central Agent retains regeneration after image selection, but never after 
  assert.ok(availableAgentTools({...ready,selectedAssetCount:2}).some(t=>t.function.name==='generate_visual_assets'));
  assert.ok(!availableAgentTools({...ready,selectedAssetCount:2,publishApproved:true}).some(t=>t.function.name==='generate_visual_assets'));
  assert.ok(!availableAgentTools({...ready,publishedDraftCount:2}).some(t=>t.function.name==='generate_visual_assets'));
+});
+
+test('video revision is available with existing media and requires reviewed listings and no publish authorization',()=>{
+ const ready=state({parsedFileCount:2,analyzedImageCount:1,factCount:8,generatedDraftCount:2,approvedDraftCount:2,generatedAssetCount:3});
+ const has=(s:AgentWorkflowState)=>availableAgentTools(s).some(t=>t.function.name==='revise_product_video');
+ assert.ok(has(ready));assert.ok(has({...ready,selectedAssetCount:2}));
+ assert.ok(!has({...ready,approvedDraftCount:0}));assert.ok(!has({...ready,publishApproved:true}));assert.ok(!has({...ready,publishedDraftCount:2}));
 });

@@ -9,6 +9,7 @@ export const AGENT_TOOL_NAMES = [
   'open_conflict_review',
   'open_listing_review',
   'generate_visual_assets',
+  'revise_product_video',
   'open_asset_selection',
   'open_publish_confirmation',
   'publish_mock_drafts',

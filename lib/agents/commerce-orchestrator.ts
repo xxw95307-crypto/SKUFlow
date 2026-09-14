@@ -12,6 +12,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
   generate_visual_assets: '根据商品、平台和本轮要求统一规划并生成图片与视频候选。已有素材时仍可调用此工具落实修改、排除或新增要求；不要用展示旧素材代替重新生成。视频按实际任务状态报告。',
+  revise_product_video: '依据上一条视频方案和商家本轮要求重新规划并生成一条商品视频；仅修改视频时使用，保留已有图片。视频镜头、背景、时长、动作修改使用此工具，商品媒体排序使用媒体编排。',
   open_asset_selection: '向商家展示已经真实生成并保存的视觉素材候选，让商家选择交付素材。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
   publish_mock_drafts: '在商家明确确认后创建平台测试草稿：Shopify 使用官方 Dev Store API 创建未公开 DRAFT，其他平台暂时使用本地 Mock。',
@@ -49,6 +50,7 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   }
   if (state.generatedDraftCount > 0 && !allDraftsApproved) names.push('open_listing_review');
   if (allDraftsApproved && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_visual_assets');
+  if (allDraftsApproved && state.generatedAssetCount > 0 && state.publishedDraftCount === 0 && !state.publishApproved) names.push('revise_product_video');
   if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount === 0) names.push('open_asset_selection');
   if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount > 0 && !state.publishApproved) {
     names.push('open_publish_confirmation');
@@ -99,7 +101,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 8. 面向商家的自然语言使用简洁中文。调用工具时可以附一句简短说明，但不要伪造工具结果。
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；结合本会话用户的明确要求和后续补答判断；普通咨询不能触发上新。
 9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
-10. 视频请求和视频修改要求调用 generate_visual_assets 生成方案卡。视频生成需方案确认，图片与视频是不同候选，视频可由卖家选择并同图片编排后发布到 Shopify，封面与顺序必须在对话卡片确认。封面、排序或视频位置修改要求调用 generate_visual_assets 打开媒体编排确认。
+10. 已有素材时用户只修改或新增视频，必须调用 revise_product_video；它依据上一条视频方案落实镜头、场景、动作、时长要求并启动新视频，不重做图片。视频内部镜头顺序不是商品媒体排序。首次图片与视频一起规划使用 generate_visual_assets。只调整商品封面、图片/视频在商品媒体中的位置时调用 generate_visual_assets 打开媒体编排。
 11. 生成工具完成且用户没有新的修改要求时，应调用 open_asset_selection 展示本次结果，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求，再展示新结果。
 12. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
 
