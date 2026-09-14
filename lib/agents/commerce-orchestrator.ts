@@ -138,4 +138,3 @@ export function withRegenerationTool(tools: AgentToolDefinition[], messages: Age
     },
   }];
 }
-
