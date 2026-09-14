@@ -52,8 +52,8 @@ test('listing requests with explicit platform and market can create from attachm
 test('Agent generates assets before selection and requires explicit approval before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
   assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['generate_visual_assets']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['open_asset_selection']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['open_publish_confirmation']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['generate_visual_assets', 'open_asset_selection']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['generate_visual_assets', 'open_publish_confirmation']);
   assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['publish_mock_drafts']);
 });
 
@@ -83,4 +83,12 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
   assert.equal(result.message.content, '先读取资料。');
   assert.deepEqual(requestBody?.tool_choice, { type: 'function', function: { name: 'parse_product_sources' } });
   assert.equal(requestBody?.parallel_tool_calls, false);
+});
+
+test('central Agent retains regeneration after image selection, but never after publication authorization',()=>{
+ const ready=state({parsedFileCount:2,analyzedImageCount:1,factCount:8,generatedDraftCount:2,approvedDraftCount:2,generatedAssetCount:3});
+ assert.ok(availableAgentTools(ready).some(t=>t.function.name==='generate_visual_assets'));
+ assert.ok(availableAgentTools({...ready,selectedAssetCount:2}).some(t=>t.function.name==='generate_visual_assets'));
+ assert.ok(!availableAgentTools({...ready,selectedAssetCount:2,publishApproved:true}).some(t=>t.function.name==='generate_visual_assets'));
+ assert.ok(!availableAgentTools({...ready,publishedDraftCount:2}).some(t=>t.function.name==='generate_visual_assets'));
 });
