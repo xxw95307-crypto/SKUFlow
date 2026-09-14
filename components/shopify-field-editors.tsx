@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import type { ListingFieldDefinition } from '@/lib/domain/listing';
-import type { ShopifyVariantRow } from '@/lib/platforms/shopify-integrated';
+import type { ShopifyVariantRow } from '@/lib/domain/shopify-validation';
 export function ShopifyLookupEditor({field,value,onChange}:{field:ListingFieldDefinition;value:unknown;onChange:(v:unknown)=>void}) {
   const [query,setQuery]=useState('');const [options,setOptions]=useState<Array<{value:string;label:string}>>(field.options ?? []);const [error,setError]=useState('');const [busy,setBusy]=useState(false);
   const search=async()=>{setBusy(true);setError('');try{const r=await fetch(`/api/integrations/shopify-options?kind=${field.lookup}&q=${encodeURIComponent(query)}`);const d=await r.json() as {options:Array<{value:string;label:string}>;error?:string};if(!r.ok)throw new Error(d.error);setOptions(d.options);if(!d.options.length)setError('未找到匹配项，可换一个关键词（分类支持英文搜索）');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};

@@ -1,5 +1,5 @@
 import { listingRequirement } from '../agents/listing-evidence.ts';
-import { validateShopifyFields } from '../platforms/shopify-integrated.ts';
+import { validateShopifyFields } from '../domain/shopify-validation.ts';
 import type { GeneratedListingDraft, ListingDraftPayload, ListingFieldDefinition, ListingFieldSource, MockListingSchema } from '../domain/listing';
 import type { DraftValidationIssue, PlatformDraft, ProductFact, ProductPassport } from '../domain/product-passport';
 
