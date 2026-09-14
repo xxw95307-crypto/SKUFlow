@@ -3,7 +3,7 @@ import { DescriptionEditor, DescriptionPreview } from '@/components/description-
 import { listingRequirement, sellerFieldLabel } from '@/lib/agents/listing-evidence';
 
 import { ShopifyLookupEditor, ShopifyVariantsEditor } from '@/components/shopify-field-editors';
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type { ListingFieldDefinition, ListingFieldSource } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
 import type { TaskSnapshot } from '@/lib/domain/task';
@@ -24,7 +24,7 @@ function editableValue(field: ListingFieldDefinition, value: unknown): string {
   return value === undefined || value === null ? '' : String(value);
 }
 
-function ListingFieldEditor({ field, value, source, confirmed, issue, evidence, note, onChange, onConfirm }: {
+function ListingFieldEditor({ field, value, source, confirmed, issue, evidence, note, active, onChange, onConfirm }: {
   field: ListingFieldDefinition;
   value: unknown;
   source: ListingFieldSource;
@@ -32,6 +32,7 @@ function ListingFieldEditor({ field, value, source, confirmed, issue, evidence, 
   issue?: string;
   evidence?: import('@/lib/domain/listing').ListingFieldEvidence;
   note?: string;
+  active?: boolean;
   onChange: (value: unknown) => void;
   onConfirm: (confirmed: boolean) => void;
 }) {
@@ -42,7 +43,7 @@ function ListingFieldEditor({ field, value, source, confirmed, issue, evidence, 
     placeholder: field.placeholder ?? (source === 'AI_GENERATED' || source === 'AI_INFERRED' ? '由 Listing Agent 生成' : ''),
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),
   };
-  return <div className={`listing-field ${issue ? 'has-error' : ''}`}>
+  return <div tabIndex={-1} data-listing-field={field.key} className={`listing-field ${issue ? 'has-error' : ''} ${active ? 'is-located' : ''}`}>
     <span><b>{field.label}{field.required && <i>*</i>}</b><em className={source.toLowerCase()}>{source === 'AI_INFERRED' && !confirmed ? 'AI 推断·待确认' : source === 'SELLER_INPUT' ? sellerFieldLabel(value,field.required) : evidence?.sourceKind === 'USER_INPUT' ? '来自卖家对话' : sourceLabels[source]}</em></span>
     {field.key === 'body_html' ? <DescriptionEditor label={field.label} value={value} readOnly={readOnly} onChange={onChange}/> : field.lookup ? <ShopifyLookupEditor field={field} value={value} onChange={onChange}/> : field.type==='variants' ? <ShopifyVariantsEditor value={value} onChange={onChange}/> : field.type==='boolean' ? <select aria-label={field.label} value={value===true?'true':value===false?'false':''} onChange={e=>onChange(e.target.value===''?undefined:e.target.value==='true')}><option value="">请选择</option><option value="true">是</option><option value="false">否</option></select> : field.options ? <select aria-label={field.label} value={String(value??'')} onChange={e=>onChange(e.target.value)}><option value="">请选择</option>{field.options.map(o=><option value={o.value} key={o.value}>{o.label}</option>)}</select> : field.type === 'text' || field.type === 'string_array'
       ? <textarea {...common} rows={field.type === 'string_array' ? 5 : 6} />
@@ -66,6 +67,18 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+  const issueCursor = useRef(-1);
+  const [locatedField, setLocatedField] = useState<{key:string;sequence:number} | null>(null);
+  useEffect(() => { issueCursor.current = -1; setLocatedField(null); }, [selectedDraftId]);
+  useEffect(() => {
+    if (!locatedField || (conversation && !detailsOpen)) return;
+    const field = Array.from(formRef.current?.querySelectorAll<HTMLElement>('[data-listing-field]') ?? []).find(node => node.dataset.listingField === locatedField.key);
+    if (!field) return;
+    field.scrollIntoView({behavior: 'smooth', block: 'center'});
+    const control = field.querySelector<HTMLElement>('input:not([readonly]):not([disabled]), textarea:not([readonly]):not([disabled]), select:not([disabled]), [contenteditable="true"]');
+    (control ?? field).focus({preventScroll: true});
+  }, [locatedField, detailsOpen, conversation]);
 
   useEffect(() => {
     if (!task) return;
@@ -91,6 +104,15 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
   const confirmations = selectedDraft && listing
     ? draftConfirmations[selectedDraft.id] ?? confirmedInferredFields(listing)
     : [];
+
+  const locateNextIssue = () => {
+    if (!listing || !selectedDraft) return;
+    const keys = [...new Set(selectedDraft.validationIssues.map(issue => issue.path))].filter(key => listing.schema.fields.some(field => field.key === key));
+    if (!keys.length) return;
+    issueCursor.current = (issueCursor.current + 1) % keys.length;
+    setDetailsOpen(true);
+    setLocatedField(current => ({key:keys[issueCursor.current], sequence:(current?.sequence ?? 0)+1}));
+  };
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((platform) => [platform.id, platform.shortName])), []);
   const generatedCount = passport?.platformDrafts.filter((draft) => isListingDraftPayload(draft.payload)).length ?? 0;
@@ -179,8 +201,9 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
       {listing.schema.mode === 'SHOPIFY_API' && <div className="listing-sync-note"><b>字段来源：Shopify 实际接口 · {listing.schema.storeDomain}</b><span>商品、变体、地点库存、运输及所选图片将在发布时同步；库存需授权读写与地点权限。尚未接入：{listing.schema.unsupportedFields?.join('、')}。发布后逐项回读核对。</span></div>}
       {listing.testPublication?.verification && <div className="listing-sync-note"><b>Shopify 回读核对</b><ul>{listing.testPublication.verification.map((item) => <li key={item.field}>{item.field}：{item.status === 'MATCH' ? '已核对一致' : item.status === 'MISMATCH' ? '值不一致' : item.status === 'NOT_SYNCED' ? '未同步' : item.status === 'PENDING' ? '平台处理中' : '未能核对'}</li>)}</ul></div>}
       {conversation && !detailsOpen && <dl className="listing-conversation-preview">{listing.schema.fields.slice(0, 5).map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{field.key === 'body_html' ? <DescriptionPreview value={fields[field.key]}/> : editableValue(field, fields[field.key]) || '待补充'}</dd><span>{(fieldSources[field.key] ?? field.source) === 'SELLER_INPUT' ? sellerFieldLabel(fields[field.key],listing.schema.mode === 'SHOPIFY_API' ? listingRequirement(field,fields) : field.required) : sourceLabels[fieldSources[field.key] ?? field.source]}</span></div>)}</dl>}
-      {(!conversation || detailsOpen) && <div className="listing-form-grid">{listing.schema.fields.map((field) => <ListingFieldEditor
+      {(!conversation || detailsOpen) && <div className="listing-form-grid" ref={formRef}>{listing.schema.fields.map((field) => <ListingFieldEditor
         key={field.key}
+        active={locatedField?.key === field.key}
         field={{...field,required:listing.schema.mode === 'SHOPIFY_API' ? listingRequirement(field,fields) : field.required}}
         evidence={listing.fieldEvidence?.[field.key]}
         note={listing.fieldNotes?.[field.key]}
@@ -209,7 +232,7 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
           };
         })}
       />)}</div>}
-      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? `${selectedDraft.validationIssues.length} 项需要处理` : '字段校验通过'} · 整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
+      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? <button type="button" className="listing-issue-jump" onClick={locateNextIssue} title="展开并定位未处理字段；再次点击定位下一项">{selectedDraft.validationIssues.length} 项需要处理 · {locatedField ? '定位下一项' : '点击定位'} ↓</button> : '字段校验通过'} · 整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
     </>}
 
     {!conversation && <div className="footer-actions"><span>{generatedCount}/{passport?.platformDrafts.length ?? 0} 已生成 · {approvedCount} 已确认</span><button className="primary" type="button" onClick={onAssets} disabled={!allApproved}>全部确认后进入视觉素材 →</button></div>}

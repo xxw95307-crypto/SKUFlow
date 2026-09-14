@@ -1501,3 +1501,6 @@ body {
  .agent-shell-v2 .listing-conversation-card .listing-review-actions { margin-left: 16px; margin-right: 16px; }
  .agent-shell-v2 .shopify-variant-fields { grid-template-columns: 1fr; }
 }
+.agent-shell-v2 .listing-issue-jump { border: 0; padding: 5px 0; background: transparent; color: #a45a24; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
+.agent-shell-v2 .listing-issue-jump:focus-visible { outline: 2px solid var(--sf-accent-strong); outline-offset: 4px; border-radius: 3px; }
+.agent-shell-v2 .listing-field.is-located { border-color: #6ba886; box-shadow: 0 0 0 3px #6ba88633; scroll-margin: 24px; }
