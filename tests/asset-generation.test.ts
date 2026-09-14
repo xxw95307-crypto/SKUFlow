@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAssetGenerationPrompt, buildAssetPlanningMessages, parseAssetPlan } from '../lib/agents/asset-generation.ts';
+import { buildAssetGenerationPrompt, buildAssetPlanningMessages, parseUnifiedVideoDecision, parseAssetPlan } from '../lib/agents/asset-generation.ts';
 import { callBailianAssetPlanning, callBailianImageGeneration } from '../lib/ai/bailian-client.ts';
 import { loadBailianImageConfig, missingBailianImageConfig } from '../lib/config/bailian.ts';
 import type { ProductFact } from '../lib/domain/product-passport.ts';
@@ -116,4 +116,12 @@ test('calls the Token Plan native image endpoint with a private reference image 
   assert.equal(body.parameters.watermark, false);
   assert.deepEqual([...result.bytes], [137, 80, 78, 71]);
   assert.equal(result.width, 1024);
+});
+
+test('unified visual planning validates video decisions and original image references',()=>{
+ const plan={title:'展示',prompt:'缓慢环绕商品，不改变外观',duration:5,resolution:'720P',sourceFileId:'original',shots:['商品细节']};
+ assert.equal(parseUnifiedVideoDecision(JSON.stringify({videoDecision:{required:true,reason:'展示商品细节',plan}}),['original']).plan?.duration,5);
+ assert.equal(parseUnifiedVideoDecision(JSON.stringify({videoDecision:{required:false,reason:'用户只需图片',plan:null}}),['original']).plan,null);
+ assert.throws(()=>parseUnifiedVideoDecision(JSON.stringify({videoDecision:{required:true,reason:'需要展示',plan:{...plan,sourceFileId:'invented'}}}),['original']));
+ assert.throws(()=>parseUnifiedVideoDecision(JSON.stringify({videoDecision:{required:true,reason:'',plan}}),['original']));
 });

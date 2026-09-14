@@ -1,9 +1,10 @@
+import {parseVideoPlan, type VideoPlan} from '../ai/wan-video.ts';
 import type { ListingDraftPayload } from '../domain/listing.ts';
 import { GENERATED_ASSET_KINDS, type GeneratedAssetKind } from '../domain/generated-asset.ts';
 import type { PlatformId } from '../domain/platform.ts';
 import type { ProductFact } from '../domain/product-passport.ts';
 
-export const ASSET_PLAN_VERSION = 'dynamic-v1';
+export const ASSET_PLAN_VERSION = 'dynamic-v2';
 const ALLOWED_SIZES = ['1024*1024', '1024*1280', '1280*1024'] as const;
 
 export interface AssetGenerationSpec {
@@ -21,6 +22,7 @@ export interface AssetPlanningContext {
   platforms: readonly PlatformId[];
   markets: readonly string[];
   sourceImageCount: number;
+  sourceImageIds?: string[];
   userGuidance?: string | null;
 }
 
@@ -52,6 +54,8 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 
 只输出 JSON：{"assets":[{"kind":"HERO","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的中文生成指令"}]}。
 
+同时在同一个 JSON 中返回 videoDecision:{required:boolean,reason:中文理由,plan:视频方案或null}。自主判断视频是否有助于展示商品，用户明确不要视频则不生成；需要时规划一条视频，plan为{title,prompt,duration:2到15的整数,resolution:"720P"或"1080P",sourceFileId:提供的原图ID,shots:[中文镜头说明]}。保持原图商品外观与事实，不编造动作、功能或文字；用简短镜头展示，视频与图片用途互补。没有原图ID时required必须为false。
+
 规则：
 1. 总数由你判断，必须为 2–4 张；必须且只能有一张 HERO 商品主图。
 2. 其他 kind 从 LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING 中选择，可按商品需要重复同一 kind，但场景和目的不得重复。
@@ -68,7 +72,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 已审核 Listing：${listingText(context.listings) || '无'}
 目标平台：${context.platforms.join('、') || '未指定'}
 目标市场：${context.markets.join('、') || '未指定'}
-可用原始商品图：${context.sourceImageCount} 张
+可用原始商品图：${context.sourceImageCount} 张；可用原图ID：${(context.sourceImageIds ?? []).join("、")}
 商家本轮补充要求：${plainText(context.userGuidance) || '无，由你根据商品与平台自主判断'}
 
 请为这个具体商品制定素材计划。`,
@@ -123,4 +127,11 @@ export function buildAssetGenerationPrompt(input: {
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
 
 视觉策划任务：${input.spec.instruction}`;
+}
+
+export function parseUnifiedVideoDecision(content:string, sourceIds:string[]): {required:boolean;reason:string;plan:VideoPlan|null} {
+  const decision=JSON.parse(content).videoDecision;
+  if (!decision) return {required:false,reason:'本次策划未提供视频方案',plan:null};
+  if(typeof decision.required!=='boolean'||typeof decision.reason!=='string'||!decision.reason.trim())throw new Error('素材策划缺少有效的视频决策');
+  return {required:decision.required,reason:decision.reason.slice(0,300),plan:decision.required?parseVideoPlan(decision.plan,sourceIds):null};
 }

@@ -626,15 +626,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance(requestText);setPhase('publish');setPublishOpen(false);
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
       }
-      if (name === 'generate_visual_assets' && /视频|video/i.test(requestText)) {
-        const result=await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText})}),'视频方案规划失败');
-        setVideoRevision(v=>v+1);setPhase('assets');
-        append('agent','视频方案已放在当前对话中，请核对镜头、时长和清晰度，确认后启动生成。','等待视频方案确认',{kind:'assets'});
-        markToolRun(call,'COMPLETED');return {result:{ok:true,videoPlanId:result.job.id},checkpoint:true};
-      }
       if (name === 'generate_visual_assets') {
         setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…');
-        const customVisualRequest = /重新生成|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片)|生成.*(?:素材|图片)/.test(requestText);
+        const customVisualRequest = /重新生成|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|视频|主图|场景)|增加.*(?:素材|图片)|生成.*(?:素材|图片|视频)/.test(requestText);
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
@@ -643,6 +637,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ force: customVisualRequest, guidance: customVisualRequest ? requestText : null }),
         }), '视觉素材生成失败');
+        setVideoRevision(v=>v+1);
         setGeneratedAssets(payload.assets);
         selectedAssetsRef.current = [];
         setSelectedAssets([]);
@@ -656,7 +651,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
         setPhase('assets');
-        append('agent', `我已经根据这个商品的类目、属性、目标平台和原始图片，动态规划并生成 ${completed.length} 张视觉素材。候选图已经放在当前对话中；不满意的话，直接在下方告诉我想怎么修改。`, '等待素材选择');
+        append('agent', `我已经根据这个商品的类目、属性、目标平台和原始图片，动态规划并生成 ${completed.length} 项已完成素材。图片与视频已统一规划；视频如已启动会在下方显示生成进度。候选素材已经放在当前对话中；不满意的话，直接在下方告诉我想怎么修改。`, '等待素材选择');
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
