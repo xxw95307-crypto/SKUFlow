@@ -5,7 +5,7 @@ import { MediaOrderReview } from '@/components/media-order-review';
 import { VideoConversation } from '@/components/video-conversation';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
@@ -169,11 +169,12 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetConversationCard({ assets, selected, onToggle, onConfirm }: {
+function AssetConversationCard({ assets, selected, onToggle, onConfirm, children }: {
   assets: GeneratedAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
+  children?: ReactNode;
 }) {
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
   return <div className="asset-conversation-card">
@@ -183,7 +184,8 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm }: {
       <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
     <div className="asset-conversation-hint"><span>↳</span><div><b>不满意这批素材？</b><p>直接在下方对话框告诉我修改要求，例如“换成户外场景，不要模特”，我会重新规划并生成。</p></div></div>
-    <footer><span>已选择 {selected.length} 项</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认已选素材并继续</button></footer>
+    {children && <div className="asset-video-section">{children}</div>}
+    <footer><span>已选择 {selected.length} 项图片／视频</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认已选素材并继续</button></footer>
   </div>;
 }
 
@@ -1052,8 +1054,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
 
-          {task && ['assets','publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
-          {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets} /></article>}
+          {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
+          {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion/>}</AssetConversationCard></article>}
 
           {phase === 'publish' && task?.platforms.includes('shopify') && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" disabled={Boolean(task?.platforms.includes('shopify') && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
