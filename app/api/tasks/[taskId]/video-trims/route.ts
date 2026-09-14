@@ -23,17 +23,20 @@ async function handlePOST(request: Request, ctx: { params: Promise<{ taskId: str
       .bind(taskId).all<{ id: string; source_file_id: string; plan_json: string }>();
     if (!rows.results.length) return Response.json({ error: '当前没有已生成的视频可供裁剪' }, { status: 409 });
     if (body.videoId && !rows.results.some(r => r.id === body.videoId)) return Response.json({ error: '目标视频不属于当前任务或尚未完成' }, { status: 404 });
-    // Persist a confirmation card, never treat inferred seconds as an approved edit.
+    // The Agent decides the range; persist it before hidden client execution.
     const id = `video_${crypto.randomUUID()}`;
-    const source = rows.results.find(r => r.id === body.videoId);
-    const plan = { title: '视频裁剪 · 待确认', duration: 0, resolution: '原视频', shots: [], trim: {
-      sourceVideoId: source?.id ?? null, start: typeof body.start === 'number' ? body.start : null,
-      end: typeof body.end === 'number' ? body.end : null, guidance: String(body.guidance ?? '').slice(0, 1000),
+    const source = rows.results.find(r => r.id === body.videoId) ?? (!body.videoId && rows.results.length === 1 ? rows.results[0] : null);
+    if (!source) return Response.json({error:'你想裁剪哪一个视频？请告诉我视频编号或名称。',code:'NEED_TARGET'},{status:422});
+    const original=JSON.parse(source.plan_json);
+    const range=validateVideoTrimRange(body.start ?? 0,body.end ?? original.duration,original.duration);
+    if (range.start===0 && range.end===original.duration) return Response.json({error:'想去掉哪个大致时段？例如前半段或开头约2秒。',code:'NEED_RANGE'},{status:422});
+    const plan = { title: '视频裁剪', duration: 0, resolution: '原视频', shots: [], trim: {
+      sourceVideoId: source.id, start: range.start, end: range.end, guidance: String(body.guidance ?? '').slice(0, 1000),
     } };
     await b.DB.prepare("UPDATE video_jobs SET status='CANCELED' WHERE task_id=? AND status='TRIM_DRAFT'").bind(taskId).run();
     await b.DB.prepare("INSERT INTO video_jobs(id,task_id,source_file_id,plan_json,status,created_at) VALUES(?,?,?,?,'TRIM_DRAFT',?)")
       .bind(id, taskId, source?.source_file_id ?? rows.results[0].source_file_id, JSON.stringify(plan), new Date().toISOString()).run();
-    return Response.json({ trimId: id });
+    return Response.json({ trimId: id, sourceVideoId:source.id, sourceUrl:`/api/tasks/${taskId}/videos/${source.id}/file`, duration:original.duration, ...range });
   } catch (e) { return Response.json({ error: (e as Error).message }, { status: 400 }); }
 }
 
@@ -49,7 +52,7 @@ async function handlePUT(request: Request, ctx: { params: Promise<{ taskId: stri
     const draft = await b.DB.prepare("SELECT status FROM video_jobs WHERE task_id=? AND id=?").bind(taskId, trimId).first<{ status: string }>();
     if (!draft) return Response.json({ error: '裁剪任务不存在' }, { status: 404 });
     if (draft.status === 'SUCCEEDED') return Response.json({ id: trimId }); // idempotent upload retry
-    if (draft.status !== 'TRIM_DRAFT') throw new Error('裁剪任务已取消，请重新打开裁剪卡');
+    if (draft.status !== 'TRIM_DRAFT') throw new Error('裁剪任务已取消，请重新发送裁剪要求');
     const source = await b.DB.prepare("SELECT source_file_id,plan_json FROM video_jobs WHERE task_id=? AND id=? AND status='SUCCEEDED'")
       .bind(taskId, sourceVideoId).first<{ source_file_id: string; plan_json: string }>();
     if (!source) return Response.json({ error: '原视频不存在或尚未完成' }, { status: 404 });

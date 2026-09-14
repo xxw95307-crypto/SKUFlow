@@ -2,7 +2,7 @@ import { validateVideoTrimRange } from '../domain/video-trim';
 
 // Decode and record only the selected segment. No microphone, screen recording,
 // remote editing service, or generative model is involved.
-export async function trimVideo(input: HTMLVideoElement, start: number, end: number, onProgress: (value: number) => void): Promise<Blob> {
+export async function trimVideo(input: {duration:number;currentSrc:string}, start: number, end: number, onProgress: (value: number) => void): Promise<Blob> {
   validateVideoTrimRange(start, end, Number.isFinite(input.duration) ? input.duration : end);
   if (typeof MediaRecorder === 'undefined') throw new Error('当前浏览器不支持视频裁剪，请使用新版 Chrome 或 Edge');
   const mime = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus']
