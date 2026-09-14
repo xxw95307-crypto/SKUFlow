@@ -43,14 +43,14 @@ export async function shopifyLookup(config: ShopifyDevConfig, kind: string, sear
 async function uploadMedia(config: ShopifyDevConfig, token:string, media:ShopifyMediaInput[], fetchImpl:typeof fetch) {
   const files=[];
   for(const item of media) {
-    if(item.contentType!=='video/mp4' && !item.contentType.startsWith('image/'))throw new Error('不支持的商品媒体类型');
+    if(!['video/mp4','video/webm'].includes(item.contentType) && !item.contentType.startsWith('image/'))throw new Error('不支持的商品媒体类型');
     if(!item.bytes.byteLength)throw new Error('媒体文件为空');
-    const d=await shopifyGraphql<any>(config,token,`mutation($input:[StagedUploadInput!]!){stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}} userErrors{message}}}`,{input:[{filename:item.name,mimeType:item.contentType,httpMethod:'POST',resource:item.contentType==='video/mp4'?'VIDEO':'PRODUCT_IMAGE',...(item.contentType==='video/mp4'?{fileSize:String(item.bytes.byteLength)}:{})}]},fetchImpl);
+    const d=await shopifyGraphql<any>(config,token,`mutation($input:[StagedUploadInput!]!){stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}} userErrors{message}}}`,{input:[{filename:item.name,mimeType:item.contentType,httpMethod:'POST',resource:['video/mp4','video/webm'].includes(item.contentType)?'VIDEO':'PRODUCT_IMAGE',...(['video/mp4','video/webm'].includes(item.contentType)?{fileSize:String(item.bytes.byteLength)}:{})}]},fetchImpl);
     if(d.stagedUploadsCreate.userErrors.length) throw new Error(d.stagedUploadsCreate.userErrors.map((e:any)=>e.message).join('；'));
     const target=d.stagedUploadsCreate.stagedTargets[0];if(!target)throw new Error('Shopify 未返回上传地址');
     const form=new FormData();for(const p of target.parameters)form.append(p.name,p.value);form.append('file',new Blob([item.bytes],{type:item.contentType}),item.name);
     const response=await fetchImpl(target.url,{method:'POST',body:form});if(!response.ok)throw new Error(`媒体上传失败 ${response.status}`);
-    files.push({originalSource:target.resourceUrl,contentType:item.contentType==='video/mp4'?'VIDEO':'IMAGE',alt:item.alt});
+    files.push({originalSource:target.resourceUrl,contentType:['video/mp4','video/webm'].includes(item.contentType)?'VIDEO':'IMAGE',alt:item.alt});
   }
   return files;
 }
@@ -63,7 +63,7 @@ export async function publishIntegratedShopify(input:{config:ShopifyDevConfig;pa
   const quantities=(expected.variants as any[]).some(v=>v.inventoryQuantities?.length);
   if(quantities && (!scopes.includes('write_inventory') || !scopes.includes('read_locations')))throw new Error('请先授权 Shopify 库存写入和地点读取权限（write_inventory、read_locations），再发布');
   if(quantities) { const locations=await shopifyLookup(config,'locations','',fetchImpl); if(!locations.some((l:any)=>l.value===payload.fields.inventory_location))throw new Error('库存地点无效或已停用'); }
-  expected.files=input.media.map(m=>({alt:m.alt,contentType:m.contentType==='video/mp4'?'VIDEO':'IMAGE'}));
+  expected.files=input.media.map(m=>({alt:m.alt,contentType:['video/mp4','video/webm'].includes(m.contentType)?'VIDEO':'IMAGE'}));
   // Idempotent recovery: a previous request may have created the product before
   // its response was persisted. Never create another product for that draft.
   const existing=await shopifyGraphql<any>(config,token,'query($q:String!){products(first:2,query:$q){nodes{id}}}',{q:`tag:skuflow-draft-${draftId}`},fetchImpl);
@@ -87,7 +87,7 @@ export async function publishIntegratedShopify(input:{config:ShopifyDevConfig;pa
     for(const v of verification)if(v.status!=='MATCH')warnings.push(`${v.field}：${v.status==='PENDING'?'Shopify 正在处理媒体，稍后需重新核对':'与提交值不一致'}`);
   }catch(e){verification=[{field:'product',status:'UNVERIFIED'}];warnings.push(`草稿已创建，回读失败：${(e as Error).message}。重试会核对原草稿，不会重新创建。`);}
   warnings.push('销售渠道、市场本地化和分类/自定义元字段尚未写入；商品保持 DRAFT。');
-  return {provider:'SHOPIFY_DEV',productId:id,variantId,handle,adminUrl:`https://${config.storeDomain}/admin/products/${id.split('/').pop()}`,status:'DRAFT_CREATED',createdAt:new Date().toISOString(),warnings,verification,submittedProduct:{...expected,files:input.media.map(m=>({alt:m.alt,contentType:m.contentType==='video/mp4'?'VIDEO':'IMAGE'}))}};
+  return {provider:'SHOPIFY_DEV',productId:id,variantId,handle,adminUrl:`https://${config.storeDomain}/admin/products/${id.split('/').pop()}`,status:'DRAFT_CREATED',createdAt:new Date().toISOString(),warnings,verification,submittedProduct:{...expected,files:input.media.map(m=>({alt:m.alt,contentType:['video/mp4','video/webm'].includes(m.contentType)?'VIDEO':'IMAGE'}))}};
 }
 export function compareIntegratedProduct(expected:Record<string,any>,actual:any):Verification {
   const result:Verification=[];

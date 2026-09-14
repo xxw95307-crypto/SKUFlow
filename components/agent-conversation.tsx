@@ -622,6 +622,17 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true, drafts: refreshed.passport.platformDrafts.length }, checkpoint: true };
       }
+      if (name === 'trim_product_video') {
+        let args:Record<string,unknown>={};
+        try { args=JSON.parse(call.function.arguments); } catch { throw new Error('视频裁剪参数无效'); }
+        await responseJson(await fetch(`/api/tasks/${currentTask.id}/video-trims`, {
+          method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...args,guidance:requestText}),
+        }), '视频裁剪卡创建失败');
+        mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');setVideoRevision(v=>v+1);
+        append('agent','请在下方确认目标视频和保留时段，裁剪后预览并采用新版本。图片和原视频会保留。','等待裁剪确认');
+        markToolRun(call,'COMPLETED');
+        return {result:{ok:true,presented:true},checkpoint:true};
+      }
       if (name === 'revise_product_video') {
         setBusyLabel('视频 Agent 正在根据上一条方案和你的要求修改视频…');
         const payload = await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`, {
@@ -1064,7 +1075,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
 
           {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
-          {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion/>}</AssetConversationCard></article>}
+          {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion onTrimSaved={id=>{const next=[...selectedAssetsRef.current.filter(a=>!a.startsWith('video_')),id];selectedAssetsRef.current=next;setSelectedAssets(next);mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setVideoRevision(v=>v+1);void fetchGeneratedAssets(task.id).then(setGeneratedAssets);append('agent','已保存并选用裁剪版，其他视频已取消选择。你可以继续确认素材和媒体顺序。','裁剪完成');}}/>}</AssetConversationCard></article>}
 
           {phase === 'publish' && task?.platforms.includes('shopify') && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" disabled={Boolean(task?.platforms.includes('shopify') && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}

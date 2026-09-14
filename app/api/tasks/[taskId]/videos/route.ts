@@ -7,7 +7,7 @@ import {loadWanVideoConfig,parseVideoPlan,requireWanConfig,submitWanVideo,queryW
 export const dynamic='force-dynamic';
 const publicJob=(r:any)=>({id:r.id,status:r.status,plan:JSON.parse(r.plan_json),error:r.error,videoUrl:r.status==='SUCCEEDED'?`/api/tasks/${r.task_id}/videos/${r.id}/file`:null});
 async function handleGET(_r:Request,ctx:{params:Promise<{taskId:string}>}) {
- try {await ensureSchema();const {taskId}=await ctx.params;const b=getBindings();const rows=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? ORDER BY created_at DESC LIMIT 12').bind(taskId).all();const c=loadWanVideoConfig(b);return Response.json({jobs:rows.results.map(publicJob),configured:!!c.apiKey&&!!c.baseUrl});}catch(e){return Response.json({error:(e as Error).message},{status:500});}
+ try {await ensureSchema();const {taskId}=await ctx.params;const b=getBindings();const rows=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? ORDER BY created_at DESC,id DESC LIMIT 50').bind(taskId).all();const c=loadWanVideoConfig(b);return Response.json({jobs:rows.results.map(publicJob),configured:!!c.apiKey&&!!c.baseUrl});}catch(e){return Response.json({error:(e as Error).message},{status:500});}
 }
 async function handlePOST(req:Request,ctx:{params:Promise<{taskId:string}>}) {
  try {await ensureSchema();const {taskId}=await ctx.params;const b=getBindings();const p=await getProductPassport(b.DB,taskId);if(!p)return Response.json({error:'任务不存在'},{status:404});

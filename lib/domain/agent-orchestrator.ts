@@ -10,6 +10,7 @@ export const AGENT_TOOL_NAMES = [
   'open_listing_review',
   'generate_visual_assets',
   'revise_product_video',
+  'trim_product_video',
   'open_asset_selection',
   'open_publish_confirmation',
   'publish_mock_drafts',
@@ -50,6 +51,7 @@ export interface AgentWorkflowState {
   generatedAssetCount: number;
   selectedAssetCount: number;
   publishApproved: boolean;
+  videoCandidates?: Array<{id:string;title:string;duration:number;ordinal:number}>;
 }
 
 export interface AgentToolDefinition {
@@ -59,7 +61,7 @@ export interface AgentToolDefinition {
     description: string;
     parameters: {
       type: 'object';
-      properties: Record<string, never>;
+      properties: Record<string, unknown>;
       additionalProperties: false;
     };
   };

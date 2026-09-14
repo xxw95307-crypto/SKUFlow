@@ -62,7 +62,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       for(const item of plan.items) {
         const c=candidates.find(c=>c.id===item.id)!;
         const object=await bindings.UPLOADS.get(c.objectKey);if(!object)throw new Error('找不到选中的媒体文件');
-        media.push({name:`${c.id}.${c.type==='VIDEO'?'mp4':'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
+        media.push({name:`${c.id}.${c.type==='VIDEO'?(c.contentType==='video/webm'?'webm':'mp4'):'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
       }
     }
     const shopifyConfig = hasShopify ? loadShopifyDevConfig(bindings) : null;

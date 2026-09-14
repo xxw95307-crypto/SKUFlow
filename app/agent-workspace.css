@@ -1510,3 +1510,20 @@ body {
 .agent-shell-v2 .video-conversation:not(:has(.asset-conversation-card)) { display: none; }
 .agent-shell-v2 .asset-video-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--sf-line); }
 .agent-shell-v2 .asset-video-section > .asset-conversation-card { width: 100%; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+
+.video-trim-card { margin: 16px 0; padding: 20px; border: 1px solid #c9ddd2; border-radius: 14px; background: #f8fbf9; color: #23352c; }
+.video-trim-card header > span { font-size: 12px; font-weight: 600; color: #3d8061; }
+.video-trim-card h3 { margin: 8px 0; font-size: 19px; }
+.video-trim-card p { font-size: 13px; line-height: 1.65; }
+.video-trim-card video { display: block; width: 100%; max-height: 360px; border-radius: 10px; margin: 14px 0; background: #16241d; }
+.video-trim-card label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; font-weight: 500; }
+.video-trim-card select, .video-trim-card input { width: 100%; min-height: 42px; border: 1px solid #cddbd3; border-radius: 8px; background: white; color: inherit; padding: 9px 12px; font: inherit; box-sizing: border-box; }
+.video-trim-range { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.video-trim-shortcuts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.video-trim-card button { padding: 10px 14px; border: 1px solid #cddbd3; border-radius: 8px; background: white; color: #365d49; font: inherit; font-size: 13px; cursor: pointer; }
+.video-trim-card button.primary { background: #3f8060; color: white; border-color: #3f8060; }
+.video-trim-card button:disabled { opacity: .5; cursor: wait; }
+.video-trim-card .video-trim-error { color: #b93b32; }
+.video-trim-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #dce6df; }
+.video-trim-card footer span, .video-trim-hint { color: #6e8176; font-size: 12px; }
+@media (max-width: 600px) { .video-trim-range { grid-template-columns: 1fr; } .video-trim-card footer { align-items: stretch; flex-direction: column; } }

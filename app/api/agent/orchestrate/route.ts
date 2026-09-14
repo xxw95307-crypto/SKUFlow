@@ -1,6 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
@@ -101,7 +101,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     listLatestGeneratedAssets(DB, taskId),
   ]);
   const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith('asset_dynamic_'));
-  const videos=await DB.prepare("SELECT id FROM video_jobs WHERE task_id=? AND status='SUCCEEDED'").bind(taskId).all<{id:string}>();
+  const videos=await DB.prepare("SELECT id,plan_json FROM video_jobs WHERE task_id=? AND status='SUCCEEDED' ORDER BY created_at DESC, id DESC").bind(taskId).all<{id:string;plan_json:string}>();
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
@@ -118,44 +118,13 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     generatedDraftCount: generatedDrafts.length,
     approvedDraftCount: approvedDrafts.length,
     publishedDraftCount: passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length,
+    videoCandidates: videos.results.map((v,index)=>{const p=JSON.parse(v.plan_json);return {id:v.id,title:p.title,duration:p.duration,ordinal:index+1};}),
     generatedAssetCount: completedAssets.length + videos.results.length,
     selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length + videos.results.filter(v=>selectedAssetIds.has(v.id)).length,
     publishApproved: body.publishApproved === true,
   };
 }
 
-function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModelMessage[], state: AgentWorkflowState): AgentToolDefinition[] {
-  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
-  const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : undefined;
-  const requested = lastUser?.role === 'user'
-    && /封面|排序|顺序|视频.*放.*第|重新生成|重写|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片|视频)|生成.*(?:素材|图片|视频)/.test(lastUser.content);
-  if (!requested || state.factCount === 0 || state.openConflictCount > 0 || state.publishedDraftCount > 0) return tools;
-  const completedAfterRequest = new Set(messages.slice(lastUserIndex + 1)
-    .filter((message) => message.role === 'tool')
-    .map((message) => message.role === 'tool' ? message.name : null));
-  const visualRequested = state.generatedAssetCount > 0 || (lastUser.role === 'user' && /封面|排序|顺序|素材|图片|视频|video|视觉|主图|场景图/.test(lastUser.content));
-  if (visualRequested && state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
-    if (completedAfterRequest.has('generate_visual_assets')) return tools;
-    return [{
-      type: 'function',
-      function: {
-        name: 'generate_visual_assets',
-        description: '根据用户最新要求规划视觉素材；视频请求生成视频方案卡，确认后异步生成；图片请求生成图片候选。',
-        parameters: { type: 'object', properties: {}, additionalProperties: false },
-      },
-    }];
-  }
-  if (completedAfterRequest.has('generate_platform_listings')) return tools;
-  if (tools.some((item) => item.function.name === 'generate_platform_listings')) return tools;
-  return [...tools, {
-    type: 'function',
-    function: {
-      name: 'generate_platform_listings',
-      description: '按用户最新要求重新生成各平台中文 Listing 审校稿。',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
-    },
-  }];
-}
 
 function requestsListingStart(messages: AgentModelMessage[], state: AgentWorkflowState): boolean {
   if (state.taskId) return false;
