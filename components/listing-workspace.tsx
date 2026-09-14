@@ -68,9 +68,8 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
   const [message, setMessage] = useState('');
   const [detailsOpen, setDetailsOpen] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
-  const issueCursor = useRef(-1);
   const [locatedField, setLocatedField] = useState<{key:string;sequence:number} | null>(null);
-  useEffect(() => { issueCursor.current = -1; setLocatedField(null); }, [selectedDraftId]);
+  useEffect(() => { setLocatedField(null); }, [selectedDraftId]);
   useEffect(() => {
     if (!locatedField || (conversation && !detailsOpen)) return;
     const field = Array.from(formRef.current?.querySelectorAll<HTMLElement>('[data-listing-field]') ?? []).find(node => node.dataset.listingField === locatedField.key);
@@ -104,15 +103,6 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
   const confirmations = selectedDraft && listing
     ? draftConfirmations[selectedDraft.id] ?? confirmedInferredFields(listing)
     : [];
-
-  const locateNextIssue = () => {
-    if (!listing || !selectedDraft) return;
-    const keys = [...new Set(selectedDraft.validationIssues.map(issue => issue.path))].filter(key => listing.schema.fields.some(field => field.key === key));
-    if (!keys.length) return;
-    issueCursor.current = (issueCursor.current + 1) % keys.length;
-    setDetailsOpen(true);
-    setLocatedField(current => ({key:keys[issueCursor.current], sequence:(current?.sequence ?? 0)+1}));
-  };
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((platform) => [platform.id, platform.shortName])), []);
   const generatedCount = passport?.platformDrafts.filter((draft) => isListingDraftPayload(draft.payload)).length ?? 0;
@@ -159,7 +149,6 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
         const checkedListing = checkedDraft && isListingDraftPayload(checkedDraft.payload) ? checkedDraft.payload : null;
         const unresolved = checkedDraft?.validationIssues.find(issue => checkedListing?.schema.fields.some(field => field.key === issue.path));
         if (action === 'approve' && unresolved) {
-          issueCursor.current = -1;
           setDetailsOpen(true);
           setLocatedField(current => ({key: unresolved.path, sequence: (current?.sequence ?? 0) + 1}));
           setError(`请先处理：${unresolved.message}。修改后再次点击“确认这份 Listing”，系统会重新检查。`);
@@ -245,7 +234,7 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
           };
         })}
       />)}</div>}
-      <div className="listing-review-actions"><span>{selectedDraft.validationIssues.length ? <button type="button" className="listing-issue-jump" onClick={locateNextIssue} title="展开并定位未处理字段；再次点击定位下一项">{selectedDraft.validationIssues.length} 项需要处理 · {locatedField ? '定位下一项' : '点击定位'} ↓</button> : '字段校验通过'} · 整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
+      <div className="listing-review-actions"><span>整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
     </>}
 
     {!conversation && <div className="footer-actions"><span>{generatedCount}/{passport?.platformDrafts.length ?? 0} 已生成 · {approvedCount} 已确认</span><button className="primary" type="button" onClick={onAssets} disabled={!allApproved}>全部确认后进入视觉素材 →</button></div>}
