@@ -153,7 +153,20 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
       });
       const payload = await response.json() as { passport?: ProductPassport; error?: string };
       if (payload.passport) setPassport(payload.passport);
-      if (!response.ok || !payload.passport) throw new Error(payload.error || 'Listing 保存失败');
+      if (!response.ok || !payload.passport) {
+        // Use the server's validation of this submission, never the stale issue list.
+        const checkedDraft = payload.passport?.platformDrafts.find(draft => draft.id === selectedDraft.id);
+        const checkedListing = checkedDraft && isListingDraftPayload(checkedDraft.payload) ? checkedDraft.payload : null;
+        const unresolved = checkedDraft?.validationIssues.find(issue => checkedListing?.schema.fields.some(field => field.key === issue.path));
+        if (action === 'approve' && unresolved) {
+          issueCursor.current = -1;
+          setDetailsOpen(true);
+          setLocatedField(current => ({key: unresolved.path, sequence: (current?.sequence ?? 0) + 1}));
+          setError(`请先处理：${unresolved.message}。修改后再次点击“确认这份 Listing”，系统会重新检查。`);
+          return;
+        }
+        throw new Error(payload.error || 'Listing 保存失败');
+      }
       setDraftEdits((current) => {
         const next = { ...current };
         delete next[selectedDraft.id];
