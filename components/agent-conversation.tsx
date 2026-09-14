@@ -1008,7 +1008,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         </div>
       </header>
 
-      <div className={`agent-chat-layout ${phase === 'idle' ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
+      <div className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
           {!showWelcomeWorkspace && messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
