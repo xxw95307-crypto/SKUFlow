@@ -1,4 +1,4 @@
-import { present, parseOptions, validateShopifyFields } from '../domain/shopify-validation.ts';
+import { normalizeSaleVariants, present, parseOptions, validateShopifyFields } from '../domain/shopify-validation.ts';
 export { validateShopifyFields } from '../domain/shopify-validation.ts';
 import { exchangeAccessToken, shopifyGraphql, buildShopifyProductInput, type ShopifyDevConfig, type ShopifyDevPublication } from './shopify-dev.ts';
 import type { ListingDraftPayload } from '../domain/listing.ts';
@@ -6,7 +6,7 @@ export interface ShopifyVariantRow { options: string; sku: string; price: string
 export interface ShopifyMediaInput { name: string; contentType: string; bytes: ArrayBuffer; alt: string }
 type Verification = NonNullable<ShopifyDevPublication['verification']>;
 export function buildIntegratedProduct(payload: ListingDraftPayload, draftId: string, files: unknown[] = []) {
-  const f = payload.fields as Record<string, any>;
+  const f = {...payload.fields, variants: normalizeSaleVariants(payload.fields.variants)} as Record<string, any>;
   const errors=validateShopifyFields(f); if(errors.length) throw new Error(errors.join('；'));
   const product = buildShopifyProductInput(payload,draftId);
   for(const [key,target] of Object.entries({category_id:'category',handle:'handle',template_suffix:'templateSuffix',collection_ids:'collections'})) if(present(f[key])) product[target]=f[key];

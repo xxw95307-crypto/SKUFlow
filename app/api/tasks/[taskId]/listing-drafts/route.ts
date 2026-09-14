@@ -1,3 +1,4 @@
+import { normalizeSaleVariants } from '@/lib/domain/shopify-validation';
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingFieldDefinition } from '@/lib/domain/listing';
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
 function normalizeFieldValue(field: ListingFieldDefinition, value: unknown): unknown {
   if (value === null || value === undefined || value === '') return undefined;
   if (field.type === 'boolean') return typeof value === 'boolean' ? value : undefined;
-  if (field.type === 'variants') return Array.isArray(value) ? value : [];
+  if (field.type === 'variants') return normalizeSaleVariants(value);
   if (field.type === 'number') {
     const number = typeof value === 'number' ? value : Number(String(value).trim());
     return Number.isFinite(number) ? number : value;

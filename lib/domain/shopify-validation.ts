@@ -1,6 +1,12 @@
 export interface ShopifyVariantRow { options: string; sku: string; price: string | number; quantity?: string | number; barcode?: string; weight?: string | number }
 export const present = (v: unknown) => v !== undefined && v !== null && v !== '';
+// Ignore only wholly empty accidental rows. Partial rows must still be validated.
+export function normalizeSaleVariants(value: unknown): ShopifyVariantRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(row => !row || typeof row !== 'object' || Object.values(row).some(v => v != null && (typeof v !== 'string' || v.trim() !== '')));
+}
 export function validateShopifyFields(f: Record<string, any>): string[] {
+  f = {...f, variants: normalizeSaleVariants(f.variants)};
   const errors: string[] = [];
   if (!f.title?.trim()) errors.push('请填写商品标题');
   for (const key of ['taxable','requires_shipping','inventory_tracked']) if (typeof f[key] !== 'boolean') errors.push(`请确认${({taxable:'是否收税',requires_shipping:'是否需要运输',inventory_tracked:'是否跟踪库存'} as any)[key]}`);

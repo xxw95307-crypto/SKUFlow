@@ -1,3 +1,4 @@
+import { normalizeSaleVariants } from '../domain/shopify-validation.ts';
 import type { ListingFieldDefinition, GeneratedListingDraft } from '../domain/listing.ts';
 
 export interface ListingEvidenceSource { id: string; label: string; kind: 'DOCUMENT' | 'USER_INPUT' | 'FACT'; text: string }
@@ -82,6 +83,7 @@ export function parseSuppliedFields(raw: unknown, fields: ListingFieldDefinition
 }
 
 export function listingRequirement(field: ListingFieldDefinition, fields: Record<string, unknown>): boolean {
+  fields = {...fields, variants: normalizeSaleVariants(fields.variants)};
   if (['variant_sku','variant_price'].includes(field.key)) return !Array.isArray(fields.variants) || !fields.variants.length;
   if (field.key === 'shipping_weight') return fields.requires_shipping === true && !(Array.isArray(fields.variants) && fields.variants.length);
   if (field.key === 'inventory_quantity') return fields.inventory_tracked === true && !(Array.isArray(fields.variants) && fields.variants.length);

@@ -18,3 +18,14 @@ test('readback matches variants by selected options and detects location-level i
  const p=buildIntegratedProduct({fields} as any,'test');const actual={title:p.title,status:'DRAFT',tags:p.tags,collections:{nodes:[]},variants:{nodes:(p.variants as any[]).map(v=>({...v,selectedOptions:v.optionValues.map((o:any)=>({name:o.optionName,value:o.name})),inventoryItem:{...v.inventoryItem,inventoryLevels:{nodes:[{location:{id:fields.inventory_location},quantities:[{name:'available',quantity:99}]}]}}})).reverse()},media:{nodes:[]}};
  const r=compareIntegratedProduct(p,actual);assert.equal(r.filter(v=>v.field.includes('地点库存')&&v.status==='MISMATCH').length,2);assert.ok(r.filter(v=>v.field.endsWith('.sku')).every(v=>v.status==='MATCH'));
 });
+
+test('empty accidental variants are ignored during validation and publishing, partial variants still block',()=>{
+ const single={title:'test',taxable:false,requires_shipping:false,inventory_tracked:false,variant_sku:'ONE',variant_price:0};
+ const empty={options:' ',sku:'',price:'',quantity:''};
+ assert.deepEqual(validateShopifyFields({...single,variants:[empty]}),[]);
+ assert.equal((buildIntegratedProduct({fields:{...single,variants:[empty]}} as any,'draft').variants as any[]).length,1);
+ assert.deepEqual(validateShopifyFields({...fields,variants:[...fields.variants,empty]}),[]);
+ assert.equal((buildIntegratedProduct({fields:{...fields,variants:[...fields.variants,empty]}} as any,'draft').variants as any[]).length,2);
+ assert.ok(validateShopifyFields({...single,variants:[{...empty,options:'Size=M'}]}).some(e=>e.includes('SKU')));
+ assert.ok(validateShopifyFields({...single,variant_sku:'',variants:[]}).some(e=>e.includes('SKU')));
+});

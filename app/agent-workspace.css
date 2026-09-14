@@ -1450,3 +1450,54 @@ body {
     transition-duration: .01ms !important;
   }
 }
+/* Consistent spacing and controls for the conversational Listing review. */
+.agent-shell-v2 .listing-conversation-card { border-radius: 14px; overflow: hidden; }
+.agent-shell-v2 .listing-conversation-head { padding: 22px 24px; }
+.agent-shell-v2 .listing-conversation-card > .listing-replenish,
+.agent-shell-v2 .listing-conversation-card > .listing-sync-note,
+.agent-shell-v2 .listing-conversation-card > .platform-tabs,
+.agent-shell-v2 .listing-conversation-card > .listing-schema-bar,
+.agent-shell-v2 .listing-conversation-card > .form-error,
+.agent-shell-v2 .listing-conversation-card > .form-success,
+.agent-shell-v2 .listing-conversation-card .listing-form-grid,
+.agent-shell-v2 .listing-conversation-card .listing-review-actions { margin-left: 24px; margin-right: 24px; }
+.agent-shell-v2 .listing-replenish { margin-top: 16px; }
+.agent-shell-v2 .listing-replenish button,
+.agent-shell-v2 .shopify-lookup button,
+.agent-shell-v2 .shopify-variant-actions button { padding: 10px 14px; border: 1px solid var(--sf-line); border-radius: 8px; background: white; color: var(--sf-accent-strong); font: inherit; font-size: 13px; cursor: pointer; }
+.agent-shell-v2 button:disabled { cursor: not-allowed; opacity: .55; }
+.agent-shell-v2 .listing-sync-note { display: grid; gap: 8px; margin-top: 16px; padding: 14px 16px; background: #f2f7f4; border: 1px solid #dce8df; border-radius: 10px; color: #617269; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.agent-shell-v2 .listing-sync-note b { color: #34644d; }
+.agent-shell-v2 .listing-field { padding: 16px; border-radius: 10px; background: #fafcfb; }
+.agent-shell-v2 .listing-field > span { gap: 12px; align-items: center; }
+.agent-shell-v2 .listing-field > span > em { flex-shrink: 0; }
+.agent-shell-v2 .listing-field input,
+.agent-shell-v2 .listing-field textarea,
+.agent-shell-v2 .listing-field select { box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #cedcd4; border-radius: 8px; background: white; color: #25352c; font: inherit; font-size: 14px; }
+.agent-shell-v2 .listing-field .inference-confirm input { width: 16px; min-height: 16px; }
+.agent-shell-v2 .listing-field small { line-height: 1.6; overflow-wrap: anywhere; }
+.agent-shell-v2 .shopify-lookup { display: grid; gap: 10px; }
+.agent-shell-v2 .shopify-lookup-search { display: flex; gap: 10px; align-items: stretch; }
+.agent-shell-v2 .shopify-lookup-search input { flex: 1; min-width: 0; }
+.agent-shell-v2 .shopify-lookup-search button { flex-shrink: 0; white-space: nowrap; }
+.agent-shell-v2 .shopify-lookup select[multiple] { min-height: 112px; }
+.agent-shell-v2 .shopify-variants-help { margin: 0 0 14px; color: #64756b; font-size: 12px; line-height: 1.7; }
+.agent-shell-v2 .shopify-variant-row { padding: 16px; margin-bottom: 12px; border: 1px solid #d9e4dd; border-radius: 10px; background: white; }
+.agent-shell-v2 .shopify-variant-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.agent-shell-v2 .shopify-variant-delete { border: 1px solid #ecd4d0; border-radius: 7px; padding: 7px 10px; background: #fff8f6; color: #a44338; font: inherit; font-size: 12px; cursor: pointer; }
+.agent-shell-v2 .shopify-variant-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+.agent-shell-v2 .shopify-variant-fields label { display: grid; gap: 7px; font-size: 13px; color: #43574b; min-width: 0; }
+.agent-shell-v2 .shopify-variant-fields label:first-child { grid-column: 1 / -1; }
+.agent-shell-v2 .shopify-variant-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.agent-shell-v2 .listing-review-actions { align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--sf-line); }
+@media (max-width: 640px) {
+ .agent-shell-v2 .listing-conversation-head { padding: 18px 16px; }
+ .agent-shell-v2 .listing-conversation-card > .listing-replenish,
+ .agent-shell-v2 .listing-conversation-card > .listing-sync-note,
+ .agent-shell-v2 .listing-conversation-card > .platform-tabs,
+ .agent-shell-v2 .listing-conversation-card > .listing-schema-bar,
+ .agent-shell-v2 .listing-conversation-card > .form-error,
+ .agent-shell-v2 .listing-conversation-card .listing-form-grid,
+ .agent-shell-v2 .listing-conversation-card .listing-review-actions { margin-left: 16px; margin-right: 16px; }
+ .agent-shell-v2 .shopify-variant-fields { grid-template-columns: 1fr; }
+}
