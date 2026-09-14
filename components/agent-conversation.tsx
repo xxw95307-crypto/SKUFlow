@@ -628,14 +628,13 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (name === 'generate_visual_assets') {
         setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…');
-        const customVisualRequest = /重新生成|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|视频|主图|场景)|增加.*(?:素材|图片)|生成.*(?:素材|图片|视频)/.test(requestText);
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
         }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force: customVisualRequest, guidance: customVisualRequest ? requestText : null }),
+          body: JSON.stringify({ force: true, guidance: requestText }),
         }), '视觉素材生成失败');
         setVideoRevision(v=>v+1);
         setGeneratedAssets(payload.assets);

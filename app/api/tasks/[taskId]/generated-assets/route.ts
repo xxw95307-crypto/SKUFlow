@@ -70,7 +70,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
-    if (!options.force && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
+    if (!options.force && !options.guidance && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
 
     const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
     if (approved.length === 0 || approved.length < passport.platformDrafts.length) {

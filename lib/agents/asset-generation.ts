@@ -57,6 +57,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 同时在同一个 JSON 中返回 videoDecision:{required:boolean,reason:中文理由,plan:视频方案或null}。自主判断视频是否有助于展示商品，用户明确不要视频则不生成；需要时规划一条视频，plan为{title,prompt,duration:2到15的整数,resolution:"720P"或"1080P",sourceFileId:提供的原图ID,shots:[中文镜头说明]}。保持原图商品外观与事实，不编造动作、功能或文字；用简短镜头展示，视频与图片用途互补。没有原图ID时required必须为false。
 
 规则：
+0. 商家本轮要求优先于类目建议；明确排除的图类型或场景不得再次规划。例如“不要细节图”必须排除 DETAIL 与任何细节特写，改选其他有依据的素材。不把排除要求解释成仅调整细节图。
 1. 总数由你判断，必须为 2–4 张；必须且只能有一张 HERO 商品主图。
 2. 其他 kind 从 LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING 中选择，可按商品需要重复同一 kind，但场景和目的不得重复。
 3. 服装可优先考虑 MODEL、穿搭场景和面料细节；家电可考虑使用场景、结构细节和尺寸感；食品可考虑包装、食用场景和质感特写。必须根据当前商品判断。
