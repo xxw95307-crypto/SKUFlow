@@ -1,9 +1,11 @@
 'use client';
-import { useEffect, useRef } from 'react';
-import { descriptionHtml } from '@/lib/domain/description';
+import { useEffect, useRef, useState } from 'react';
+import { editableDescriptionHtml } from '@/lib/client/description';
 
 export function DescriptionPreview({ value }: { value: unknown }) {
-  return <div className="description-content" dangerouslySetInnerHTML={{ __html: descriptionHtml(value) }} />;
+  const [html, setHtml] = useState('');
+  useEffect(() => { setHtml(editableDescriptionHtml(value)); }, [value]);
+  return <div className="description-content" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 export function DescriptionEditor({ value, readOnly, label, onChange }: { value: unknown; readOnly: boolean; label: string; onChange: (value: string) => void }) {
@@ -11,10 +13,10 @@ export function DescriptionEditor({ value, readOnly, label, onChange }: { value:
   const emitted = useRef<string | null>(null);
   useEffect(() => {
     // Keep the caret stable while parent state follows typing.
-    if (editor.current && value !== emitted.current) editor.current.innerHTML = descriptionHtml(value);
+    if (editor.current && value !== emitted.current) editor.current.innerHTML = editableDescriptionHtml(value);
   }, [value]);
   const change = () => {
-    const html = descriptionHtml(editor.current?.innerHTML || '');
+    const html = editableDescriptionHtml(editor.current?.innerHTML || '');
     emitted.current = html;
     onChange(html);
   };

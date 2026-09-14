@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { descriptionHtml } from '../lib/domain/description.ts';
 import { buildShopifyProductInput } from '../lib/platforms/shopify-dev.ts';
+
+test('browser description UI does not import the server PostCSS sanitizer', () => {
+  const editor = readFileSync(new URL('../components/description-editor.tsx', import.meta.url), 'utf8');
+  const browser = readFileSync(new URL('../lib/client/description.ts', import.meta.url), 'utf8');
+  assert.match(editor, /from '@\/lib\/client\/description'/);
+  assert.doesNotMatch(editor, /from '@\/lib\/domain\/description'/);
+  assert.doesNotMatch(browser, /\bimport\b.*(?:sanitize-html|postcss)/);
+});
 
 test('description keeps Chinese paragraphs emphasis lists and tables', () => {
   const html='<p>中文描述 <strong>纯棉</strong></p><ul><li>商品参数</li></ul><table><tr><td>尺码</td><td>M</td></tr></table>';
