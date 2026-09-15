@@ -514,17 +514,17 @@ body {
   width: 100%;
   height: 100%;
   overflow-y: auto;
-  padding: 24px clamp(24px, 6vw, 96px) 42px;
+  padding: 24px clamp(20px, 3vw, 56px) 42px;
   background: var(--sf-paper);
   scrollbar-width: thin;
   scrollbar-color: #cfd6d1 transparent;
 }
 
 .agent-shell-v2 .agent-date {
-  width: min(940px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto 22px;
   color: #a0a7a2;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .05em;
   text-align: center;
@@ -804,8 +804,8 @@ body {
 
 /* Conversation messages */
 .agent-shell-v2 .chat-message {
-  width: min(940px, 100%);
-  max-width: 940px;
+  width: min(1180px, 100%);
+  max-width: 1180px;
   display: flex;
   align-items: flex-start;
   gap: 11px;
@@ -813,8 +813,8 @@ body {
 }
 
 .agent-shell-v2 .chat-avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   flex: none;
@@ -822,7 +822,7 @@ body {
   border-radius: 7px;
   background: var(--sf-accent-soft);
   color: var(--sf-accent-strong);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   line-height: 1;
   box-shadow: none;
@@ -839,8 +839,8 @@ body {
 }
 
 .agent-shell-v2 .chat-message > div {
-  max-width: min(770px, calc(100% - 43px));
-  padding: 12px 15px;
+  max-width: min(980px, calc(100% - 45px));
+  padding: 14px 17px;
   border: 1px solid var(--sf-line);
   border-radius: 5px 11px 11px;
   background: #fff;
@@ -855,20 +855,20 @@ body {
 }
 
 .agent-shell-v2 .chat-message > div.rich-message-bubble {
-  width: min(770px, calc(100% - 43px));
-  max-width: min(770px, calc(100% - 43px));
-  padding: 13px;
+  width: min(980px, calc(100% - 45px));
+  max-width: min(980px, calc(100% - 45px));
+  padding: 15px;
 }
 
 .agent-shell-v2 .chat-message.joined-action > div.joined-action-bubble {
-  width: min(900px, calc(100% - 43px));
-  max-width: min(900px, calc(100% - 43px));
+  width: min(1100px, calc(100% - 45px));
+  max-width: min(1100px, calc(100% - 45px));
   padding: 0;
   overflow: hidden;
 }
 
 .agent-shell-v2 .joined-message-copy {
-  padding: 14px 17px 13px;
+  padding: 16px 19px 15px;
 }
 
 .agent-shell-v2 .joined-action-bubble .chat-action-card.intake {
@@ -903,13 +903,13 @@ body {
 
 .agent-shell-v2 .embedded-intake .dropzone.compact b {
   color: #344139;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .agent-shell-v2 .embedded-intake .dropzone.compact span {
   margin-top: 3px;
   color: #7f8a83;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .agent-shell-v2 .embedded-intake .dropzone.compact button {
@@ -920,15 +920,15 @@ body {
 .agent-shell-v2 .chat-message p {
   margin: 0;
   color: #303733;
-  font-size: 14px;
-  line-height: 1.72;
+  font-size: 15px;
+  line-height: 1.75;
 }
 
 .agent-shell-v2 .chat-message small {
   display: block;
   margin-top: 7px;
   color: #87908a;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -968,8 +968,8 @@ body {
 .agent-shell-v2 .chat-error,
 .agent-shell-v2 .listing-conversation-card,
 .agent-shell-v2 .chat-message.asset-conversation > .asset-conversation-card {
-  width: min(900px, 100%);
-  max-width: 900px;
+  width: min(1100px, 100%);
+  max-width: 1100px;
   margin-right: auto;
   margin-left: auto;
   border-color: var(--sf-line);
@@ -989,6 +989,34 @@ body {
 .agent-shell-v2 .listing-conversation-head > span,
 .agent-shell-v2 .asset-conversation-card > header > span {
   color: var(--sf-accent-strong);
+  font-size: 12px;
+}
+
+.agent-shell-v2 .action-card-head > b {
+  font-size: 18px;
+}
+
+.agent-shell-v2 .action-card-head > p {
+  font-size: 14px;
+}
+
+.agent-shell-v2 .embedded-intake .intake-fields legend {
+  font-size: 14px;
+}
+
+.agent-shell-v2 .embedded-intake .choice-row button {
+  min-height: 38px;
+  font-size: 13px;
+}
+
+.agent-shell-v2 .embedded-intake .platform-choice-grid b,
+.agent-shell-v2 .embedded-intake .file-row b {
+  font-size: 13px;
+}
+
+.agent-shell-v2 .embedded-intake .platform-choice-grid small,
+.agent-shell-v2 .embedded-intake .file-row small {
+  font-size: 11px;
 }
 
 .agent-shell-v2 .agent-running-card {
@@ -1033,8 +1061,8 @@ body {
 .agent-shell-v2 .listing-conversation-card,
 .agent-shell-v2 .chat-message.conflict-conversation > div,
 .agent-shell-v2 .chat-message.asset-conversation > .asset-conversation-card {
-  width: min(850px, calc(100% - 42px));
-  max-width: min(850px, calc(100% - 42px));
+  width: min(1040px, calc(100% - 45px));
+  max-width: min(1040px, calc(100% - 45px));
   border-radius: 5px 11px 11px;
 }
 
@@ -1188,7 +1216,7 @@ body {
   grid-template-areas: "attachments attachments attachments" "attach message send";
   align-items: center;
   gap: 9px;
-  padding: 10px clamp(24px, 6vw, 96px) 14px;
+  padding: 10px clamp(20px, 3vw, 56px) 14px;
   border: 0;
   border-top: 1px solid #f0f2f0;
   background: rgba(255, 255, 255, .99);
@@ -1206,7 +1234,7 @@ body {
   border-radius: 9px;
   background: #fff;
   color: var(--sf-ink);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
   outline: 0;
   box-shadow: 0 3px 11px rgba(25, 42, 31, .04);
