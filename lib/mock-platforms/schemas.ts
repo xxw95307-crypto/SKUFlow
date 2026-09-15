@@ -1,15 +1,7 @@
 import type { ListingFieldDefinition, MockListingSchema } from '../domain/listing';
 import type { PlatformId } from '../domain/platform';
 import { getPlatformProfile } from '../platforms/registry.ts';
-
-const marketLocale: Record<string, string> = {
-  '美国': 'en-US', US: 'en-US',
-  '英国': 'en-GB', UK: 'en-GB',
-  '德国': 'de-DE', DE: 'de-DE',
-  '日本': 'ja-JP', JP: 'ja-JP',
-  '新加坡': 'en-SG', SG: 'en-SG',
-  '巴西': 'pt-BR', BR: 'pt-BR',
-};
+import { marketLocale } from '../localization/market-locales.ts';
 
 const fact = (key: string, label: string, factKey: string, required = false, extra: Partial<ListingFieldDefinition> = {}): ListingFieldDefinition => ({
   key, label, factKey, required, source: 'PRODUCT_FACT', type: 'string', ...extra,
@@ -122,10 +114,10 @@ export function resolveMockListingSchema(input: {
     platformId: input.platformId,
     platformName: platform.name,
     market: input.market,
-    locale: marketLocale[input.market] ?? 'en-US',
+    locale: marketLocale(input.market).locale,
     categoryId,
     categoryLabel,
-    schemaVersion: `mock-${input.platformId}-${(marketLocale[input.market] ?? 'en-US').toLowerCase()}-v3`,
+    schemaVersion: `mock-${input.platformId}-${marketLocale(input.market).locale.toLowerCase()}-v3`,
     fields: fieldsFor(input.platformId).map((field) => ({ ...field })),
   };
 }

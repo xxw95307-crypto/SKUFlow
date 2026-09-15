@@ -1,5 +1,6 @@
 import { exchangeAccessToken, shopifyGraphql, type ShopifyDevConfig } from './shopify-dev.ts';
 import type { MockListingSchema, ListingFieldDefinition } from '../domain/listing.ts';
+import { marketLocale } from '../localization/market-locales.ts';
 
 const TYPES = ['ProductCreateInput', 'SEOInput', 'ProductVariantsBulkInput', 'InventoryItemInput', 'ProductSetInput', 'ProductVariantSetInput', 'ProductSetInventoryInput', 'FileSetInput', 'WeightInput'];
 export async function fetchShopifyListingSchema(config: ShopifyDevConfig, input: { market: string; categoryLabel?: string | null }, fetchImpl: typeof fetch = fetch): Promise<MockListingSchema> {
@@ -54,9 +55,9 @@ export async function fetchShopifyListingSchema(config: ShopifyDevConfig, input:
   add('ProductSetInput','variants',{key:'variants',label:'尺码/颜色等变体',type:'variants',unit:data.shop.currencyCode,source:'SELLER_INPUT',required:false,helpText:'没有不同规格可留空。每行一个实际销售规格，分别填写 SKU、售价与库存；不自动拼出未经确认的组合'});
   if (!fields.some((field) => field.key === 'title')) throw new Error('Shopify 缺少可写入的标题字段');
   return { mode: 'SHOPIFY_API', platformId: 'shopify', platformName: 'Shopify', market: input.market,
-    locale: 'zh-CN', categoryId: 'shopify-product', categoryLabel: input.categoryLabel || '商品',
+    locale: marketLocale(input.market).locale, categoryId: 'shopify-product', categoryLabel: input.categoryLabel || '商品',
     schemaVersion: `shopify-admin-${config.apiVersion}`, storeDomain: config.storeDomain, fetchedAt: new Date().toISOString(), fields: fields.sort((a,b) => (a.key === 'title' ? -1 : b.key === 'title' ? 1 : 0)),
     accessScopes: scopes,
-    unsupportedFields: ['订阅销售计划、组合套装、礼品卡专用配置', '分类元字段和自定义元字段（需定义及数据类型）', '销售渠道、市场价格及语言翻译（当前仍创建中文测试草稿）'],
+    unsupportedFields: ['订阅销售计划、组合套装、礼品卡专用配置', '分类元字段和自定义元字段（需定义及数据类型）', '销售渠道与市场独立价格'],
   };
 }

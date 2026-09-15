@@ -86,7 +86,7 @@ export async function publishIntegratedShopify(input:{config:ShopifyDevConfig;pa
     variantId=actual.variants.nodes[0]?.id??null;handle=actual.handle;
     for(const v of verification)if(v.status!=='MATCH')warnings.push(`${v.field}：${v.status==='PENDING'?'Shopify 正在处理媒体，稍后需重新核对':'与提交值不一致'}`);
   }catch(e){verification=[{field:'product',status:'UNVERIFIED'}];warnings.push(`草稿已创建，回读失败：${(e as Error).message}。重试会核对原草稿，不会重新创建。`);}
-  warnings.push('销售渠道、市场本地化和分类/自定义元字段尚未写入；商品保持 DRAFT。');
+  warnings.push('销售渠道、市场独立价格和分类/自定义元字段尚未写入；商品保持 DRAFT。');
   return {provider:'SHOPIFY_DEV',productId:id,variantId,handle,adminUrl:`https://${config.storeDomain}/admin/products/${id.split('/').pop()}`,status:'DRAFT_CREATED',createdAt:new Date().toISOString(),warnings,verification,submittedProduct:{...expected,files:input.media.map(m=>({alt:m.alt,contentType:['video/mp4','video/webm'].includes(m.contentType)?'VIDEO':'IMAGE'}))}};
 }
 export function compareIntegratedProduct(expected:Record<string,any>,actual:any):Verification {

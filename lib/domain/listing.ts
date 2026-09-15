@@ -52,6 +52,16 @@ export interface ListingDraftPayload {
     passportId: string;
     passportVersion: number;
   };
+  localization?: {
+    status: 'READY';
+    sourceLocale: 'zh-CN';
+    targetLocale: string;
+    targetLanguage: string;
+    fields: Record<string, unknown>;
+    model: string;
+    requestId: string | null;
+    createdAt: string;
+  };
   mockPublication?: {
     draftId: string;
     status: 'DRAFT_CREATED';

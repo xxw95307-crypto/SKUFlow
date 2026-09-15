@@ -76,6 +76,7 @@ async function handlePATCH(request: Request, context: { params: Promise<{ taskId
     const hasErrors = issues.some((issue) => issue.severity === 'error');
     const payload = { ...draft.payload, fields, fieldSources, fieldEvidence, fieldNotes, confirmedInferredFields: requestedConfirmations };
     delete payload.mockPublication;
+    delete payload.localization;
     const status = action === 'approve' && !hasErrors ? 'APPROVED' : hasErrors ? 'NEEDS_REVIEW' : 'VALIDATED';
     const now = new Date().toISOString();
     await DB.prepare(

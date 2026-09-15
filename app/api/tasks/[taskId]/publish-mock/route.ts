@@ -7,8 +7,9 @@ import { ensureSchema, getBindings } from '@/db/client';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
-import { loadShopifyDevConfig, publishShopifyDevDraft } from '@/lib/platforms/shopify-dev';
+import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
 import { getProductPassport } from '@/lib/server/passport-store';
+import { localizedPublicationPayload } from '@/lib/agents/listing-localization';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,8 @@ interface DeliveryResult {
   adminUrl?: string | null;
   warnings?: string[];
   verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
+  targetLocale?: string;
+  targetLanguage?: string;
 }
 
 async function saveCreatedDraft(DB: D1Database, input: {
@@ -71,6 +74,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     for (const draft of publishable) {
       const now = new Date().toISOString();
       const currentPayload = draft.payload as unknown as ListingDraftPayload;
+      const publicationPayload = localizedPublicationPayload(currentPayload);
       if (draft.platformId === 'shopify' && shopifyConfig) {
         if (!media.length) throw new Error('请选择要同步到 Shopify 的商品图片');
         const liveSchema = await fetchShopifyListingSchema(shopifyConfig, { market: draft.market });
@@ -79,7 +83,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
         if (currentPayload.schema.fields.some((field) => !supported.has(field.key))) throw new Error('Shopify 可写字段已发生变化，请重新生成审核稿。');
         const publication = await publishIntegratedShopify({
           config: shopifyConfig,
-          payload: currentPayload,
+          payload: publicationPayload,
           draftId: draft.id,
           media,
           onCreated: async(productId) => { await DB.prepare('UPDATE platform_drafts SET payload_json=? WHERE id=? AND task_id=?').bind(JSON.stringify({...currentPayload, pendingShopifyProductId:productId}),draft.id,taskId).run(); },
@@ -95,6 +99,8 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
           adminUrl: publication.adminUrl,
           warnings: publication.warnings,
           verification: publication.verification,
+          targetLocale: currentPayload.localization?.targetLocale,
+          targetLanguage: currentPayload.localization?.targetLanguage,
         });
         continue;
       }
@@ -105,7 +111,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
         mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now },
       };
       await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
-      results.push({ platformId: draft.platformId, market: draft.market, draftId: mockDraftId, status: 'DRAFT_CREATED', mode: 'MOCK' });
+      results.push({ platformId: draft.platformId, market: draft.market, draftId: mockDraftId, status: 'DRAFT_CREATED', mode: 'MOCK', targetLocale: currentPayload.localization?.targetLocale, targetLanguage: currentPayload.localization?.targetLanguage });
     }
 
     const realCount = results.filter((item) => item.mode === 'SHOPIFY_DEV').length;

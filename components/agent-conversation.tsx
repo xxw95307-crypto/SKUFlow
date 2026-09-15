@@ -191,11 +191,19 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, children
   </div>;
 }
 
-function PublishDialog({ task, passport, selectedAssets, busy, onPublish, onClose }: {
+function localizationPreviewValue(value: unknown): string {
+  if (Array.isArray(value)) return value.join(' · ');
+  return typeof value === 'string' ? value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : String(value ?? '');
+}
+
+function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy, localizationError, onRetryLocalization, onPublish, onClose }: {
   task: TaskSnapshot;
   passport: ProductPassport;
   selectedAssets: string[];
   busy: boolean;
+  localizationBusy: boolean;
+  localizationError: string;
+  onRetryLocalization: () => void;
   onPublish: () => void;
   onClose: () => void;
 }) {
@@ -203,11 +211,22 @@ function PublishDialog({ task, passport, selectedAssets, busy, onPublish, onClos
   const shopifyCount = approved.filter((draft) => draft.platformId === 'shopify').length;
   const mockCount = approved.length - shopifyCount;
   const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
-  return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose}>
+  const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && draft.payload.localization?.status === 'READY');
+  return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose} wide>
     <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 个平台 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
-    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
+    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
+    <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文将写入平台草稿</b></header>
+      {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>中央 Agent 正在翻译并校验字段长度与结构…</p></div>}
+      {localizationError && <div className="publish-localization-error" role="alert"><p>{localizationError}</p><button type="button" onClick={onRetryLocalization}>重新生成译文</button></div>}
+      {!localizationBusy && !localizationError && approved.map((draft) => {
+        if (!isListingDraftPayload(draft.payload) || !draft.payload.localization) return null;
+        const payload = draft.payload;
+        const entries = payload.schema.fields.flatMap((field) => field.key in payload.localization!.fields ? [[field.label, payload.localization!.fields[field.key]] as const] : []).slice(0, 5);
+        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{payload.localization.targetLanguage} · {payload.localization.targetLocale}</span></div><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl><small>由 {payload.localization.model} 根据已确认中文稿生成；SKU、价格、尺寸及其他经营字段保持原值。</small></article>;
+      })}
+    </section>
     <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若测试店铺未配置，Agent 会暂停并提示所需连接信息。</span></div>
-    <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || approved.length === 0} onClick={onPublish}>{busy ? '发布中…' : `确认并创建 ${approved.length} 个草稿`}</button></div>
+    <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || localizationBusy || !localizationReady || Boolean(localizationError)} onClick={onPublish}>{busy ? '发布中…' : localizationBusy ? '正在准备译文…' : `确认译文并创建 ${approved.length} 个草稿`}</button></div>
   </AgentDialog>;
 }
 
@@ -246,6 +265,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const [error, setError] = useState('');
   const [composer, setComposer] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
+  const [localizationBusy, setLocalizationBusy] = useState(false);
+  const [localizationError, setLocalizationError] = useState('');
+  const [localizationRevision, setLocalizationRevision] = useState(0);
   const [manualConflictValue, setManualConflictValue] = useState('');
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [mediaGuidance,setMediaGuidance] = useState('');
@@ -273,6 +295,22 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
+
+  useEffect(() => {
+    if (!publishOpen || !task || !passport) return;
+    const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED');
+    if (!approved.length || approved.every((draft) => isListingDraftPayload(draft.payload) && draft.payload.localization?.status === 'READY')) {
+      queueMicrotask(() => { setLocalizationError(''); setLocalizationBusy(false); });
+      return;
+    }
+    let active = true;
+    queueMicrotask(() => { if (active) { setLocalizationBusy(true); setLocalizationError(''); } });
+    void responseJson<{ passport: ProductPassport }>(fetch(`/api/tasks/${task.id}/localize-drafts`, { method: 'POST' }), '目标站点译文生成失败')
+      .then((data) => { if (active) setPassport(data.passport); })
+      .catch((caught) => { if (active) setLocalizationError(caught instanceof Error ? caught.message : '目标站点译文生成失败'); })
+      .finally(() => { if (active) setLocalizationBusy(false); });
+    return () => { active = false; };
+  }, [publishOpen, task, passport, localizationRevision]);
 
   const append = (
     role: ChatMessage['role'],
@@ -712,12 +750,13 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         const payload = await responseJson<{
           passport: ProductPassport;
           message?: string;
-          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }> }>;
+          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; targetLocale?: string; targetLanguage?: string; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }> }>;
         }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({selectedAssetIds:selectedAssetsRef.current,mediaPlanId:mediaPlanRef.current}) }), '平台测试草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
         const shopifyCreated = payload.results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
         const warningCount = payload.results.reduce((count, item) => count + (item.warnings?.length ?? 0), 0);
-        append('agent', `测试发布工具已完成，已创建 ${payload.results.length} 个平台草稿。${shopifyCreated ? `其中 ${shopifyCreated} 个已写入 Shopify Dev Store，保持未公开状态。` : ''}${warningCount ? `另有 ${warningCount} 条非阻塞提示可在发布记录中核对。` : ''}`, '发布记录已保存', {
+        const languageSummary = payload.results.map((item) => item.targetLanguage ? `${item.targetLanguage}（${item.targetLocale}）` : '').filter(Boolean).join('、');
+        append('agent', `测试发布工具已完成，已按${languageSummary || '目标站点语言'}创建 ${payload.results.length} 个平台草稿。${shopifyCreated ? `其中 ${shopifyCreated} 个已写入 Shopify Dev Store，保持未公开状态。` : ''}${warningCount ? `另有 ${warningCount} 条非阻塞提示可在发布记录中核对。` : ''}`, '发布记录已保存', {
           kind: 'publish',
           items: payload.passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').map((draft) => ({
             id: draft.id,
@@ -1129,7 +1168,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       </footer>}
     </section>
 
-    {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} onPublish={publish} onClose={() => setPublishOpen(false)} />}
+    {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} localizationBusy={localizationBusy} localizationError={localizationError} onRetryLocalization={() => setLocalizationRevision((value) => value + 1)} onPublish={publish} onClose={() => setPublishOpen(false)} />}
     {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}
   </main>;
 }

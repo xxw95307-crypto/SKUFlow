@@ -9,6 +9,7 @@ test('live schema includes only returned API fields and uses shop currency witho
   ])});
   const schema = await fetchShopifyListingSchema(config,{market:'日本'},mock);
   assert.equal(schema.mode,'SHOPIFY_API');
+  assert.equal(schema.locale,'ja-JP');
   assert.equal(schema.fields.find(f=>f.key==='variant_price')?.unit,'JPY');
   assert.equal(schema.fields.some(f=>f.key==='body_html'),false);
   await assert.rejects(()=>fetchShopifyListingSchema(config,{market:'日本'},async()=>Response.json({error:'denied'},{status:403})));
