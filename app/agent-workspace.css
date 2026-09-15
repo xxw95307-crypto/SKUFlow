@@ -860,6 +860,27 @@ body {
   padding: 13px;
 }
 
+.agent-shell-v2 .chat-message.joined-action > div.joined-action-bubble {
+  width: min(900px, calc(100% - 43px));
+  max-width: min(900px, calc(100% - 43px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.agent-shell-v2 .joined-message-copy {
+  padding: 14px 17px 13px;
+}
+
+.agent-shell-v2 .joined-action-bubble .chat-action-card.intake {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--sf-line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .agent-shell-v2 .chat-message p {
   margin: 0;
   color: #303733;

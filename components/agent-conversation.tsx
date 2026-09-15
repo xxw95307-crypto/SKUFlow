@@ -969,6 +969,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const approvedCount = passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED').length ?? 0;
   const publishedCount = passport?.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length ?? 0;
   const showWelcomeWorkspace = phase === 'idle' && messages.length === 1 && messages[0]?.id === 'welcome';
+  const joinIntakeToLastAgentReply = phase === 'intake' && messages.at(-1)?.role === 'agent';
+
+  const intakeCard = phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
 
@@ -1048,10 +1051,17 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       <div className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
-          {!showWelcomeWorkspace && messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}>
-            <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
-            <div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}><RichMessageContent message={message} /></div>
-          </article>)}
+          {!showWelcomeWorkspace && messages.map((message, index) => {
+            const joinsIntake = joinIntakeToLastAgentReply && index === messages.length - 1;
+            const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
+            return <article className={`chat-message ${message.role}${joinsIntake ? ' joined-action' : ''}`} key={message.id}>
+              <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
+              <div className={`${richClass}${joinsIntake ? ' joined-action-bubble' : ''}`}>
+                {joinsIntake ? <div className="joined-message-copy"><RichMessageContent message={message} /></div> : <RichMessageContent message={message} />}
+                {joinsIntake && intakeCard}
+              </div>
+            </article>;
+          })}
 
           {showWelcomeWorkspace && <div className="agent-welcome-workspace">
             <div className="agent-welcome-copy"><small>欢迎使用 SKUFlow</small><h2>今天想上新什么商品？</h2><p>把商品图片、参数表和说明文档交给我，我会整理属性、生成各平台 Listing，并在关键节点请你确认。</p></div>
@@ -1076,7 +1086,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
 
-          {phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>}
+          {phase === 'intake' && !joinIntakeToLastAgentReply && intakeCard}
 
           {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 
