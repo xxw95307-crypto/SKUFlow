@@ -1212,11 +1212,11 @@ body {
 .agent-shell-v2 .agent-composer {
   min-height: 84px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "attachments attachments attachments" "attach message send";
+  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1078px) 42px minmax(0, 1fr);
+  grid-template-areas: ". attachments attachments attachments ." ". attach message send .";
   align-items: center;
   gap: 9px;
-  padding: 10px clamp(20px, 3vw, 56px) 14px;
+  padding: 10px 0 14px;
   border: 0;
   border-top: 1px solid #f0f2f0;
   background: rgba(255, 255, 255, .99);
