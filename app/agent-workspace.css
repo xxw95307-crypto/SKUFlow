@@ -1513,9 +1513,3 @@ body {
 .chat-result-video { grid-column: 1 / -1; width: 100%; }
 .chat-result-video video { display: block; width: 100%; max-height: 460px; background: #17251e; border-radius: 10px; margin: 12px 0; }
 .chat-result-video a { font-size: 12px; color: #3f8060; }
-
-.agent-shell-v2 .rail-new-chat { display: flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; width: 100%; min-height: 42px; margin: 18px 0 0; padding: 10px 12px; border: 1px solid #3f8060; border-radius: 9px; background: #3f8060; color: #fff; font: inherit; cursor: pointer; }
-.agent-shell-v2 .rail-new-chat b { font-size: 13px; font-weight: 600; }
-.agent-shell-v2 .rail-new-chat:hover { background: #347052; }
-.agent-shell-v2 .rail-new-chat:disabled { opacity: .5; cursor: default; }
-@media (max-width: 1100px) { .agent-shell-v2 .rail-new-chat { padding: 10px 0; } .agent-shell-v2 .rail-new-chat b { display: none; } }

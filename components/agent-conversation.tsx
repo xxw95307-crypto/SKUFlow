@@ -990,7 +990,6 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         <a href="#conversation-list"><span>□</span>任务记录</a>
         <button type="button" disabled={phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
       </nav>
-      <button className="rail-new-chat" type="button" aria-label="新建对话" title="新建对话" disabled={phase === 'processing'} onClick={() => void newConversation()}><span aria-hidden="true">＋</span><b>新建对话</b></button>
       <div className="agent-rail-label">最近对话</div>
       <div className="conversation-list" id="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
         <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
@@ -1042,6 +1041,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         <div className="agent-topbar-actions">
           {phase !== 'idle' && <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>}
           {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
+          <button className="topbar-new-chat" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span> 新建对话</button>
         </div>
       </header>
 
