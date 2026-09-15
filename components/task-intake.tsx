@@ -120,10 +120,10 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
       {(!agentManaged || !initialTargets?.platforms.length) && <fieldset><legend>目标平台 <small>12 个平台均可走 Mock 流程</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>}
     </div>
 
-    {(!agentManaged || files.length === 0) && <div className="dropzone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
-      <input ref={fileInput} className="visually-hidden" type="file" multiple accept={acceptedTypes} onChange={(event) => event.target.files && addFiles(event.target.files)} />
-      <div className="upload-icon">↑</div><h3>拖入供应商资料，或点击选择文件</h3><p>支持图片、PDF、Excel、CSV、Word 和文本资料</p><button type="button">选择本地文件</button>
-    </div>}
+    <input ref={fileInput} className="visually-hidden" type="file" multiple accept={acceptedTypes} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} />
+    <div className={`dropzone ${files.length ? 'compact' : ''}`} role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+      {files.length ? <><div><b>继续添加商品资料</b><span>可再次选择或拖入图片、PDF、Excel 等文件</span></div><button type="button">＋ 添加文件</button></> : <><div className="upload-icon">↑</div><h3>拖入供应商资料，或点击选择文件</h3><p>支持图片、PDF、Excel、CSV、Word 和文本资料</p><button type="button">选择本地文件</button></>}
+    </div>
 
     <div className="file-list">{files.length === 0 ? <div className="empty-files"><b>尚未选择文件</b><span>建议至少包含商品主图与一份参数资料</span></div> : files.map((file, index) => <div className="file-row" key={`${file.name}:${file.size}`}><span className="file-icon image">{file.name.split('.').pop()?.slice(0, 3).toUpperCase()}</span><div><b>{file.name}</b><small>{formatBytes(file.size)} · 等待安全上传</small></div><button className="remove-file" type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>移除</button></div>)}</div>
 

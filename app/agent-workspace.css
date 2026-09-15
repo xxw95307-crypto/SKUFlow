@@ -881,6 +881,42 @@ body {
   box-shadow: none;
 }
 
+.agent-shell-v2 .embedded-intake .dropzone.compact {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 13px;
+  border-style: solid;
+  text-align: left;
+}
+
+.agent-shell-v2 .embedded-intake .dropzone.compact > div {
+  min-width: 0;
+}
+
+.agent-shell-v2 .embedded-intake .dropzone.compact b,
+.agent-shell-v2 .embedded-intake .dropzone.compact span {
+  display: block;
+}
+
+.agent-shell-v2 .embedded-intake .dropzone.compact b {
+  color: #344139;
+  font-size: 12px;
+}
+
+.agent-shell-v2 .embedded-intake .dropzone.compact span {
+  margin-top: 3px;
+  color: #7f8a83;
+  font-size: 10px;
+}
+
+.agent-shell-v2 .embedded-intake .dropzone.compact button {
+  flex: none;
+  margin: 0;
+}
+
 .agent-shell-v2 .chat-message p {
   margin: 0;
   color: #303733;
