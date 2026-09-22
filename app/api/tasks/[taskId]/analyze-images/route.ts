@@ -99,6 +99,10 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (passport.status === 'LOCKED') return Response.json({ error: 'Product passport is locked' }, { status: 409 });
     const files = await getImageFiles(bindings.DB, taskId);
     if (files.length === 0) return Response.json({ error: '当前任务没有图片文件' }, { status: 409 });
+    if (force) {
+      // 强制重分析意味着可见属性证据会更新：作废未发布的旧审校稿，由编排器引导重新生成。
+      await bindings.DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
+    }
 
     for (const file of files.slice(0, 12)) {
       const existing = await getLatestVisionRunForFile(bindings.DB, file.id);

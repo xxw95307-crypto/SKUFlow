@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic';
 const welcomeMessages: ConversationMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，我是 SKUFlow Agent。你可以点击左下角“＋”附上商品图片、表格和说明文档，再直接告诉我想上新到哪些平台；也可以先问我有关平台 Listing 的问题。',
-  meta: '等待你的消息',
+  text: '你好，我是你的上新助手。把商品图片、表格或说明文档发给我，告诉我想上新到哪些平台，剩下的交给我。',
+  meta: '也可以先聊聊平台 Listing 的问题，随时开始',
 }];
 
 async function handleGET() {

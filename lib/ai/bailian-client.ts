@@ -120,6 +120,13 @@ function toBailianMessages(messages: AgentModelMessage[]): Array<Record<string, 
   });
 }
 
+const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRY_DELAYS_MS = [2_000, 4_000, 8_000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function callBailianOrchestrator(
   config: BailianConfig,
   input: {
@@ -135,61 +142,79 @@ export async function callBailianOrchestrator(
   const baseUrl = normalizeBaseUrl(config.baseUrl);
   const model = config.model.trim();
   if (!model) throw new Error('BAILIAN_MODEL 尚未配置');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90_000);
   const forcedTool = input.requireTool && input.tools.length === 1 ? input.tools[0].function.name : null;
+  const requestBody = JSON.stringify({
+    model,
+    messages: [{ role: 'system', content: input.systemPrompt }, ...toBailianMessages(input.messages)],
+    ...(input.tools.length ? {
+      tools: input.tools,
+      tool_choice: forcedTool
+        ? { type: 'function', function: { name: forcedTool } }
+        : input.requireTool ? 'required' : 'auto',
+      parallel_tool_calls: false,
+    } : {}),
+    enable_thinking: false,
+    temperature: 0.1,
+    max_completion_tokens: 1_024,
+    stream: false,
+  });
 
-  try {
-    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'system', content: input.systemPrompt }, ...toBailianMessages(input.messages)],
-        ...(input.tools.length ? {
-          tools: input.tools,
-          tool_choice: forcedTool
-            ? { type: 'function', function: { name: forcedTool } }
-            : input.requireTool ? 'required' : 'auto',
-          parallel_tool_calls: false,
-        } : {}),
-        enable_thinking: false,
-        temperature: 0.1,
-        max_completion_tokens: 1_024,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
-      throw new Error(`百炼 Agent 编排失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+  // 429/5xx 指数退避重试：百炼限流（素材生成阶段请求密集）在秒级窗口内即可恢复，
+  // 自动重试避免演示流程被中断；Retry-After 优先且封顶 30 秒。
+  let lastError: Error = new Error('百炼 Agent 编排失败');
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90_000);
+    try {
+      const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+        body: requestBody,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
+        const error = new Error(`百炼 Agent 编排失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+        if (RETRYABLE_HTTP_STATUS.has(response.status) && attempt < RETRY_DELAYS_MS.length) {
+          const retryAfterHeader = Number(response.headers.get('retry-after'));
+          const delay = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+            ? Math.min(retryAfterHeader * 1_000, 30_000)
+            : RETRY_DELAYS_MS[attempt];
+          await sleep(delay);
+          continue;
+        }
+        throw error;
+      }
+      const payload = await response.json() as ChatCompletionResponse;
+      const rawMessage = payload.choices?.[0]?.message;
+      if (!rawMessage) throw new Error('百炼 Agent 返回内容为空');
+      const toolCalls: AgentToolCall[] = (rawMessage.tool_calls ?? []).flatMap((call) => {
+        const name = call.function?.name;
+        if (!call.id || call.type !== 'function' || !isAgentToolName(name)) return [];
+        return [{
+          id: call.id,
+          type: 'function' as const,
+          function: { name, arguments: call.function?.arguments || '{}' },
+        }];
+      });
+      const content = responseText(rawMessage.content).trim() || null;
+      if (!content && toolCalls.length === 0) throw new Error('百炼 Agent 未返回回复或工具调用');
+      return {
+        message: { role: 'assistant', content, toolCalls },
+        model: payload.model || model,
+        usage: normalizeUsage(payload.usage),
+        requestId: payload.id || response.headers.get('x-request-id'),
+      };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼 Agent 编排超时');
+      lastError = error instanceof Error ? error : new Error('百炼 Agent 编排失败');
+      // 非限流类错误（参数、鉴权、内容问题）没有重试价值，直接抛出。
+      if (!/HTTP (429|500|502|503|504)/.test(lastError.message)) throw lastError;
+    } finally {
+      clearTimeout(timeout);
     }
-    const payload = await response.json() as ChatCompletionResponse;
-    const rawMessage = payload.choices?.[0]?.message;
-    if (!rawMessage) throw new Error('百炼 Agent 返回内容为空');
-    const toolCalls: AgentToolCall[] = (rawMessage.tool_calls ?? []).flatMap((call) => {
-      const name = call.function?.name;
-      if (!call.id || call.type !== 'function' || !isAgentToolName(name)) return [];
-      return [{
-        id: call.id,
-        type: 'function' as const,
-        function: { name, arguments: call.function?.arguments || '{}' },
-      }];
-    });
-    const content = responseText(rawMessage.content).trim() || null;
-    if (!content && toolCalls.length === 0) throw new Error('百炼 Agent 未返回回复或工具调用');
-    return {
-      message: { role: 'assistant', content, toolCalls },
-      model: payload.model || model,
-      usage: normalizeUsage(payload.usage),
-      requestId: payload.id || response.headers.get('x-request-id'),
-    };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼 Agent 编排超时');
-    throw error;
-  } finally {
-    clearTimeout(timeout);
   }
+  throw lastError;
 }
 
 function toBase64(bytes: Uint8Array): string {

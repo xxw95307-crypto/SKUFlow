@@ -8,6 +8,10 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   parse_product_sources: '解析当前任务中的图片、PDF、表格和文本资料，形成统一内容块。',
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
+  update_task_targets: '更新当前商品任务的目标平台和目标市场/站点。仅在任务存在且尚未发布任何草稿时可调用。必须用户提供完整的平台列表和目标市场列表后才调用；不完整时先用自然语言询问。更新会作废旧的 Listing 审校稿，后续按新目标重新生成；图文冲突与商品事实不受影响。',
+  reparse_sources: '强制重新解析当前任务的全部资料（图片、PDF、表格、文本），覆盖旧的解析结果。仅当用户明确要求重新解析，或说明资料有问题（如识别错漏、文件内容更新）时调用；任务存在且有资料、未发布即可调用。完成后应按需继续重新理解图片、重新合并事实；旧审校稿已作废。',
+  reanalyze_images: '强制重新理解当前任务的全部商品实物图，覆盖旧的图片分析结果。仅当用户明确要求重新看图、重新识别图片属性，或图片理解结果有误时调用；任务存在且有图片、未发布即可调用。完成后应重新合并事实；旧审校稿已作废。',
+  reopen_resolved_conflicts: '把全部已裁决或已忽略的图文冲突重置为待确认，让商家重新逐项选择。仅当用户明确要求重新裁决冲突、修改之前的冲突选择时调用；存在已裁决冲突且未发布即可调用。事实当前取值不变，直到商家重新选择；旧审校稿已作废。',
   generate_platform_listings: '读取所选平台字段（Shopify 使用真实接口），并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
@@ -25,7 +29,18 @@ function tool(name: AgentToolName): AgentToolDefinition {
     function: {
       name,
       description: TOOL_DESCRIPTIONS[name],
-      parameters: { type: 'object', properties: name === 'trim_product_video' ? {videoId:{type:'string',description:'要裁剪的可信视频ID；不确定则省略'},start:{type:'number',description:'Agent决定的保留起点秒数；省略为0'},end:{type:'number',description:'Agent决定的保留终点秒数；省略为原视频终点'}} : {}, additionalProperties: false },
+      parameters: {
+        type: 'object',
+        properties: name === 'trim_product_video'
+          ? { videoId:{type:'string',description:'要裁剪的可信视频ID；不确定则省略'},start:{type:'number',description:'Agent决定的保留起点秒数；省略为0'},end:{type:'number',description:'Agent决定的保留终点秒数；省略为原视频终点'} }
+          : name === 'update_task_targets'
+            ? {
+                platforms: { type: 'array', items: { type: 'string' }, description: '完整的目标平台 ID 列表（替换现有全部平台），如 ["amazon","tiktok-shop"]' },
+                markets: { type: 'array', items: { type: 'string' }, description: '完整的目标市场/站点列表（替换现有全部市场），如 ["US","JP"]' },
+              }
+            : {},
+        additionalProperties: false,
+      },
     },
   };
 }
@@ -44,7 +59,7 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
 
   if (!parsingReady) names.push('parse_product_sources');
   if (parsingReady && !visionReady) names.push('analyze_product_images');
-  if (parsingReady && visionReady && state.factCount === 0) names.push('merge_product_facts');
+  if (parsingReady && visionReady && state.publishedDraftCount === 0) names.push('merge_product_facts');
   if (state.openConflictCount > 0) names.push('open_conflict_review');
   if (state.factCount > 0 && state.openConflictCount === 0 && state.generatedDraftCount === 0 && state.publishedDraftCount === 0) {
     names.push('generate_platform_listings');
@@ -107,13 +122,42 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 10. 已有素材时用户只修改或新增视频，必须调用 revise_product_video；它依据上一条视频方案落实镜头、场景、动作、时长要求并启动新视频，不重做图片。视频内部镜头顺序不是商品媒体排序。首次图片与视频一起规划使用 generate_visual_assets。只调整商品封面、图片/视频在商品媒体中的位置时调用 generate_visual_assets 打开媒体编排。
 11. 生成工具完成且用户没有新的修改要求时，应调用 open_asset_selection 展示本次结果，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求，再展示新结果。
 12. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
+13. 回退与改目标：用户想“重新选站点/平台/市场”“改目标站点”“换平台再来”时，即使正处在冲突确认或 Listing 审核等检查点，也应优先响应这个意图：新目标明确（能列出完整的平台列表和市场列表）时直接调用 update_task_targets，并说明旧的审校稿会作废、稍后按新目标重新生成；不明确时先用自然语言问清完整目标再调用，绝不带着模糊目标调用。图文冲突和已确认的事实与平台无关，改目标不会丢失这些进度，改完目标后继续未完成的检查点。已发布过草稿的任务不可改目标，需如实告知。
+14. 回退到更早的步骤：用户说“重新解析资料”“文件识别错了/内容更新了”调用 reparse_sources；“重新看图”“图片属性识别错了”调用 reanalyze_images；“重新裁决冲突”“改一下之前冲突的选择”调用 reopen_resolved_conflicts。这三个工具都会作废未发布的旧审校稿，完成后按状态继续正常流程（例如重新解析后继续重新理解图片、重新合并事实，再回到冲突确认或 Listing 生成）。merge_product_facts 在未发布前始终可用，用于事实变化后的重新合并；除此之外不要重复执行已完成的步骤。这些回退工具只在用户本轮明确提出对应意图时才会出现在工具列表里；如果列表里没有，先用自然语言向商家确认具体想回退到哪一步，不要尝试调用列表外的工具。所有回退在任务发布后不可用，需如实告知。
 
 当前可信状态：
 ${JSON.stringify(state, null, 2)}`;
 }
 
-export function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModelMessage[], state: AgentWorkflowState): AgentToolDefinition[] {
+const BACKTRACK_INTENT_PATTERNS: Array<{ pattern: RegExp; tool: AgentToolName }> = [
+  { pattern: /重新解析|重新识别文件|解析.{0,6}(?:错|错漏|失败|不对|更新)|资料.{0,8}(?:变了|更新了|换了)/, tool: 'reparse_sources' },
+  { pattern: /重新(?:看|分析|理解|识别).{0,6}(?:图|图片|实物)|图片.{0,8}(?:识别|理解).{0,4}错|重新拍|重拍/, tool: 'reanalyze_images' },
+  { pattern: /重新裁决|重新确认冲突|重开冲突| reopen |改.{0,4}冲突(?:的)?(?:选择|答案|裁决)|之前.{0,6}冲突.{0,8}(?:选错|改)/, tool: 'reopen_resolved_conflicts' },
+  { pattern: /重新选|改目标|换平台|换站点|重新选站点|重新选平台|改成.{0,12}(?:平台|站点|市场)|只上|再加一个平台|去掉一个平台/, tool: 'update_task_targets' },
+];
+
+// 回退能力按用户意图动态注入：平时不占工具列表（保住唯一工具恢复机制），
+// 用户表达回退意图时才给出对应工具，且发布后一律不可回退。
+export function withBacktrackTools(tools: AgentToolDefinition[], messages: AgentModelMessage[], state: AgentWorkflowState): AgentToolDefinition[] {
+  if (!state.taskId || state.publishedDraftCount > 0) return tools;
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
+  const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : undefined;
+  if (lastUser?.role !== 'user') return tools;
+  const wanted = new Set<AgentToolName>();
+  for (const { pattern, tool } of BACKTRACK_INTENT_PATTERNS) {
+    if (pattern.test(lastUser.content)) wanted.add(tool);
+  }
+  if (wanted.size === 0) return tools;
+  if (state.fileCount === 0) wanted.delete('reparse_sources');
+  if (state.imageCount === 0) wanted.delete('reanalyze_images');
+  if (state.resolvedConflictCount === 0) wanted.delete('reopen_resolved_conflicts');
+  const existing = new Set(tools.map((item) => item.function.name));
+  const additions = [...wanted].filter((name) => !existing.has(name));
+  if (additions.length === 0) return tools;
+  return [...tools, ...additions.map(tool)];
+}
+
+export function withRegenerationTool(tools: AgentToolDefinition[], messages: AgentModelMessage[], state: AgentWorkflowState): AgentToolDefinition[] {  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
   const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : undefined;
   const requested = lastUser?.role === 'user'
     && /封面|排序|顺序|视频.*放.*第|重新生成|重写|再生成|重新规划|换一批|换成|想要.*(?:素材|图片|主图|场景)|增加.*(?:素材|图片|视频)|生成.*(?:素材|图片|视频)/.test(lastUser.content);

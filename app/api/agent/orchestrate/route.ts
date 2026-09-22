@@ -1,6 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
@@ -81,7 +81,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     : 0;
   const empty: AgentWorkflowState = {
     taskId: null, intakePresented: body.intakePresented === true, pendingAttachmentCount, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
-    imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0,
+    imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0, resolvedConflictCount: 0,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
     generatedAssetCount: 0,
     selectedAssetCount: 0, publishApproved: body.publishApproved === true,
@@ -114,6 +114,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     analyzedImageCount: new Set(visionRuns.map((run) => run.fileId)).size,
     factCount: passport.facts.filter((fact) => fact.status !== 'MISSING').length,
     openConflictCount: passport.conflicts.filter((conflict) => conflict.status === 'OPEN').length,
+    resolvedConflictCount: passport.conflicts.filter((conflict) => conflict.status !== 'OPEN').length,
     draftCount: passport.platformDrafts.length,
     generatedDraftCount: generatedDrafts.length,
     approvedDraftCount: approvedDrafts.length,
@@ -151,7 +152,7 @@ async function handlePOST(request: Request) {
     const targetAwareTools = listingStartRequested && lastUser?.role === 'user'
       ? restrictIntakeToolsForListingRequest(stateTools, state, [...knownTargets.platforms, ...knownTargets.markets].join(' '))
       : stateTools;
-    const tools = withRegenerationTool(targetAwareTools, messages, state);
+    const tools = withBacktrackTools(withRegenerationTool(targetAwareTools, messages, state), messages, state);
     const requireTool = (body.requireAction === true || listingStartRequested) && tools.length > 0;
     const soleTool = soleRequiredAgentTool(tools, requireTool);
     let result;

@@ -79,7 +79,7 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
-  text: '你好，我是 SKUFlow Agent。今天想上新什么商品？',
+  text: '你好，我是你的上新助手。今天想上新什么商品？',
   meta: '直接描述需求，也可以先附上图片、表格或说明文档',
 }];
 
@@ -216,7 +216,7 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
     <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 个平台 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
     <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
     <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文将写入平台草稿</b></header>
-      {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>中央 Agent 正在翻译并校验字段长度与结构…</p></div>}
+      {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>Agent 正在为各目标市场翻译 Listing，并校验字段长度与结构…</p></div>}
       {localizationError && <div className="publish-localization-error" role="alert"><p>{localizationError}</p><button type="button" onClick={onRetryLocalization}>重新生成译文</button></div>}
       {!localizationBusy && !localizationError && approved.map((draft) => {
         if (!isListingDraftPayload(draft.payload) || !draft.payload.localization) return null;
@@ -262,6 +262,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const [passport, setPassport] = useState<ProductPassport | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [busyLabel, setBusyLabel] = useState('正在读取最近任务…');
+  const [busyHint, setBusyHint] = useState('');
   const [error, setError] = useState('');
   const [composer, setComposer] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
@@ -280,8 +281,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<ConversationSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  const [itemMenu, setItemMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [pauseRequested, setPauseRequested] = useState(false);
+  const pauseRequestedRef = useRef(false);
   const [railWidth, setRailWidth] = useState(DEFAULT_RAIL_WIDTH);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [dragActive, setDragActive] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerFileInput = useRef<HTMLInputElement>(null);
@@ -305,10 +313,16 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     }
     let active = true;
     queueMicrotask(() => { if (active) { setLocalizationBusy(true); setLocalizationError(''); } });
-    void responseJson<{ passport: ProductPassport }>(fetch(`/api/tasks/${task.id}/localize-drafts`, { method: 'POST' }), '目标站点译文生成失败')
-      .then((data) => { if (active) setPassport(data.passport); })
-      .catch((caught) => { if (active) setLocalizationError(caught instanceof Error ? caught.message : '目标站点译文生成失败'); })
-      .finally(() => { if (active) setLocalizationBusy(false); });
+    void (async () => {
+      try {
+        const payload = await responseJson<{ passport: ProductPassport }>(await fetch(`/api/tasks/${task.id}/localize-drafts`, { method: 'POST' }), '目标站点译文生成失败');
+        if (active) setPassport(payload.passport);
+      } catch (caught) {
+        if (active) setLocalizationError(caught instanceof Error ? caught.message : '目标站点译文生成失败');
+      } finally {
+        if (active) setLocalizationBusy(false);
+      }
+    })();
     return () => { active = false; };
   }, [publishOpen, task, passport, localizationRevision]);
 
@@ -419,7 +433,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const loadConversation = async (id: string) => {
     if (id === conversationIdRef.current) return;
     await persistConversation();
-    setPhase('loading'); setBusyLabel('正在恢复会话记忆…');
+    setPhase('loading'); setBusyLabel('正在恢复会话记忆…'); setBusyHint('正在加载历史消息与任务状态，马上就好');
     const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${id}`), '会话读取失败');
     await applyConversation(payload.conversation);
   };
@@ -492,6 +506,23 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     setError(candidates.length + pendingFiles.length > MAX_COMPOSER_FILES ? `一次最多上传 ${MAX_COMPOSER_FILES} 个文件` : '');
   };
 
+  const composerDropHandlers = {
+    onDragOver: (event: React.DragEvent) => {
+      event.preventDefault();
+      if (task === null && phase !== 'processing') setDragActive(true);
+    },
+    onDragLeave: (event: React.DragEvent) => {
+      event.preventDefault();
+      if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false);
+    },
+    onDrop: (event: React.DragEvent) => {
+      event.preventDefault();
+      setDragActive(false);
+      if (task !== null || phase === 'processing') return;
+      if (event.dataTransfer.files?.length) addComposerFiles(event.dataTransfer.files);
+    },
+  };
+
   const refreshTaskState = async (taskId: string) => {
     const [nextTask, nextPassport] = await Promise.all([fetchTask(taskId), fetchPassport(taskId)]);
     setTask(nextTask);
@@ -530,7 +561,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     try {
       if (name === 'inspect_chat_attachments') {
         if (attachmentFiles.length === 0) throw new Error('本轮没有可读取的聊天附件');
-        setBusyLabel('Agent 正在读取本轮附件…');
+        setBusyLabel('Agent 正在读取本轮附件…'); setBusyHint('附件会先安全存入你的空间，再交给 Agent 阅读');
         const body = new FormData();
         attachmentFiles.forEach((file) => body.append('files', file));
         const payload = await responseJson<Record<string, unknown>>(await fetch('/api/agent/inspect-attachments', { method: 'POST', body }), '附件读取失败');
@@ -541,7 +572,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       if (name === 'create_listing_task_from_attachments') {
         if (currentTask) throw new Error('当前会话已经绑定商品任务');
         if (attachmentFiles.length === 0) throw new Error('本轮没有可用于创建任务的附件');
-        setBusyLabel('Agent 正在安全保存资料并创建商品任务…');
+        setBusyLabel('Agent 正在安全保存资料并创建商品任务…'); setBusyHint('资料加密存储，任务随时可在左侧会话找回');
         const body = new FormData();
         const targets = inferConversationTargets(modelHistory.current);
         if (!targets.platforms.length || !targets.markets.length) {
@@ -597,14 +628,14 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (!currentTask) throw new Error('当前还没有创建商品任务');
       if (name === 'parse_product_sources') {
-        setProgressStep(0); setBusyLabel('Agent 正在解析图片、表格和文档…');
+        setProgressStep(0); setBusyLabel('Agent 正在解析图片、表格和文档…'); setBusyHint('逐个文件提取文本、表格和画面信息');
         const payload = await responseJson<{ summary: Record<string, unknown> }>(await fetch(`/api/tasks/${currentTask.id}/parse`, { method: 'POST' }), '资料解析失败');
         await refreshTaskState(currentTask.id);
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: false };
       }
       if (name === 'analyze_product_images') {
-        setProgressStep(1); setBusyLabel('Agent 正在调用百炼理解商品实物图…');
+        setProgressStep(1); setBusyLabel('Agent 正在逐张理解商品实物图…'); setBusyHint('识别品牌、材质、规格等可见属性，图片越清晰识别越准');
         const payload = await responseJson<{ summary: { completed: number; failed: number } }>(await fetch(`/api/tasks/${currentTask.id}/analyze-images`, { method: 'POST' }), '图片理解失败');
         if (payload.summary.completed === 0) throw new Error(`图片理解未得到有效结果（失败 ${payload.summary.failed} 张）`);
         await refreshTaskState(currentTask.id);
@@ -612,14 +643,66 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         return { result: { ok: true, summary: payload.summary }, checkpoint: false };
       }
       if (name === 'merge_product_facts') {
-        setProgressStep(1); setBusyLabel('Agent 正在合并图文证据并检查冲突…');
+        setProgressStep(1); setBusyLabel('Agent 正在合并图文证据并检查冲突…'); setBusyHint('图文说法不一致的地方会列出来，交给你裁决');
         const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport; task: TaskSnapshot }>(await fetch(`/api/tasks/${currentTask.id}/extract-facts`, { method: 'POST' }), '商品事实合并失败');
         setPassport(payload.passport); setTask(payload.task);
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: false };
       }
+      if (name === 'update_task_targets') {
+        if (!currentTask) throw new Error('当前还没有创建商品任务');
+        let args: Record<string, unknown> = {};
+        try { args = JSON.parse(call.function.arguments || '{}'); } catch { throw new Error('目标参数无效'); }
+        const platforms = Array.isArray(args.platforms) ? args.platforms.filter((item): item is string => typeof item === 'string') : [];
+        const markets = Array.isArray(args.markets) ? args.markets.filter((item): item is string => typeof item === 'string') : [];
+        setBusyLabel('Agent 正在更新目标平台与站点…'); setBusyHint('旧的审校稿会作废，稍后按新目标重新生成；冲突与事实进度保留');
+        const payload = await responseJson<{ task: TaskSnapshot }>(await fetch(`/api/tasks/${currentTask.id}/targets`, {
+          method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platforms, markets }),
+        }), '目标平台与站点更新失败');
+        setTask(payload.task);
+        setPassport(await fetchPassport(currentTask.id));
+        mediaPlanRef.current = null; setMediaPlanReady(false);
+        markToolRun(call, 'COMPLETED');
+        return {
+          result: { ok: true, platforms: payload.task.platforms, markets: payload.task.markets, note: '目标已更新，旧的 Listing 审校稿已作废；图文冲突与商品事实保留。' },
+          checkpoint: false, task: payload.task,
+        };
+      }
+      if (name === 'reparse_sources') {
+        if (!currentTask) throw new Error('当前还没有创建商品任务');
+        setBusyLabel('Agent 正在重新解析全部资料…'); setBusyHint('覆盖旧的解析结果，旧审校稿已作废');
+        const payload = await responseJson<{ summary: Record<string, unknown> }>(await fetch(`/api/tasks/${currentTask.id}/parse`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }),
+        }), '资料重新解析失败');
+        await refreshTaskState(currentTask.id);
+        setPassport(await fetchPassport(currentTask.id));
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary, note: '资料已重新解析，旧审校稿已作废。请继续重新理解图片（如有）并重新合并事实，再回到冲突确认或 Listing 生成。' }, checkpoint: false };
+      }
+      if (name === 'reanalyze_images') {
+        if (!currentTask) throw new Error('当前还没有创建商品任务');
+        setProgressStep(1); setBusyLabel('Agent 正在重新理解全部商品实物图…'); setBusyHint('覆盖旧的图片分析结果，旧审校稿已作废');
+        const payload = await responseJson<{ summary: { completed: number; failed: number } }>(await fetch(`/api/tasks/${currentTask.id}/analyze-images`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }),
+        }), '图片重新理解失败');
+        if (payload.summary.completed === 0) throw new Error(`图片重新理解未得到有效结果（失败 ${payload.summary.failed} 张）`);
+        await refreshTaskState(currentTask.id);
+        setPassport(await fetchPassport(currentTask.id));
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, summary: payload.summary, note: '图片已重新理解，旧审校稿已作废。请继续调用 merge_product_facts 重新合并事实。' }, checkpoint: false };
+      }
+      if (name === 'reopen_resolved_conflicts') {
+        if (!currentTask) throw new Error('当前还没有创建商品任务');
+        setBusyLabel('Agent 正在重置冲突裁决…'); setBusyHint('全部已裁决的冲突将回到待确认状态，供你重新选择');
+        const payload = await responseJson<{ reopened: number; note: string }>(await fetch(`/api/tasks/${currentTask.id}/conflicts/reopen`, {
+          method: 'PUT',
+        }), '冲突重置失败');
+        setPassport(await fetchPassport(currentTask.id));
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, reopened: payload.reopened, note: payload.note }, checkpoint: false };
+      }
       if (name === 'generate_platform_listings') {
-        setProgressStep(2); setBusyLabel('Agent 正在读取平台字段并创作中文 Listing…');
+        setProgressStep(2); setBusyLabel('Agent 正在读取平台字段并创作中文 Listing…'); setBusyHint('按各平台字段要求分别创作，稍后请你统一审校');
         const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport }>(await fetch(`/api/tasks/${currentTask.id}/compile-drafts`, { method: 'POST' }), '多平台 Listing 生成失败');
         setPassport(payload.passport);
         markToolRun(call, 'COMPLETED');
@@ -665,7 +748,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       if (name === 'trim_product_video') {
         let args:Record<string,unknown>={};
         try { args=JSON.parse(call.function.arguments); } catch { throw new Error('视频裁剪参数无效'); }
-        setBusyLabel('正在处理你的视频要求…');
+        setBusyLabel('正在处理你的视频要求…'); setBusyHint('视频处理耗时较长，请稍候');
         const response=await fetch(`/api/tasks/${currentTask.id}/video-trims`, {
           method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...args,guidance:requestText}),
         });
@@ -684,7 +767,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
 
       if (name === 'revise_product_video') {
-        setBusyLabel('视频 Agent 正在根据上一条方案和你的要求修改视频…');
+        setBusyLabel('视频 Agent 正在根据上一条方案和你的要求修改视频…'); setBusyHint('在上一版基础上继续调整，不会推翻已有设定');
         const payload = await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`, {
           method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText}),
         }), '视频修改规划失败');
@@ -703,7 +786,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
       }
       if (name === 'generate_visual_assets') {
-        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…');
+        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…'); setBusyHint('会生成多张候选素材，稍后由你挑选');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
@@ -732,7 +815,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (name === 'open_publish_confirmation') {
         if(currentTask.platforms.includes('shopify')) {
-          setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…');
+          setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…'); setBusyHint('编排主图、细节图与视频的展示顺序');
           await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
         }
         setPhase('publish'); setPublishOpen(!currentTask.platforms.includes('shopify'));
@@ -746,7 +829,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (name === 'publish_mock_drafts') {
         if (!publishApproved) throw new Error('发布工具缺少本轮商家明确授权');
-        setProgressStep(4); setBusyLabel('Agent 正在创建平台测试草稿…');
+        setProgressStep(4); setBusyLabel('Agent 正在创建平台测试草稿…'); setBusyHint('仅创建测试草稿，不会改动你的真实店铺');
         const payload = await responseJson<{
           passport: ProductPassport;
           message?: string;
@@ -799,9 +882,17 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       ? modelHistory.current.filter((message) => message.role === 'user' || (message.role === 'assistant' && !message.toolCalls?.length)).slice(-20)
       : modelHistory.current;
     let history: AgentModelMessage[] = [...retainedHistory, { role: 'user', content: modelUserText }];
-    setPhase('processing'); setBusyLabel('中央 Agent 正在判断下一步…'); setError('');
+    pauseRequestedRef.current = false; setPauseRequested(false);
+    setPhase('processing'); setBusyLabel('Agent 正在规划下一步…'); setBusyHint('根据任务进度决定接下来解析、理解还是生成'); setError('');
     try {
       for (let step = 0; step < 10; step += 1) {
+        if (pauseRequestedRef.current) {
+          modelHistory.current = history;
+          setPhase('idle');
+          append('agent', '已按你的要求暂停。当前进度已保存，随时告诉我「继续」，或点「重试当前步骤」接着跑。', '已暂停');
+          await persistConversation(activeTask?.id ?? null, 'ACTIVE');
+          return;
+        }
         const payload = await responseJson<AgentOrchestratorResponse>(await fetch('/api/agent/orchestrate', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -971,7 +1062,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         setConversationId(null);
         const replacement = remaining[Math.min(Math.max(targetIndex, 0), remaining.length - 1)];
         if (replacement) {
-          setPhase('loading'); setBusyLabel('正在打开相邻会话…');
+          setPhase('loading'); setBusyLabel('正在打开相邻会话…'); setBusyHint('');
           const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${replacement.id}`), '会话读取失败');
           await applyConversation(payload.conversation);
         } else {
@@ -982,6 +1073,35 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       setError(caught instanceof Error ? caught.message : '会话删除失败');
     } finally {
       setDeleteBusy(false);
+    }
+  };
+
+  const renameConversation = async (id: string) => {
+    const title = renameValue.trim();
+    if (!title) { setRenamingId(null); return; }
+    try {
+      await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title }),
+      }), '会话重命名失败');
+      setConversations((current) => current.map((item) => item.id === id ? { ...item, title } : item));
+      setRenamingId(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '会话重命名失败');
+    }
+  };
+
+  const toggleConversationStatus = async (item: ConversationSummary) => {
+    const nextStatus = item.status === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED';
+    setStatusBusyId(item.id);
+    try {
+      await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${item.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: nextStatus }),
+      }), '会话状态更新失败');
+      setConversations((current) => current.map((row) => row.id === item.id ? { ...row, status: nextStatus } : row));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '会话状态更新失败');
+    } finally {
+      setStatusBusyId(null);
     }
   };
 
@@ -1034,12 +1154,23 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       </nav>
       <div className="agent-rail-label">最近对话</div>
       <div className="conversation-list" id="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
-        <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
-        <button className="conversation-delete" type="button" disabled={phase === 'processing'} aria-label={`删除会话：${item.title}`} title="删除会话" onClick={() => setDeleteCandidate(item)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v6h2v-6h-2Zm4 0v6h2v-6h-2Z" /></svg></button>
+        {renamingId === item.id ? <form className="conversation-rename" onSubmit={(event) => { event.preventDefault(); void renameConversation(item.id); }}>
+          <input autoFocus value={renameValue} maxLength={60} aria-label="会话名称" onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null); }} />
+          <button className="conversation-action" type="submit" title="确认重命名" aria-label="确认重命名"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2Z"/></svg></button>
+          <button className="conversation-action" type="button" title="取消" aria-label="取消重命名" onClick={() => setRenamingId(null)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12Z"/></svg></button>
+        </form> : <>
+          <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
+          <div className="conversation-actions">
+            <button className="conversation-action" type="button" disabled={phase === 'processing'} title="更多操作" aria-label={`会话操作：${item.title}`} aria-haspopup="menu" onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setItemMenu({ id: item.id, x: rect.right, y: rect.bottom }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg></button>
+          </div>
+        </>}
       </div>)}</div>
-      <div className="agent-rail-links"><span>帮助中心</span><span>偏好设置</span></div>
-      <div className="agent-rail-note"><i /> <b>Agent 自动推进</b><p>只在事实冲突、主观选择和最终发布时向你提问。</p></div>
-      <div className="agent-user"><span>{avatar}</span><div><a href="/login" title="查看账号"><b>{account.name}</b></a><small title={account.email}>{account.email}</small><a className="account-signout" href="/signout-with-chatgpt?return_to=/login" target="_top">退出登录</a></div></div>
+      <div className="agent-rail-links">
+        <button type="button" title="帮助中心"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm1-4h-2v2h2v-2Zm1.9-5.6c-.3.4-.8.8-1.4 1.1-.4.2-.5.4-.5.8v.7h-2v-.9c0-1 .5-1.7 1.4-2.2.5-.3.8-.5.9-.8.2-.3.3-.6.3-1 0-.9-.7-1.6-1.6-1.6s-1.6.7-1.6 1.6H9c0-2 1.3-3.6 3-3.6s3 1.4 3 3.2c0 .7-.2 1.3-.6 1.7Z"/></svg><span>帮助中心</span></button>
+        <button type="button" title="偏好设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.7c.2-.2.3-.5.1-.7l-2-3.5c-.1-.2-.4-.3-.7-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1L14.2 2c0-.3-.3-.5-.5-.5h-4c-.2 0-.5.2-.5.5l-.4 2.7c-.6.2-1.2.5-1.7 1l-2.5-1c-.2-.1-.5 0-.7.2l-2 3.5c-.1.2-.1.5.1.7L4.1 11c0 .3-.1.7-.1 1s0 .7.1 1l-2.1 1.7c-.2.2-.3.5-.1.7l2 3.5c.1.2.4.3.7.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.7c0 .3.3.5.5.5h4c.2 0 .5-.2.5-.5l.4-2.7c.6-.2 1.2-.5 1.7-1l2.5 1c.2.1.5 0 .7-.2l2-3.5c.1-.2.1-.5-.1-.7L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg><span>偏好设置</span></button>
+        <button type="button" className="agent-rail-upgrade" title="升级计划"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.8 5.7L19.5 9l-4.6 3.4 1.7 5.6L12 14.7l-4.6 3.3 1.7-5.6L4.5 9l5.7-1.3L12 2Z"/></svg><span>升级计划</span></button>
+      </div>
+      <div className="agent-user"><span>{avatar}</span><div><a href="/login" title="查看账号"><b>{account.name}</b></a><small title={account.email}>{account.email}</small></div><a className="agent-user-signout" href="/signout-with-chatgpt?return_to=/login" target="_top" title="退出登录" aria-label="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm4 4-1.4 1.4L15.2 11H8v2h7.2l-2.6 2.6L14 17l5-5-5-5Z"/></svg></a></div>
       <button
         className="agent-rail-resizer"
         type="button"
@@ -1104,12 +1235,12 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {showWelcomeWorkspace && <div className="agent-welcome-workspace">
             <div className="agent-welcome-copy"><small>欢迎使用 SKUFlow</small><h2>今天想上新什么商品？</h2><p>把商品图片、参数表和说明文档交给我，我会整理属性、生成各平台 Listing，并在关键节点请你确认。</p></div>
-            <div className={`welcome-composer ${pendingFiles.length ? 'has-files' : ''}`}>
+            <div className={`welcome-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
               <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
               {composerAttachments}
               <textarea rows={4} className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={composerPlaceholder} />
               <div className="welcome-composer-toolbar">
-                <div><span className="composer-mode">◇ 智能规划</span><button type="button" onClick={() => composerFileInput.current?.click()}>＋ 添加资料</button><button type="button" onClick={() => composerFileInput.current?.click()}>▧ 上传图片</button><button type="button" disabled title="即将支持">⌁ 语音消息</button></div>
+                <div><span className="composer-mode">◇ 智能规划</span><button type="button" title="可一次选择多个文件，也可以直接拖进对话框" onClick={() => composerFileInput.current?.click()}>＋ 添加资料</button><button type="button" title="可一次选择多张图片，也可以直接拖进对话框" onClick={() => composerFileInput.current?.click()}>▧ 上传图片</button><button type="button" disabled title="即将支持">⌁ 语音消息</button></div>
                 <small>{composer.length}/2000</small>
                 <button className="send" type="button" aria-label="发送消息" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
               </div>
@@ -1123,13 +1254,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             </div>
           </div>}
 
-          {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>我会根据任务状态继续上次的工作。</small></div></div>}
+          {phase === 'loading' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>{busyHint || '我会根据任务状态继续上次的工作。'}</small></div></div>}
 
           {phase === 'intake' && !joinIntakeToLastAgentReply && intakeCard}
 
           {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
 
-          {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>正在处理你的要求，完成后会显示结果。</small></div><em>自动执行中</em></div>}
+          {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>{busyHint || '正在处理你的要求，完成后会自动展示结果。'}</small></div>{pauseRequested
+            ? <em>正在等待当前步骤完成…</em>
+            : <button type="button" className="agent-pause-button" title="不会打断正在执行的一步，当前步骤完成后暂停" onClick={() => { pauseRequestedRef.current = true; setPauseRequested(true); }}>⏸ 暂停</button>}</div>}
 
           {phase === 'conflict' && passport && <ConflictConversationCard passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} />}
 
@@ -1159,16 +1292,28 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         </>}
       </div>
 
-      {!showWelcomeWorkspace && <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''}`}>
+      {!showWelcomeWorkspace && <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
         <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
         {composerAttachments}
-        <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务' : '添加图片、表格或文档'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>
+        <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务，资料需在任务创建前提供' : '添加图片、表格或文档（可一次选多个，也可以直接拖进输入框）'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>
         <textarea rows={1} className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={composerPlaceholder} />
         <button className="send" type="button" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
       </footer>}
     </section>
 
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} localizationBusy={localizationBusy} localizationError={localizationError} onRetryLocalization={() => setLocalizationRevision((value) => value + 1)} onPublish={publish} onClose={() => setPublishOpen(false)} />}
+    {itemMenu && (() => {
+      const menuItem = conversations.find((row) => row.id === itemMenu.id);
+      if (!menuItem) return null;
+      const openUpward = typeof window !== 'undefined' && window.innerHeight - itemMenu.y < 150;
+      return <div className="conversation-menu-layer" role="presentation" onClick={() => setItemMenu(null)} onContextMenu={(event) => { event.preventDefault(); setItemMenu(null); }}>
+        <div className="conversation-menu" role="menu" aria-label={`会话操作：${menuItem.title}`} style={openUpward ? { left: Math.max(8, itemMenu.x - 148), bottom: window.innerHeight - itemMenu.y + 6 } : { left: Math.max(8, itemMenu.x - 148), top: itemMenu.y + 6 }} onClick={(event) => event.stopPropagation()}>
+          <button type="button" role="menuitem" onClick={() => { setRenamingId(menuItem.id); setRenameValue(menuItem.title); setItemMenu(null); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.2V21h3.8L17.8 9.9l-3.7-3.7L3 17.2ZM20.7 7c.4-.4.4-1 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.7L20.7 7Z"/></svg>重命名</button>
+          <button type="button" role="menuitem" disabled={statusBusyId === menuItem.id} onClick={() => { void toggleConversationStatus(menuItem); setItemMenu(null); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2Z"/></svg>{menuItem.status === 'COMPLETED' ? '标记为进行中' : '标记为已完成'}</button>
+          <button type="button" role="menuitem" className="conversation-menu-danger" onClick={() => { setDeleteCandidate(menuItem); setItemMenu(null); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v6h2v-6h-2Zm4 0v6h2v-6h-2Z" /></svg>删除会话</button>
+        </div>
+      </div>;
+    })()}
     {deleteCandidate && <DeleteConversationDialog conversation={deleteCandidate} busy={deleteBusy} onDelete={() => void removeConversation()} onClose={() => setDeleteCandidate(null)} />}
   </main>;
 }

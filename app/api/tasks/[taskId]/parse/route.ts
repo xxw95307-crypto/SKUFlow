@@ -62,13 +62,20 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       .first<TaskRow>();
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
 
+    if (['EXPORTED', 'DRAFT_CREATED'].includes(task.status)) {
+      return Response.json({ error: `任务已进入终态 ${task.status}，不能再重新解析` }, { status: 409 });
+    }
     if (task.status === 'FILES_PARSED' && !options.force) {
       const results = await getParseResults(DB, taskId);
       return Response.json({ task: await getTaskSnapshot(DB, taskId), results, summary: summarizeParseResults(results) });
     }
 
-    if (!['CREATED', 'INGESTING', 'FILES_PARSED', 'FAILED'].includes(task.status)) {
+    if (!options.force && !['CREATED', 'INGESTING', 'FILES_PARSED', 'FAILED'].includes(task.status)) {
       return Response.json({ error: `当前任务状态 ${task.status} 不允许重新解析源文件` }, { status: 409 });
+    }
+    if (options.force) {
+      // 强制重解析意味着后续事实与 Listing 需要重算：作废未发布的旧审校稿。
+      await DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
     }
 
     let workingStatus = task.status;

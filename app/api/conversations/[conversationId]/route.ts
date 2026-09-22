@@ -119,6 +119,7 @@ async function handlePATCH(request: Request, context: { params: Promise<{ conver
       if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
       if (task.productName !== PENDING_PRODUCT_NAME) title = task.productName;
     }
+    if (typeof body.title === 'string' && body.title.trim()) title = body.title.trim().slice(0, 120);
     const selectedAssetIds = Array.isArray(body.selectedAssetIds)
       ? [...new Set(body.selectedAssetIds.filter((item): item is string => typeof item === 'string').map((item) => item.slice(0, 100)))].slice(0, 20)
       : current.selectedAssetIds;

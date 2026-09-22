@@ -30,7 +30,16 @@ test('routes extracted facts with gaps to human confirmation', () => {
 test('exposes agent ownership and terminal state metadata', () => {
   assert.equal(TASK_STATE_METADATA.FACTS_EXTRACTED.owner, 'agent');
   assert.equal(TASK_STATE_METADATA.NEEDS_CONFIRMATION.requiresHumanAction, true);
-  assert.deepEqual(getAllowedTransitions('HUMAN_APPROVED'), ['EXPORTED', 'DRAFT_CREATED', 'FAILED']);
+  assert.deepEqual(getAllowedTransitions('HUMAN_APPROVED'), ['EXPORTED', 'DRAFT_CREATED', 'FACTS_EXTRACTED', 'INGESTING', 'FAILED']);
   assert.equal(isTerminalStatus('EXPORTED'), true);
   assert.equal(isTerminalStatus('FAILED'), false);
+});
+
+test('permits pre-publication backtracking to earlier pipeline steps', () => {
+  assert.equal(canTransition('NEEDS_CONFIRMATION', 'INGESTING'), true);
+  assert.equal(canTransition('CATEGORY_MAPPED', 'FACTS_EXTRACTED'), true);
+  assert.equal(canTransition('CONTENT_GENERATED', 'INGESTING'), true);
+  assert.equal(canTransition('VALIDATED', 'INGESTING'), true);
+  assert.equal(canTransition('DRAFT_CREATED', 'INGESTING'), false);
+  assert.equal(canTransition('EXPORTED', 'INGESTING'), false);
 });

@@ -68,7 +68,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       .bind(taskId)
       .first<TaskRow>();
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
-    if (!['FILES_PARSED', 'FACTS_EXTRACTED', 'NEEDS_CONFIRMATION'].includes(task.status)) {
+    if (!['FILES_PARSED', 'FACTS_EXTRACTED', 'NEEDS_CONFIRMATION', 'CATEGORY_MAPPED', 'CONTENT_GENERATED', 'VALIDATED', 'HUMAN_APPROVED'].includes(task.status)) {
       return Response.json({ error: `当前任务状态 ${task.status} 尚不能执行事实抽取` }, { status: 409 });
     }
 
@@ -125,6 +125,10 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     });
 
     let currentStatus = task.status;
+    if (currentStatus !== 'FILES_PARSED' && currentStatus !== 'FACTS_EXTRACTED') {
+      // 从更晚阶段重新合并事实：作废旧审校稿（事实已变，旧稿不可信）。
+      await DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
+    }
     if (currentStatus === 'FILES_PARSED') {
       assertTransition(currentStatus, 'FACTS_EXTRACTED');
       await DB.batch(prepareTaskTransition(DB, {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { availableAgentTools, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '../lib/agents/commerce-orchestrator.ts';
+import { availableAgentTools, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, withBacktrackTools } from '../lib/agents/commerce-orchestrator.ts';
 import { callBailianOrchestrator } from '../lib/ai/bailian-client.ts';
 import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
@@ -8,7 +8,7 @@ function state(overrides: Partial<AgentWorkflowState> = {}): AgentWorkflowState 
   return {
     taskId: 'task_demo', intakePresented: true, pendingAttachmentCount: 0, taskStatus: 'CREATED', productName: null,
     fileCount: 2, parsedFileCount: 0, imageCount: 1, analyzedImageCount: 0,
-    factCount: 0, openConflictCount: 0, draftCount: 2, generatedDraftCount: 0,
+    factCount: 0, openConflictCount: 0, resolvedConflictCount: 0, draftCount: 2, generatedDraftCount: 0,
     approvedDraftCount: 0, publishedDraftCount: 0, generatedAssetCount: 0, selectedAssetCount: 0,
     publishApproved: false,
     ...overrides,
@@ -19,7 +19,7 @@ test('orchestrator exposes only tools valid for the trusted workflow state', () 
   assert.deepEqual(availableAgentTools(state()).map((item) => item.function.name), ['parse_product_sources']);
   assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2 })).map((item) => item.function.name), ['analyze_product_images']);
   assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2, analyzedImageCount: 1 })).map((item) => item.function.name), ['merge_product_facts']);
-  assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, openConflictCount: 1 })).map((item) => item.function.name), ['open_conflict_review']);
+  assert.deepEqual(availableAgentTools(state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, openConflictCount: 1 })).map((item) => item.function.name), ['merge_product_facts', 'open_conflict_review']);
 });
 
 test('a blank conversation only exposes the tool that opens the listing intake', () => {
@@ -51,10 +51,10 @@ test('listing requests with explicit platform and market can create from attachm
 
 test('Agent generates assets before selection and requires explicit approval before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
-  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['generate_visual_assets']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['generate_visual_assets', 'revise_product_video', 'open_asset_selection']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['generate_visual_assets', 'revise_product_video', 'open_publish_confirmation']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['publish_mock_drafts']);
+  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'open_asset_selection']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'open_publish_confirmation']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['merge_product_facts', 'publish_mock_drafts']);
 });
 
 test('trusted workflow may safely recover only when exactly one tool is required', () => {
@@ -91,6 +91,32 @@ test('central Agent retains regeneration after image selection, but never after 
  assert.ok(availableAgentTools({...ready,selectedAssetCount:2}).some(t=>t.function.name==='generate_visual_assets'));
  assert.ok(!availableAgentTools({...ready,selectedAssetCount:2,publishApproved:true}).some(t=>t.function.name==='generate_visual_assets'));
  assert.ok(!availableAgentTools({...ready,publishedDraftCount:2}).some(t=>t.function.name==='generate_visual_assets'));
+});
+
+test('backtrack tools are injected only when the user expresses the matching intent', () => {
+  const conflicted = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, openConflictCount: 1, resolvedConflictCount: 2 });
+  const messages = (text: string) => [{ role: 'user' as const, content: text }];
+  // 无回退意图时不注入
+  assert.deepEqual(withBacktrackTools(availableAgentTools(conflicted), messages('型号的真实值是哪一个？X-200 还是 X-300？'), conflicted).map((t) => t.function.name).filter((n) => n.startsWith('re') || n === 'update_task_targets'), []);
+  // 改目标意图注入 update_task_targets
+  const targets = withBacktrackTools(availableAgentTools(conflicted), messages('我想重新进行站点以及平台的选择，改成只上 Amazon 和 TikTok Shop'), conflicted);
+  assert.ok(targets.some((t) => t.function.name === 'update_task_targets'));
+  // 重新解析意图注入 reparse_sources
+  const reparse = withBacktrackTools(availableAgentTools(conflicted), messages('说明文档内容更新了，帮我重新解析一下资料'), conflicted);
+  assert.ok(reparse.some((t) => t.function.name === 'reparse_sources'));
+  // 重新看图意图注入 reanalyze_images
+  const reanalyze = withBacktrackTools(availableAgentTools(conflicted), messages('图片属性识别错了，重新看一遍图'), conflicted);
+  assert.ok(reanalyze.some((t) => t.function.name === 'reanalyze_images'));
+  // 重新裁决冲突意图注入 reopen_resolved_conflicts
+  const reopen = withBacktrackTools(availableAgentTools(conflicted), messages('我想重新裁决之前的冲突'), conflicted);
+  assert.ok(reopen.some((t) => t.function.name === 'reopen_resolved_conflicts'));
+  // 没有已裁决冲突时不注入 reopen
+  const noResolved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, openConflictCount: 1, resolvedConflictCount: 0 });
+  assert.ok(!withBacktrackTools(availableAgentTools(noResolved), messages('我想重新裁决之前的冲突'), noResolved).some((t) => t.function.name === 'reopen_resolved_conflicts'));
+  // 已发布后一律不可回退
+  const published = state({ ...conflicted, publishedDraftCount: 2 });
+  const publishedTools = availableAgentTools(published);
+  assert.deepEqual(withBacktrackTools(publishedTools, messages('我想重新选站点和平台'), published).map((t) => t.function.name), publishedTools.map((t) => t.function.name));
 });
 
 test('video revision is available with existing media and requires reviewed listings and no publish authorization',()=>{
