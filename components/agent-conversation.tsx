@@ -49,6 +49,14 @@ interface ToolRun {
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
 }
 
+interface FailedAgentTurn {
+  task: TaskSnapshot | null;
+  userText: string;
+  history: AgentModelMessage[];
+  pendingFiles: File[];
+  publishApproved: boolean;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -264,6 +272,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const [busyLabel, setBusyLabel] = useState('正在读取最近任务…');
   const [busyHint, setBusyHint] = useState('');
   const [error, setError] = useState('');
+  const [canRetryFailedTurn, setCanRetryFailedTurn] = useState(false);
   const [composer, setComposer] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
   const [localizationBusy, setLocalizationBusy] = useState(false);
@@ -294,6 +303,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerFileInput = useRef<HTMLInputElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
+  const failedTurnRef = useRef<FailedAgentTurn | null>(null);
   const messagesRef = useRef<ChatMessage[]>(initialMessages);
   const toolRunsRef = useRef<ToolRun[]>([]);
   const selectedAssetsRef = useRef<string[]>([]);
@@ -361,6 +371,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
   const applyConversation = async (conversation: AgentConversationRecord) => {
     setContextOpen(false);
+    failedTurnRef.current = null;
+    setCanRetryFailedTurn(false);
     conversationIdRef.current = conversation.id;
     setConversationId(conversation.id);
     const storedMessages = conversation.messages.length ? conversation.messages : initialMessages;
@@ -865,8 +877,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const runAgentTurn = async (
     currentTask: TaskSnapshot | null,
     userText: string,
-    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean; pendingFiles?: File[] } = {},
+    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean; pendingFiles?: File[]; resumeHistory?: AgentModelMessage[] } = {},
   ) => {
+    failedTurnRef.current = null;
+    setCanRetryFailedTurn(false);
     if (options.resetHistory) modelHistory.current = [];
     let activeTask = currentTask;
     let activeFiles = options.pendingFiles ?? [];
@@ -881,7 +895,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     const retainedHistory = modelHistory.current.length > 36
       ? modelHistory.current.filter((message) => message.role === 'user' || (message.role === 'assistant' && !message.toolCalls?.length)).slice(-20)
       : modelHistory.current;
-    let history: AgentModelMessage[] = [...retainedHistory, { role: 'user', content: modelUserText }];
+    let history: AgentModelMessage[] = options.resumeHistory
+      ? [...options.resumeHistory]
+      : [...retainedHistory, { role: 'user', content: modelUserText }];
+    let checkpointHistory = history;
     pauseRequestedRef.current = false; setPauseRequested(false);
     setPhase('processing'); setBusyLabel('Agent 正在规划下一步…'); setBusyHint('根据任务进度决定接下来解析、理解还是生成'); setError('');
     try {
@@ -893,6 +910,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           await persistConversation(activeTask?.id ?? null, 'ACTIVE');
           return;
         }
+        // Only completed model/tool exchanges are safe to replay. A failed tool call
+        // must not leave an unmatched assistant tool_call in the next request.
+        checkpointHistory = history;
         const payload = await responseJson<AgentOrchestratorResponse>(await fetch('/api/agent/orchestrate', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -938,6 +958,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       throw new Error('Agent 连续执行步骤过多，已安全暂停');
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Agent 执行失败';
+      modelHistory.current = checkpointHistory;
+      failedTurnRef.current = {
+        task: activeTask,
+        userText,
+        history: checkpointHistory,
+        pendingFiles: activeFiles,
+        publishApproved: options.publishApproved === true,
+      };
+      setCanRetryFailedTurn(true);
       setError(message); setPhase('error');
       append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
       await persistConversation(activeTask?.id ?? null).catch(() => undefined);
@@ -967,6 +996,16 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     try {const data=await responseJson<{passport:ProductPassport;results:Array<{market:string;verification:Array<{field:string;status:string}>}>}>(await fetch(`/api/tasks/${task.id}/verify-shopify`,{method:'POST'}),'Shopify 回读失败');setPassport(data.passport);for(const r of data.results)append('agent',`${r.market}草稿核对：${r.verification.map(v=>`${v.field}：${v.status==='MATCH'?'一致':v.status==='PENDING'?'处理中':'需要检查'}`).join('；')}`,'回读核对');await persistConversation(task.id,'COMPLETED');}catch(e){append('agent',`核对失败：${(e as Error).message}。已创建的商品不受影响。`);}
   };
   const resumeTask = async () => {
+    const failed = failedTurnRef.current;
+    if (failed) {
+      await runAgentTurn(failed.task, failed.userText, {
+        appendUser: false,
+        pendingFiles: failed.pendingFiles,
+        publishApproved: failed.publishApproved,
+        resumeHistory: failed.history,
+      });
+      return;
+    }
     if (!task) return;
     await runAgentTurn(task, `继续处理当前商品任务：${task.productName}。请根据真实任务状态自主选择下一步工具。`);
   };
@@ -1276,7 +1315,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>草稿已创建</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button type="button" onClick={recheckShopify}>重新核对 Shopify</button><button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 
-          {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{task && <button type="button" onClick={resumeTask}>重试当前步骤</button>}</div>}
+          {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{(canRetryFailedTurn || task) && <button type="button" onClick={resumeTask}>重试当前步骤</button>}</div>}
           <div ref={threadEnd} />
         </section>
 

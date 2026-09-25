@@ -127,6 +127,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function bailianHttpError(response: Response, requestId: string | null, baseUrl: string, apiKey: string): Promise<Error> {
+  let code = '';
+  let detail = '';
+  try {
+    const body = await response.json() as Record<string, unknown>;
+    const nested = body.error && typeof body.error === 'object' ? body.error as Record<string, unknown> : body;
+    code = typeof nested.code === 'string' ? nested.code : typeof nested.type === 'string' ? nested.type : '';
+    detail = typeof nested.message === 'string' ? nested.message : '';
+  } catch { /* Some upstream failures have no JSON body. */ }
+  const safeCode = /^[\w.-]{1,80}$/.test(code) ? code : '';
+  const safeDetail = detail.replace(/sk-[\w.-]{8,}/g, '[已隐藏的 API Key]').slice(0, 240);
+  const reason = [safeCode, safeDetail].filter(Boolean).join('：');
+  const reference = requestId ? `，Request ID ${requestId}` : '';
+  const configurationHint = baseUrl.includes('token-plan.') && !apiKey.startsWith('sk-sp-')
+    ? '当前配置使用 Token Plan 地址，但 API Key 不是 Token Plan 专属 Key；请分别配置文本模型和视频模型的 Key。'
+    : '请核对当前部署的 API Key、Base URL、模型调用权限及套餐/账户状态。';
+  const hint = response.status === 403 ? ` ${configurationHint}修复配置后再重试当前步骤。` : '';
+  return new Error(`百炼 Agent 编排失败（HTTP ${response.status}${reference}）${reason ? `：${reason}` : ''}${hint}`);
+}
+
 export async function callBailianOrchestrator(
   config: BailianConfig,
   input: {
@@ -174,7 +194,7 @@ export async function callBailianOrchestrator(
       });
       if (!response.ok) {
         const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
-        const error = new Error(`百炼 Agent 编排失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+        const error = await bailianHttpError(response, requestId, baseUrl, apiKey);
         if (RETRYABLE_HTTP_STATUS.has(response.status) && attempt < RETRY_DELAYS_MS.length) {
           const retryAfterHeader = Number(response.headers.get('retry-after'));
           const delay = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0

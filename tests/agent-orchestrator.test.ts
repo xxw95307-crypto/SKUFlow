@@ -85,6 +85,24 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
   assert.equal(requestBody?.parallel_tool_calls, false);
 });
 
+test('Bailian 403 exposes the provider reason and does not retry a permission error', async () => {
+  let calls = 0;
+  const fetchMock: typeof fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: { code: 'access_denied', message: 'Access denied to this model.' } }), {
+      status: 403,
+      headers: { 'content-type': 'application/json', 'x-request-id': 'request-403' },
+    });
+  };
+  await assert.rejects(
+    callBailianOrchestrator({ apiKey: 'sk-general-test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, {
+      systemPrompt: 'system', messages: [{ role: 'user', content: '继续' }], tools: availableAgentTools(state()), requireTool: true,
+    }, fetchMock),
+    /HTTP 403.*request-403.*access_denied.*Token Plan 地址.*专属 Key/,
+  );
+  assert.equal(calls, 1);
+});
+
 test('central Agent retains regeneration after image selection, but never after publication authorization',()=>{
  const ready=state({parsedFileCount:2,analyzedImageCount:1,factCount:8,generatedDraftCount:2,approvedDraftCount:2,generatedAssetCount:3});
  assert.ok(availableAgentTools(ready).some(t=>t.function.name==='generate_visual_assets'));
