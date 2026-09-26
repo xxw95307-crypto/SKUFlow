@@ -15,10 +15,11 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_platform_listings: '读取所选平台字段（Shopify 使用真实接口），并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
-  generate_visual_assets: '根据商品、平台和本轮要求统一规划并生成图片与视频候选。已有素材时仍可调用此工具落实修改、排除或新增要求；不要用展示旧素材代替重新生成。视频按实际任务状态报告。',
-  revise_product_video: '依据上一条视频方案和商家本轮要求重新规划并生成一条商品视频；仅修改视频时使用，保留已有图片。视频镜头、背景、时长、动作修改使用此工具，商品媒体排序使用媒体编排。',
+  generate_visual_assets: '只规划并生成商品图片；图片修改时可再次调用，绝不触发视频模型。图片由商家确认后才进入视频阶段。',
+  generate_product_video: '商家确认最终图片后，使用已选图片作为首帧，规划并开始生成商品视频。仅首次生成或图片重新确认后调用。',
+  revise_product_video: '依据已选图片、上一条视频方案和商家本轮要求重新规划并生成一条商品视频；仅修改视频时使用，保留已有图片。',
   trim_product_video: '自动裁剪已有视频并返回结果，不展示裁剪卡、时间输入或操作按钮，不调用生成模型、不重做图片。中央Agent根据用户的大致时间和视频时长决定start/end（秒）。videoId必须引用可信视频ID。仅目标视频确实无法判断时先自然语言询问。',
-  open_asset_selection: '向商家展示已经真实生成并保存的视觉素材候选，让商家选择交付素材。',
+  open_asset_selection: '向商家展示已经真实生成并保存的候选图片，让商家确认最终图片，再进入视频阶段。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
   publish_mock_drafts: '在商家明确确认后创建平台测试草稿：Shopify 使用官方 Dev Store API 创建未公开 DRAFT，其他平台暂时使用本地 Mock。',
 };
@@ -56,6 +57,8 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   const parsingReady = state.fileCount > 0 && state.parsedFileCount >= state.fileCount;
   const visionReady = state.imageCount === 0 || state.analyzedImageCount >= state.imageCount;
   const allDraftsApproved = state.draftCount > 0 && state.approvedDraftCount >= state.draftCount;
+  const selectedImageCount = state.selectedImageCount ?? state.selectedAssetCount;
+  const videoJobCount = state.videoJobCount ?? 0;
 
   if (!parsingReady) names.push('parse_product_sources');
   if (parsingReady && !visionReady) names.push('analyze_product_images');
@@ -66,12 +69,13 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   }
   if (state.generatedDraftCount > 0 && !allDraftsApproved) names.push('open_listing_review');
   if (allDraftsApproved && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_visual_assets');
-  if (allDraftsApproved && state.generatedAssetCount > 0 && state.publishedDraftCount === 0 && !state.publishApproved) names.push('revise_product_video');
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount === 0) names.push('open_asset_selection');
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount > 0 && !state.publishApproved) {
+  if (allDraftsApproved && state.imagesConfirmed && selectedImageCount > 0 && videoJobCount === 0 && !state.videoStageComplete && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_product_video');
+  if (allDraftsApproved && state.imagesConfirmed && selectedImageCount > 0 && videoJobCount > 0 && state.publishedDraftCount === 0 && !state.publishApproved) names.push('revise_product_video');
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && !state.imagesConfirmed) names.push('open_asset_selection');
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.imagesConfirmed && selectedImageCount > 0 && state.videoStageComplete && !state.publishApproved) {
     names.push('open_publish_confirmation');
   }
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && state.selectedAssetCount > 0 && state.publishApproved) {
+  if (allDraftsApproved && state.publishedDraftCount === 0 && state.imagesConfirmed && selectedImageCount > 0 && state.videoStageComplete && state.publishApproved) {
     names.push('publish_mock_drafts');
   }
   if (allDraftsApproved && state.publishedDraftCount === 0 && !state.publishApproved && state.videoCandidates?.length) names.push('trim_product_video');
@@ -109,7 +113,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
    - 用户明确要上新，但平台或目标市场/站点任一没有说清楚：调用 start_listing_workflow 展示选择卡。即使附件已经齐全，也绝不能默认替卖家选择。
    - 普通咨询且无需读取附件：直接回答，不调用工具，不展示卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
-2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 视觉策划 Agent 动态规划并生成素材 → 人工选图 → 人工确认发布 → 创建平台测试草稿。
+2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 生成图片 → 商家修改并确认图片 → 再生成视频 → 商家选择视频或跳过 → 人工确认发布 → 创建平台测试草稿。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
 4. 发现图文冲突时只能调用 open_conflict_review，在对话中逐项询问商家，绝不能替商家选择，也不要使用弹窗打断对话。
 5. Listing 必须由商家审核；素材必须由商家选择；发布必须得到本轮明确授权。不要绕过人工门禁。
@@ -119,9 +123,9 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；结合本会话用户的明确要求和后续补答判断；普通咨询不能触发上新。
 9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
 10.0 用户要裁剪、缩短、去掉已有视频片段时，必须调用 trim_product_video，不能调用图片或视频重新生成工具。你根据用户的大致时间描述和可信视频时长自行决定保留start/end；例如“去掉前半段”保留duration/2到终点，“保留后3秒”保留max(0,duration-3)到终点，“开头大约2秒不要”保留2到终点。无需让商家填写秒数或确认裁剪方案，工具内部完成加载、裁剪、保存，直接返回结果视频。不能声称已分析画面中空镜头的准确结束点；用户有大致时间时据此裁剪，完全没有时间且需画面判断时简短询问大致时段。视频编号按可信videoCandidates.ordinal。只有目标视频确实无法判断时才询问是哪条。结果可继续通过自然语言修改，发布仍遵守最终确认门禁。面向用户只说正在处理或已完成，不展示起止参数、编码步骤或裁剪操作教程。
-10. 已有素材时用户只修改或新增视频，必须调用 revise_product_video；它依据上一条视频方案落实镜头、场景、动作、时长要求并启动新视频，不重做图片。视频内部镜头顺序不是商品媒体排序。首次图片与视频一起规划使用 generate_visual_assets。只调整商品封面、图片/视频在商品媒体中的位置时调用 generate_visual_assets 打开媒体编排。
-11. 生成工具完成且用户没有新的修改要求时，应调用 open_asset_selection 展示本次结果，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求，再展示新结果。
-12. 视觉素材不能套用固定三场景。用户在素材阶段提出“换成户外场景”“重新生成主图”等要求时，应调用 generate_visual_assets 重新规划，不要只展示旧素材。
+10. 图片工具 generate_visual_assets 只生成图片，绝不能启动视频。图片不满意时按要求重新生成图片，保留尚未改动的视频；视频只在商家确认最终图片后通过 generate_product_video 开始。用户仅修改视频时调用 revise_product_video，保留图片。只调整商品媒体顺序时进入媒体编排。
+11. 图片生成后调用 open_asset_selection 展示本次图片，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等图片要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求，再展示新结果。
+12. 商家确认图片后调用 generate_product_video；视频生成后让商家预览、选择或跳过，再进入发布确认。图片阶段绝不代替商家决定视频已完成。
 13. 回退与改目标：用户想“重新选站点/平台/市场”“改目标站点”“换平台再来”时，即使正处在冲突确认或 Listing 审核等检查点，也应优先响应这个意图：新目标明确（能列出完整的平台列表和市场列表）时直接调用 update_task_targets，并说明旧的审校稿会作废、稍后按新目标重新生成；不明确时先用自然语言问清完整目标再调用，绝不带着模糊目标调用。图文冲突和已确认的事实与平台无关，改目标不会丢失这些进度，改完目标后继续未完成的检查点。已发布过草稿的任务不可改目标，需如实告知。
 14. 回退到更早的步骤：用户说“重新解析资料”“文件识别错了/内容更新了”调用 reparse_sources；“重新看图”“图片属性识别错了”调用 reanalyze_images；“重新裁决冲突”“改一下之前冲突的选择”调用 reopen_resolved_conflicts。这三个工具都会作废未发布的旧审校稿，完成后按状态继续正常流程（例如重新解析后继续重新理解图片、重新合并事实，再回到冲突确认或 Listing 生成）。merge_product_facts 在未发布前始终可用，用于事实变化后的重新合并；除此之外不要重复执行已完成的步骤。这些回退工具只在用户本轮明确提出对应意图时才会出现在工具列表里；如果列表里没有，先用自然语言向商家确认具体想回退到哪一步，不要尝试调用列表外的工具。所有回退在任务发布后不可用，需如实告知。
 

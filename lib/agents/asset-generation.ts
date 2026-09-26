@@ -1,6 +1,5 @@
-import {parseVideoPlan, type VideoPlan} from '../ai/wan-video.ts';
 import type { ListingDraftPayload } from '../domain/listing.ts';
-import { GENERATED_ASSET_KINDS, type GeneratedAssetKind } from '../domain/generated-asset.ts';
+import { GENERATED_ASSET_KINDS, type GeneratedAsset, type GeneratedAssetKind } from '../domain/generated-asset.ts';
 import type { PlatformId } from '../domain/platform.ts';
 import type { ProductFact } from '../domain/product-passport.ts';
 
@@ -54,7 +53,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 
 只输出 JSON：{"assets":[{"kind":"HERO","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的中文生成指令"}]}。
 
-同时在同一个 JSON 中返回 videoDecision:{required:boolean,reason:中文理由,plan:视频方案或null}。自主判断视频是否有助于展示商品，用户明确不要视频则不生成；需要时规划一条视频，plan为{title,prompt,duration:2到15的整数,resolution:"720P"或"1080P",sourceFileId:提供的原图ID,shots:[中文镜头说明]}。保持原图商品外观与事实，不编造动作、功能或文字；用简短镜头展示，视频与图片用途互补。没有原图ID时required必须为false。
+这一阶段只规划图片，不规划、提交或生成视频。视频会在商家确认最终图片后单独处理。
 
 规则：
 0. 商家本轮要求优先于类目建议；明确排除的图类型或场景不得再次规划。例如“不要细节图”必须排除 DETAIL 与任何细节特写，改选其他有依据的素材。不把排除要求解释成仅调整细节图。
@@ -108,6 +107,21 @@ export function parseAssetPlan(value: string): AssetGenerationSpec[] {
   return assets;
 }
 
+export function selectConfirmedVideoImages(latestAssets: readonly GeneratedAsset[], requestedIds: unknown): GeneratedAsset[] {
+  if (!Array.isArray(requestedIds) || requestedIds.length === 0 || requestedIds.length > 20
+    || requestedIds.some((id) => typeof id !== 'string' || !/^asset_[\w-]+$/.test(id))) {
+    throw new Error('请先确认最终图片，再生成视频');
+  }
+  const ids = [...new Set(requestedIds as string[])];
+  if (ids.length !== requestedIds.length) throw new Error('已选图片列表不能重复');
+  const byId = new Map(latestAssets.map((asset) => [asset.id, asset]));
+  const images = ids.map((id) => byId.get(id));
+  if (images.some((image) => !image || image.status !== 'COMPLETED' || image.kind === 'VIDEO')) {
+    throw new Error('已选图片不属于当前可用素材，请重新确认图片');
+  }
+  return images as GeneratedAsset[];
+}
+
 export function buildAssetGenerationPrompt(input: {
   spec: AssetGenerationSpec;
   productName: string;
@@ -128,11 +142,4 @@ export function buildAssetGenerationPrompt(input: {
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
 
 视觉策划任务：${input.spec.instruction}`;
-}
-
-export function parseUnifiedVideoDecision(content:string, sourceIds:string[]): {required:boolean;reason:string;plan:VideoPlan|null} {
-  const decision=JSON.parse(content).videoDecision;
-  if (!decision) return {required:false,reason:'本次策划未提供视频方案',plan:null};
-  if(typeof decision.required!=='boolean'||typeof decision.reason!=='string'||!decision.reason.trim())throw new Error('素材策划缺少有效的视频决策');
-  return {required:decision.required,reason:decision.reason.slice(0,300),plan:decision.required?parseVideoPlan(decision.plan,sourceIds):null};
 }

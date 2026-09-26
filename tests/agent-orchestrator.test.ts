@@ -49,12 +49,16 @@ test('listing requests with explicit platform and market can create from attachm
   assert.deepEqual(tools.map((item) => item.function.name), ['create_listing_task_from_attachments']);
 });
 
-test('Agent generates assets before selection and requires explicit approval before publishing', () => {
+test('Agent confirms images before video and requires video-stage completion before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
   assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'open_asset_selection']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'open_publish_confirmation']);
-  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3, selectedAssetCount: 2, publishApproved: true }).map((item) => item.function.name), ['merge_product_facts', 'publish_mock_drafts']);
+  assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'open_asset_selection']);
+  const selected = { ...approved, generatedAssetCount: 3, selectedAssetCount: 2, selectedImageCount: 2, imagesConfirmed: true };
+  assert.ok(!availableAgentTools({ ...selected, imagesConfirmed: false }).some((item) => item.function.name === 'generate_product_video'));
+  assert.deepEqual(availableAgentTools(selected).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'generate_product_video']);
+  assert.deepEqual(availableAgentTools({ ...selected, videoJobCount: 1 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video']);
+  assert.deepEqual(availableAgentTools({ ...selected, videoJobCount: 1, videoStageComplete: true }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'open_publish_confirmation']);
+  assert.deepEqual(availableAgentTools({ ...selected, videoStageComplete: true, publishApproved: true }).map((item) => item.function.name), ['merge_product_facts', 'publish_mock_drafts']);
 });
 
 test('trusted workflow may safely recover only when exactly one tool is required', () => {
@@ -137,9 +141,10 @@ test('backtrack tools are injected only when the user expresses the matching int
   assert.deepEqual(withBacktrackTools(publishedTools, messages('我想重新选站点和平台'), published).map((t) => t.function.name), publishedTools.map((t) => t.function.name));
 });
 
-test('video revision is available with existing media and requires reviewed listings and no publish authorization',()=>{
- const ready=state({parsedFileCount:2,analyzedImageCount:1,factCount:8,generatedDraftCount:2,approvedDraftCount:2,generatedAssetCount:3});
+test('video revision is available only after an image-backed video job exists',()=>{
+ const ready=state({parsedFileCount:2,analyzedImageCount:1,factCount:8,generatedDraftCount:2,approvedDraftCount:2,generatedAssetCount:3,selectedAssetCount:2,selectedImageCount:2,imagesConfirmed:true,videoJobCount:1});
  const has=(s:AgentWorkflowState)=>availableAgentTools(s).some(t=>t.function.name==='revise_product_video');
  assert.ok(has(ready));assert.ok(has({...ready,selectedAssetCount:2}));
+ assert.ok(!has({...ready,videoJobCount:0}));
  assert.ok(!has({...ready,approvedDraftCount:0}));assert.ok(!has({...ready,publishApproved:true}));assert.ok(!has({...ready,publishedDraftCount:2}));
 });

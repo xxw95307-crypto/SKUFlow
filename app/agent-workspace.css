@@ -1033,6 +1033,48 @@ body {
   box-shadow: none;
 }
 
+.agent-shell-v2 .video-stage-card {
+  width: min(1040px, calc(100% - 45px));
+  padding: 18px 19px 19px;
+  border: 1px solid var(--sf-line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--sf-shadow);
+}
+
+.agent-shell-v2 .joined-action-bubble > .video-stage-card {
+  width: 100%;
+  padding: 18px 19px 19px;
+  border: 0;
+  border-top: 1px solid var(--sf-line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.agent-shell-v2 .video-stage-card > .asset-conversation-card {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.agent-shell-v2 .video-stage-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--sf-line);
+}
+
+.agent-shell-v2 .video-stage-card > footer > span { margin-right: auto; color: #697b78; font-size: 13px; }
+.agent-shell-v2 .video-stage-card > footer > button { padding: 10px 15px; }
+
 .agent-shell-v2 .embedded-intake .dropzone.compact {
   min-height: 58px;
   display: flex;

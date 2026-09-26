@@ -1,4 +1,3 @@
-import {updateVideoJob} from '@/lib/server/video-jobs';
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
@@ -99,17 +98,6 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
 
-    let videoResult: {id?:string;status?:string;error?:string;reason:string} = {reason:plan.videoDecision.reason};
-    if (plan.videoDecision.required && plan.videoDecision.plan) {
-      const video = plan.videoDecision.plan;
-      const id = `video_${crypto.randomUUID()}`;
-      await bindings.DB.prepare("INSERT INTO video_jobs (id,task_id,source_file_id,plan_json,status,created_at) VALUES (?,?,?,?,'DRAFT',?)").bind(id,taskId,video.sourceFileId,JSON.stringify(video),createdAt).run();
-      const response = await updateVideoJob(new Request(request.url,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id,action:'start'})}),{params:Promise.resolve({taskId})});
-      const result = await response.json() as {job?:{status:string};error?:string};
-      if (result.error) await bindings.DB.prepare("UPDATE video_jobs SET error=? WHERE id=? AND task_id=?").bind(result.error,id,taskId).run();
-      videoResult = {id,status:result.job?.status,error:result.error,reason:plan.videoDecision.reason};
-    }
-
     await Promise.all(plan.assets.map(async (spec) => {
       const id = `asset_${crypto.randomUUID()}`;
       const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
@@ -145,7 +133,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       const reason = assets.find((asset) => asset.error)?.error || '图像模型未返回有效素材';
       return Response.json({ error: `视觉素材生成失败：${reason}`, assets, summary }, { status: 502 });
     }
-    return Response.json({ assets, summary, reused: false, video: videoResult, plan: plan.assets, plannerModel: plan.model });
+    return Response.json({ assets, summary, reused: false, plan: plan.assets, plannerModel: plan.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视觉素材生成失败';
     return Response.json({ error: message }, { status: message === '请求 JSON 格式无效' ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });

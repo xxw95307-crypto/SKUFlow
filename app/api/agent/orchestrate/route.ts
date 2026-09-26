@@ -6,7 +6,6 @@ import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
   isAgentToolName,
   type AgentModelMessage,
-  type AgentToolDefinition,
   type AgentWorkflowState,
 } from '@/lib/domain/agent-orchestrator';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
@@ -22,6 +21,8 @@ interface RequestBody {
   taskId?: unknown;
   messages?: unknown;
   selectedAssetIds?: unknown;
+  imagesConfirmed?: unknown;
+  videoStageComplete?: unknown;
   publishApproved?: unknown;
   requireAction?: unknown;
   intakePresented?: unknown;
@@ -84,7 +85,8 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0, resolvedConflictCount: 0,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
     generatedAssetCount: 0,
-    selectedAssetCount: 0, publishApproved: body.publishApproved === true,
+    selectedAssetCount: 0, selectedImageCount: 0, imagesConfirmed: body.imagesConfirmed === true, videoJobCount: 0,
+    videoStageComplete: body.videoStageComplete === true, publishApproved: body.publishApproved === true,
   };
   if (!taskId) return empty;
   const { DB } = getBindings();
@@ -102,6 +104,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
   ]);
   const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith('asset_dynamic_'));
   const videos=await DB.prepare("SELECT id,plan_json FROM video_jobs WHERE task_id=? AND status='SUCCEEDED' ORDER BY created_at DESC, id DESC").bind(taskId).all<{id:string;plan_json:string}>();
+  const relevantVideoJobs = await DB.prepare("SELECT source_file_id FROM video_jobs WHERE task_id=? AND status NOT IN ('CANCELED','TRIM_DRAFT')").bind(taskId).all<{source_file_id:string}>();
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
@@ -122,6 +125,10 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     videoCandidates: videos.results.map((v,index)=>{const p=JSON.parse(v.plan_json);return {id:v.id,title:p.title,duration:p.duration,ordinal:index+1};}),
     generatedAssetCount: completedAssets.length + videos.results.length,
     selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length + videos.results.filter(v=>selectedAssetIds.has(v.id)).length,
+    selectedImageCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length,
+    imagesConfirmed: body.imagesConfirmed === true,
+    videoJobCount: relevantVideoJobs.results.filter((job) => selectedAssetIds.has(job.source_file_id)).length,
+    videoStageComplete: body.videoStageComplete === true,
     publishApproved: body.publishApproved === true,
   };
 }
@@ -152,7 +159,15 @@ async function handlePOST(request: Request) {
     const targetAwareTools = listingStartRequested && lastUser?.role === 'user'
       ? restrictIntakeToolsForListingRequest(stateTools, state, [...knownTargets.platforms, ...knownTargets.markets].join(' '))
       : stateTools;
-    const tools = withBacktrackTools(withRegenerationTool(targetAwareTools, messages, state), messages, state);
+    const candidateTools = withBacktrackTools(withRegenerationTool(targetAwareTools, messages, state), messages, state);
+    const requiredNext = lastUser?.role === 'user' && lastUser.content.includes('我已确认最终图片，请根据这些图片生成视频')
+      ? 'generate_product_video'
+      : lastUser?.role === 'user' && (lastUser.content.includes('图片与视频阶段已完成，请进入最终交付确认') || lastUser.content.includes('我已确认图片，本次不需要视频，请进入最终交付确认'))
+        ? 'open_publish_confirmation'
+        : null;
+    const tools = requiredNext && candidateTools.some((item) => item.function.name === requiredNext)
+      ? candidateTools.filter((item) => item.function.name === requiredNext)
+      : candidateTools;
     const requireTool = (body.requireAction === true || listingStartRequested) && tools.length > 0;
     const soleTool = soleRequiredAgentTool(tools, requireTool);
     let result;

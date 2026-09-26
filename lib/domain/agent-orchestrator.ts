@@ -13,6 +13,7 @@ export const AGENT_TOOL_NAMES = [
   'open_conflict_review',
   'open_listing_review',
   'generate_visual_assets',
+  'generate_product_video',
   'revise_product_video',
   'trim_product_video',
   'open_asset_selection',
@@ -55,6 +56,10 @@ export interface AgentWorkflowState {
   publishedDraftCount: number;
   generatedAssetCount: number;
   selectedAssetCount: number;
+  selectedImageCount?: number;
+  imagesConfirmed?: boolean;
+  videoJobCount?: number;
+  videoStageComplete?: boolean;
   publishApproved: boolean;
   videoCandidates?: Array<{id:string;title:string;duration:number;ordinal:number}>;
 }

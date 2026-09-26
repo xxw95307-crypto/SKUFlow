@@ -6,7 +6,7 @@ import { MediaOrderReview } from '@/components/media-order-review';
 import { VideoConversation } from '@/components/video-conversation';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
@@ -32,7 +32,7 @@ import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { platformRegistry } from '@/lib/platforms/registry';
 
-type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'publish' | 'complete' | 'error';
+type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
 
 type ChatMessage = ConversationMessage;
 
@@ -102,6 +102,19 @@ function currentListingMessage(message: ChatMessage, passport: ProductPassport |
       meta: 'Listing 已确认',
     } : {}),
   };
+}
+
+function mediaCheckpoint(messages: ChatMessage[]): string | undefined {
+  return messages.findLast((message) => ['等待素材选择', '图片已确认', '视频生成中', '等待视频确认', '视频阶段已完成', '素材选择已记录'].includes(message.meta ?? ''))?.meta;
+}
+
+function imagesConfirmedFromMessages(messages: ChatMessage[]): boolean {
+  const checkpoint = mediaCheckpoint(messages);
+  return Boolean(checkpoint && checkpoint !== '等待素材选择');
+}
+
+function videoStageCompleteFromMessages(messages: ChatMessage[]): boolean {
+  return ['视频阶段已完成', '素材选择已记录'].includes(mediaCheckpoint(messages) ?? '');
 }
 
 const initialMessages: ChatMessage[] = [{
@@ -199,23 +212,22 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetConversationCard({ assets, selected, onToggle, onConfirm, children }: {
+function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo }: {
   assets: GeneratedAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
-  children?: ReactNode;
+  onSkipVideo: () => void;
 }) {
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
   return <div className="asset-conversation-card">
-    <header><span>需要你选择 · 视觉素材</span><h3>我为这个商品生成了 {completed.length} 张候选图</h3><p>请选择要进入交付包的图片。你可以选择一张或多张。</p></header>
+    <header><span>第一步 · 确认商品图片</span><h3>我为这个商品生成了 {completed.length} 张候选图</h3><p>先挑选和修改图片。确认后才会开始视频生成。</p></header>
     <div className="agent-asset-grid">{completed.map((asset) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
       <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{assetKindLabel(asset.kind)}</b></span>
       <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
     </button>)}</div>
-    <div className="asset-conversation-hint"><span>↳</span><div><b>不满意这批素材？</b><p>直接在下方对话框告诉我修改要求，例如“换成户外场景，不要模特”，我会重新规划并生成。</p></div></div>
-    {children && <div className="asset-video-section">{children}</div>}
-    <footer><span>已选择 {selected.length} 项图片／视频</span><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认已选素材并继续</button></footer>
+    <div className="asset-conversation-hint"><span>↳</span><div><b>图片不满意？</b><p>直接在下方告诉我修改要求，例如“换成户外场景，不要模特”。这一步只重做图片，不会调用视频模型。</p></div></div>
+    <footer><span>已选择 {completed.filter((asset) => selected.includes(asset.id)).length} 张图片</span><button type="button" disabled={selected.length === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认图片，开始生成视频</button></footer>
   </div>;
 }
 
@@ -333,7 +345,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const railResizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
-  const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
+  const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
 
   useEffect(() => {
     if (!publishOpen || !task || !passport) return;
@@ -441,7 +453,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     const published = loadedPassport.platformDrafts.some((draft) => draft.status === 'DRAFT_CREATED');
     const generated = loadedPassport.platformDrafts.some((draft) => isListingDraftPayload(draft.payload));
     const allApproved = loadedPassport.platformDrafts.length > 0 && loadedPassport.platformDrafts.every((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
-    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (conversation.selectedAssetIds.length ? 'publish' : 'assets') : generated ? 'listing' : 'resume');
+    const imageSelected = validSelections.some((id) => loadedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO'));
+    const imagesConfirmed = imagesConfirmedFromMessages(messagesRef.current);
+    const videoDone = videoStageCompleteFromMessages(messagesRef.current);
+    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (imageSelected && imagesConfirmed ? videoDone ? 'publish' : 'video' : 'assets') : generated ? 'listing' : 'resume');
     if (conversationUpgraded) await persistConversation(loadedTask.id, conversation.status);
   };
 
@@ -569,7 +584,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     if (state.openConflictCount > 0) return setPhase('conflict');
     if (state.generatedDraftCount > 0 && state.approvedDraftCount < state.draftCount) return setPhase('listing');
     if (state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
-      return setPhase(state.selectedAssetCount > 0 ? 'publish' : state.generatedAssetCount > 0 ? 'assets' : 'processing');
+      return setPhase((state.selectedImageCount ?? state.selectedAssetCount) > 0 && state.imagesConfirmed ? state.videoStageComplete ? 'publish' : 'video' : state.generatedAssetCount > 0 ? 'assets' : 'processing');
     }
     setPhase('resume');
   };
@@ -802,25 +817,28 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         const saved=await responseJson<{id:string}>(await fetch(`/api/tasks/${currentTask.id}/video-trims`,{method:'PUT',body:form}),'视频保存失败');
         const next=[...selectedAssetsRef.current.filter(id=>!id.startsWith('video_')),saved.id];
         selectedAssetsRef.current=next;setSelectedAssets(next);
-        mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');setVideoRevision(v=>v+1);
+        mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('video');setVideoRevision(v=>v+1);
         setGeneratedAssets(await fetchGeneratedAssets(currentTask.id));
-        append('agent','已按你的要求处理好视频。需要再调整，直接告诉我。',undefined,{kind:'assets',attachments:[{taskId:currentTask.id,fileId:saved.id,name:'结果视频',contentType:blob.type,size:blob.size}]});
+        append('agent','已按你的要求处理好视频，请在下方预览结果。需要再调整，直接告诉我。','等待视频确认',{kind:'assets'});
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:saved.id},checkpoint:true};
       }
 
-      if (name === 'revise_product_video') {
-        setBusyLabel('视频 Agent 正在根据上一条方案和你的要求修改视频…'); setBusyHint('在上一版基础上继续调整，不会推翻已有设定');
+      if (name === 'generate_product_video' || name === 'revise_product_video') {
+        const revising = name === 'revise_product_video';
+        const selectedImageIds = selectedAssetsRef.current.filter((id) => id.startsWith('asset_'));
+        if (!selectedImageIds.length) throw new Error('请先确认要用于视频的商品图片');
+        setBusyLabel(revising ? '视频 Agent 正在根据你的要求修改视频…' : '视频 Agent 正在根据已选图片生成视频…');
+        setBusyHint('视频以已选图片为首帧，完成后可预览和选择');
         const payload = await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`, {
-          method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText}),
+          method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText,selectedImageIds,purpose:revising?'revision':'initial'}),
         }), '视频修改规划失败');
         const started = await fetch(`/api/tasks/${currentTask.id}/videos`, {method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id:payload.job.id,action:'start'})});
         setVideoRevision(v=>v+1);
         await responseJson(started,'修改后的视频生成未成功启动');
         mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);
-        const images=selectedAssetsRef.current.filter(id=>!id.startsWith('video_'));
-        selectedAssetsRef.current=images;setSelectedAssets(images);setPhase('assets');
-        append('agent','已按你的修改要求重新规划并提交新视频，原有图片保留。请在下方查看新方案和生成进度，完成后可预览并选择。','视频生成中',{kind:'assets'});
+        selectedAssetsRef.current=selectedImageIds;setSelectedAssets(selectedImageIds);setPhase('video');
+        append('agent',revising ? '已按你的要求重新规划视频，图片保持不变。请在下方查看进度和结果。' : '图片已确认，现在开始生成视频。完成后可预览、选择，或只用图片继续。','视频生成中',{kind:'assets'});
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:payload.job.id},checkpoint:true};
       }
@@ -829,7 +847,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
       }
       if (name === 'generate_visual_assets') {
-        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成适合这个商品的素材…'); setBusyHint('会生成多张候选素材，稍后由你挑选');
+        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint('会生成多张候选图片，稍后由你挑选');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
@@ -838,7 +856,6 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ force: true, guidance: requestText }),
         }), '视觉素材生成失败');
-        setVideoRevision(v=>v+1);
         setGeneratedAssets(payload.assets);
         selectedAssetsRef.current = [];
         setSelectedAssets([]);
@@ -848,11 +865,11 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (name === 'open_asset_selection') {
         const assets = await fetchGeneratedAssets(currentTask.id);
-        const completed = assets.filter((asset) => asset.status === 'COMPLETED');
+        const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED');
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
         setPhase('assets');
-        append('agent', '图片素材已生成，视频进度和结果也会显示在这里。请一起预览并选择；需要修改，直接告诉我。', '等待素材选择', { kind: 'assets' });
+        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -957,6 +974,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             taskId: activeTask?.id,
             messages: history,
             selectedAssetIds: selectedAssetsRef.current,
+            imagesConfirmed: imagesConfirmedFromMessages(messagesRef.current),
+            videoStageComplete: videoStageCompleteFromMessages(messagesRef.current),
             publishApproved: options.publishApproved === true,
             intakePresented: phase === 'intake' || toolRunsRef.current.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED'),
             pendingAttachmentCount: activeFiles.length,
@@ -969,7 +988,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           ...(payload.message.toolCalls.length ? { toolCalls: payload.message.toolCalls } : {}),
         }];
         const nextTool = payload.message.toolCalls[0]?.function.name;
-        if (payload.message.content && !['generate_visual_assets', 'open_asset_selection', 'revise_product_video'].includes(nextTool ?? '')) {
+        if (payload.message.content && !['generate_visual_assets', 'open_asset_selection', 'generate_product_video', 'revise_product_video'].includes(nextTool ?? '')) {
           append('agent', payload.message.content, payload.message.toolCalls.length ? '正在调用工具' : undefined);
         }
         const call = payload.message.toolCalls[0];
@@ -1093,15 +1112,31 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     if (task) await runAgentTurn(task, '我已确认所有平台 Listing，请继续。', { appendUser: false });
   };
 
-  const confirmAssets = async () => {
+  const confirmAssets = async (skipVideo = false) => {
     const available=task?await fetchGeneratedAssets(task.id):generatedAssets;
     setGeneratedAssets(available);
-    const chosen = available.filter((asset) => selectedAssetsRef.current.includes(asset.id));
-    append('user', `已选择 ${chosen.length} 个视觉方案`, '素材选择已记录', {
+    const chosen = available.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && selectedAssetsRef.current.includes(asset.id));
+    if (!chosen.length) throw new Error('请先选择至少一张图片');
+    selectedAssetsRef.current = chosen.map((asset) => asset.id);
+    setSelectedAssets(selectedAssetsRef.current);
+    append('user', skipVideo ? `已确认 ${chosen.length} 张图片，本次不生成视频` : `已确认 ${chosen.length} 张图片，开始生成视频`, skipVideo ? '视频阶段已完成' : '图片已确认', {
       kind: 'assets',
       items: chosen.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '已选择' })),
     });
-    if (task) await runAgentTurn(task, `我已选择 ${chosen.length} 个视觉方案，请继续。`, { appendUser: false });
+    if (task) await runAgentTurn(task, skipVideo ? '我已确认图片，本次不需要视频，请进入最终交付确认。' : '我已确认最终图片，请根据这些图片生成视频。', { appendUser: false });
+  };
+
+  const confirmVideo = async (skipVideo = false) => {
+    if (!task) return;
+    const available = await fetchGeneratedAssets(task.id);
+    setGeneratedAssets(available);
+    const imageIds = selectedAssetsRef.current.filter((id) => id.startsWith('asset_'));
+    const chosenVideo = available.filter((asset) => asset.kind === 'VIDEO' && asset.status === 'COMPLETED' && selectedAssetsRef.current.includes(asset.id));
+    if (!skipVideo && !chosenVideo.length) throw new Error('请先选择已生成的视频，或选择只用图片继续');
+    selectedAssetsRef.current = [...imageIds, ...(skipVideo ? [] : chosenVideo.map((asset) => asset.id))];
+    setSelectedAssets(selectedAssetsRef.current);
+    append('user', skipVideo ? '本次只使用已确认的图片' : `已确认 ${chosenVideo.length} 条视频`, '视频阶段已完成');
+    await runAgentTurn(task, '图片与视频阶段已完成，请进入最终交付确认。', { appendUser: false });
   };
 
   const publish = async () => {
@@ -1209,10 +1244,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const showWelcomeWorkspace = phase === 'idle' && messages.length === 1 && messages[0]?.id === 'welcome';
   const joinIntakeToLastAgentReply = phase === 'intake' && messages.at(-1)?.role === 'agent';
   const joinAssetsToLastAgentReply = phase === 'assets' && messages.at(-1)?.role === 'agent'
-    && (messages.at(-1)?.meta === '等待素材选择' || messages.at(-1)?.meta === '视频生成中');
+    && messages.at(-1)?.meta === '等待素材选择';
+  const joinVideoToLastAgentReply = phase === 'video' && messages.at(-1)?.role === 'agent'
+    && (messages.at(-1)?.meta === '视频生成中' || messages.at(-1)?.meta === '等待视频确认');
+  const selectedVideoSources = messages.some((message) => message.role === 'agent' && message.text.startsWith('图片已确认，现在开始生成视频'))
+    ? selectedAssets.filter((id) => id.startsWith('asset_')) : undefined;
 
   const intakeCard = phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>;
-  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion/>}</AssetConversationCard>;
+  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} />;
+  const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} /><footer><span>跳过后不加入交付包，已启动的视频任务不会取消</span><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认视频并继续</button></footer></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
 
@@ -1223,7 +1263,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       : phase === 'idle'
         ? '描述你要上新的商品、目标平台，或先上传商品资料...'
         : phase === 'assets'
-          ? '不满意可以直接说：换成户外场景、不要模特...'
+          ? '图片不满意可以直接说：换成户外场景、不要模特...'
+          : phase === 'video'
+            ? '视频不满意可以直接描述修改要求...'
           : '直接告诉 Agent 你的要求...';
 
   return <main className="agent-shell agent-shell-v2" style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
@@ -1306,7 +1348,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           {!showWelcomeWorkspace && messages.map((message, index) => {
             const joinsIntake = joinIntakeToLastAgentReply && index === messages.length - 1;
             const joinsAssets = joinAssetsToLastAgentReply && index === messages.length - 1;
-            const joinsAction = joinsIntake || joinsAssets;
+            const joinsVideo = joinVideoToLastAgentReply && index === messages.length - 1;
+            const joinsAction = joinsIntake || joinsAssets || joinsVideo;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
             const displayedMessage = currentListingMessage(message, passport);
             return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}`} key={message.id}>
@@ -1315,6 +1358,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
                 {joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
                 {joinsIntake && intakeCard}
                 {joinsAssets && assetCard}
+                {joinsVideo && videoCard}
               </div>
             </article>;
           })}
@@ -1356,6 +1400,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
           {phase === 'assets' && !joinAssetsToLastAgentReply && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span>{assetCard}</article>}
+          {phase === 'video' && !joinVideoToLastAgentReply && <article className="chat-message agent video-stage-conversation"><span className="chat-avatar">AI</span>{videoCard}</article>}
 
           {phase === 'publish' && (task?.platforms.includes('shopify') || task?.platforms.includes('amazon')) && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview hasShopify={task.platforms.includes('shopify')} hasAmazonSandbox={task.platforms.includes('amazon')} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用测试交付工具。</p></div><button type="button" disabled={Boolean((task?.platforms.includes('shopify') || task?.platforms.includes('amazon')) && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}

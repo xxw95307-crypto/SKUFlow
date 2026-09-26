@@ -2,7 +2,7 @@ import { buildFactExtractionMessages, parseFactExtractionOutput, type Extraction
 import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/vision-analysis.ts';
 import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
 import { buildListingLocalizationMessages, parseListingLocalizationOutput, type ListingLocalizationContext } from '../agents/listing-localization.ts';
-import { buildAssetPlanningMessages, parseUnifiedVideoDecision, parseAssetPlan, type AssetGenerationSpec, type AssetPlanningContext } from '../agents/asset-generation.ts';
+import { buildAssetPlanningMessages, parseAssetPlan, type AssetGenerationSpec, type AssetPlanningContext } from '../agents/asset-generation.ts';
 import type { BailianConfig, BailianImageConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
@@ -41,7 +41,6 @@ export interface BailianListingLocalizationResponse {
 
 export interface BailianAssetPlanningResponse {
   assets: AssetGenerationSpec[];
-  videoDecision: ReturnType<typeof parseUnifiedVideoDecision>;
   model: string;
   usage: Record<string, number> | null;
   requestId: string | null;
@@ -513,7 +512,6 @@ export async function callBailianAssetPlanning(
     if (!content) throw new Error('百炼视觉策划返回内容为空');
     return {
       assets: parseAssetPlan(content),
-      videoDecision: parseUnifiedVideoDecision(content, context.sourceImageIds ?? []),
       model: payload.model || model,
       usage: normalizeUsage(payload.usage),
       requestId: payload.id || response.headers.get('x-request-id'),
