@@ -4,10 +4,11 @@ import { useRef, useState } from 'react';
 import type { PlatformId } from '@/lib/domain/platform';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
+import { amazonMarkets } from '@/lib/platforms/amazon-markets';
 
 const richMockPlatforms = new Set<PlatformId>(['amazon', 'tiktok-shop', 'shopify', 'shopee']);
 
-const marketOptions = ['美国', '英国', '德国', '日本', '新加坡', '巴西'];
+const marketOptions = amazonMarkets.map((market) => market.label);
 const acceptedTypes = '.jpg,.jpeg,.png,.webp,.pdf,.xlsx,.xls,.csv,.txt,.docx';
 
 function formatBytes(bytes: number): string {
@@ -116,8 +117,8 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
     {!agentManaged && <div className="single-product-note"><b>一次任务对应一个商品</b><span>无需提前填写商品名称。请把该商品的图片、参数表、说明书和其他资料一起上传，模型会自动命名、合并属性并检查冲突。</span></div>}
 
     <div className="intake-fields">
-      {(!agentManaged || !initialTargets?.markets.length) && <fieldset><legend>目标市场</legend><div className="choice-row">{marketOptions.map((market) => <button type="button" className={markets.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(market)} key={market}>{market}</button>)}</div></fieldset>}
-      {(!agentManaged || !initialTargets?.platforms.length) && <fieldset><legend>目标平台 <small>12 个平台均可走 Mock 流程</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>}
+      {(!agentManaged || !initialTargets?.markets.length) && <fieldset><legend>目标市场 <small>Amazon 已覆盖官方列出的 23 个站点沙箱入口</small></legend><div className="choice-row">{marketOptions.map((market) => <button type="button" className={markets.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(market)} key={market}>{market}</button>)}</div></fieldset>}
+      {(!agentManaged || !initialTargets?.platforms.length) && <fieldset><legend>目标平台 <small>按平台能力执行测试交付</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{platform.id === 'amazon' ? '23 站点 · 官方静态沙箱' : platform.id === 'shopify' ? 'Dev Store 实际字段' : richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>}
     </div>
 
     <input ref={fileInput} className="visually-hidden" type="file" multiple accept={acceptedTypes} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} />

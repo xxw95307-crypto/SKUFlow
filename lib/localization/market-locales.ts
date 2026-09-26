@@ -1,3 +1,5 @@
+import { findAmazonMarket } from '../platforms/amazon-markets.ts';
+
 const MARKET_LOCALES: Record<string, { locale: string; language: string }> = {
   '美国': { locale: 'en-US', language: '英语（美国）' }, US: { locale: 'en-US', language: '英语（美国）' },
   '英国': { locale: 'en-GB', language: '英语（英国）' }, UK: { locale: 'en-GB', language: '英语（英国）' },
@@ -9,7 +11,8 @@ const MARKET_LOCALES: Record<string, { locale: string; language: string }> = {
 };
 
 export function marketLocale(market: string): { locale: string; language: string } {
-  return MARKET_LOCALES[market.trim()] ?? { locale: 'en-US', language: '英语（美国）' };
+  const amazon = findAmazonMarket(market);
+  return amazon ? { locale: amazon.locale, language: amazon.language } : MARKET_LOCALES[market.trim()] ?? { locale: 'en-US', language: '英语（美国）' };
 }
 
 export function isChineseLocale(locale: string): boolean {

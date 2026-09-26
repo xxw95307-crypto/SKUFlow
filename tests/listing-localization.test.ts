@@ -21,6 +21,8 @@ const payload: ListingDraftPayload = {
 test('market determines the real publication locale', () => {
   assert.deepEqual(marketLocale('日本'), { locale: 'ja-JP', language: '日语' });
   assert.equal(marketLocale('德国').locale, 'de-DE');
+  assert.equal(marketLocale('加拿大').locale, 'en-CA');
+  assert.equal(marketLocale('法国').locale, 'fr-FR');
   assert.equal(marketLocale('未知市场').locale, 'en-US');
 });
 

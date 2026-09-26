@@ -47,6 +47,14 @@ test('Amazon Mock Schema separates facts, AI copy and seller inputs', () => {
   assert.equal(schema.fields.find((field) => field.key === 'standard_price')?.source, 'SELLER_INPUT');
 });
 
+test('Amazon draft shows the selected store currency and locale', () => {
+  for (const [market, locale, currency] of [['英国', 'en-GB', 'GBP'], ['日本', 'ja-JP', 'JPY'], ['巴西', 'pt-BR', 'BRL']]) {
+    const schema = resolveMockListingSchema({ platformId: 'amazon', market });
+    assert.equal(schema.locale, locale);
+    assert.equal(schema.fields.find((field) => field.key === 'standard_price')?.unit, currency);
+  }
+});
+
 test('registered long-tail platforms receive a generic Mock Schema', () => {
   const schema = resolveMockListingSchema({ platformId: 'ebay', market: '英国' });
   assert.equal(schema.platformId, 'ebay');

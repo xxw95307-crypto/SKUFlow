@@ -1,7 +1,7 @@
 import type { PlatformId, PlatformProfile } from '../domain/platform';
 
 export const platformRegistry: readonly PlatformProfile[] = [
-  { id: 'amazon', name: 'Amazon', shortName: 'Amazon', family: 'marketplace', regions: ['US', 'UK', 'EU', 'JP'], supportLevel: 'validated-export', adapterVersion: '0.1.0', capabilities: { contentGeneration: true, schemaValidation: true, fileExport: true, sandbox: false, draftPublishing: false } },
+  { id: 'amazon', name: 'Amazon', shortName: 'Amazon', family: 'marketplace', regions: ['NA', 'EU', 'FE'], supportLevel: 'sandbox', adapterVersion: '0.2.0', capabilities: { contentGeneration: true, schemaValidation: false, fileExport: true, sandbox: true, draftPublishing: false } },
   { id: 'tiktok-shop', name: 'TikTok Shop', shortName: 'TikTok', family: 'social-commerce', regions: ['US', 'UK', 'SEA'], supportLevel: 'content', adapterVersion: '0.1.0', capabilities: { contentGeneration: true, schemaValidation: false, fileExport: true, sandbox: false, draftPublishing: false } },
   { id: 'shopify', name: 'Shopify', shortName: 'Shopify', family: 'dtc', regions: ['Global'], supportLevel: 'sandbox', adapterVersion: '0.2.0', capabilities: { contentGeneration: true, schemaValidation: true, fileExport: true, sandbox: true, draftPublishing: true } },
   { id: 'shopee', name: 'Shopee', shortName: 'Shopee', family: 'regional-marketplace', regions: ['SEA', 'TW', 'BR'], supportLevel: 'content', adapterVersion: '0.1.0', capabilities: { contentGeneration: true, schemaValidation: false, fileExport: true, sandbox: false, draftPublishing: false } },

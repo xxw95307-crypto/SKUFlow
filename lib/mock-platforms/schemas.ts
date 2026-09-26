@@ -2,6 +2,7 @@ import type { ListingFieldDefinition, MockListingSchema } from '../domain/listin
 import type { PlatformId } from '../domain/platform';
 import { getPlatformProfile } from '../platforms/registry.ts';
 import { marketLocale } from '../localization/market-locales.ts';
+import { findAmazonMarket } from '../platforms/amazon-markets.ts';
 
 const fact = (key: string, label: string, factKey: string, required = false, extra: Partial<ListingFieldDefinition> = {}): ListingFieldDefinition => ({
   key, label, factKey, required, source: 'PRODUCT_FACT', type: 'string', ...extra,
@@ -31,7 +32,7 @@ const amazonFields: ListingFieldDefinition[] = [
   fact('color_name', '颜色', 'product.color', false, { allowAiInference: true }),
   fact('capacity', '容量', 'product.capacity', false, { allowAiInference: true }),
   seller('seller_sku', '卖家 SKU', 'string', true, { maxLength: 80, placeholder: '由卖家填写，例如 BG-MINI-PINK' }),
-  seller('standard_price', '售价', 'number', true, { unit: 'USD', placeholder: '由卖家填写' }),
+  seller('standard_price', '售价', 'number', true, { placeholder: '由卖家填写' }),
   seller('quantity', '库存', 'number', true, { placeholder: '由卖家填写' }),
 ];
 
@@ -119,7 +120,7 @@ export function resolveMockListingSchema(input: {
     categoryId,
     categoryLabel,
     schemaVersion: `mock-${input.platformId}-${marketLocale(input.market).locale.toLowerCase()}-v3`,
-    fields: fieldsFor(input.platformId).map((field) => ({ ...field })),
+    fields: fieldsFor(input.platformId).map((field) => ({ ...field, ...(input.platformId === 'amazon' && field.key === 'standard_price' ? { unit: findAmazonMarket(input.market)?.currency ?? 'USD' } : {}) })),
   };
 }
 

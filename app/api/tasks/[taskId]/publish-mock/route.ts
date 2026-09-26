@@ -10,7 +10,8 @@ import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { localizedPublicationPayload } from '@/lib/agents/listing-localization';
-import { buildAmazonUsSandboxListingRequest, submitAmazonUsSandboxListing } from '@/lib/platforms/amazon-us-sandbox';
+import { buildAmazonSandboxListingRequest, submitAmazonSandboxListing } from '@/lib/platforms/amazon-us-sandbox';
+import { requireAmazonMarket } from '@/lib/platforms/amazon-markets';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,8 +59,9 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建测试草稿' }, { status: 409 });
 
     const hasShopify = publishable.some((draft) => draft.platformId === 'shopify');
-    const hasAmazonUs = publishable.some((draft) => draft.platformId === 'amazon' && ['US','美国'].includes(draft.market));
-    const needsMediaPlan = hasShopify || hasAmazonUs;
+    const hasAmazon = publishable.some((draft) => draft.platformId === 'amazon');
+    for (const draft of publishable.filter((item) => item.platformId === 'amazon')) requireAmazonMarket(draft.market);
+    const needsMediaPlan = hasShopify || hasAmazon;
     if(needsMediaPlan) {
       const row=await DB.prepare("SELECT plan_json FROM media_order_plans WHERE task_id=? AND id=? AND status='CONFIRMED'").bind(taskId,body.mediaPlanId??'').first<{plan_json:string}>();
       if(!row)throw new Error('请先在对话中确认封面和媒体顺序，再发布');
@@ -112,14 +114,14 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
         continue;
       }
 
-      if (draft.platformId === 'amazon' && ['US','美国'].includes(draft.market)) {
+      if (draft.platformId === 'amazon') {
         const credentials = {
           clientId: bindings.AMAZON_SP_API_SANDBOX_CLIENT_ID ?? '',
           clientSecret: bindings.AMAZON_SP_API_SANDBOX_CLIENT_SECRET ?? '',
           refreshToken: bindings.AMAZON_SP_API_SANDBOX_REFRESH_TOKEN ?? '',
         };
-        const request = buildAmazonUsSandboxListingRequest(publicationPayload);
-        const tested = await submitAmazonUsSandboxListing(credentials, request);
+        const request = buildAmazonSandboxListingRequest(publicationPayload);
+        const tested = await submitAmazonSandboxListing(credentials, request);
         const payload: ListingDraftPayload = {
           ...currentPayload,
           sandboxPublication: {
@@ -156,7 +158,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       mode: [realCount, amazonCount, mockCount].filter(Boolean).length > 1 ? 'MIXED' : realCount ? 'SHOPIFY_DEV' : amazonCount ? 'AMAZON_SANDBOX' : 'MOCK',
       message: [
         realCount ? `${realCount} 个 Shopify Dev Store 未发布草稿已创建` : '',
-        amazonCount ? `${amazonCount} 个 Amazon 美国站 Listing 已发送官方静态沙箱测试（无真实商品创建）` : '',
+        amazonCount ? `${amazonCount} 个 Amazon 站点 Listing 已发送对应区域的官方静态沙箱测试（无真实商品创建）` : '',
         mockCount ? `${mockCount} 个其他平台本地 Mock 草稿已创建` : '',
       ].filter(Boolean).join('；'),
       results,

@@ -29,6 +29,23 @@ const marketMatchers: Array<[string, RegExp]> = [
   ['日本', /日本|日区|日站|japan/i],
   ['新加坡', /新加坡|singapore/i],
   ['巴西', /巴西|brazil/i],
+  ['加拿大', /加拿大|canada/i],
+  ['墨西哥', /墨西哥|mexico/i],
+  ['爱尔兰', /爱尔兰|ireland/i],
+  ['西班牙', /西班牙|spain/i],
+  ['法国', /法国|france/i],
+  ['比利时', /比利时|belgium/i],
+  ['荷兰', /荷兰|netherlands/i],
+  ['意大利', /意大利|italy/i],
+  ['瑞典', /瑞典|sweden/i],
+  ['南非', /南非|south\s*africa/i],
+  ['波兰', /波兰|poland/i],
+  ['埃及', /埃及|egypt/i],
+  ['土耳其', /土耳其|turkey/i],
+  ['沙特阿拉伯', /沙特阿拉伯|沙特|saudi\s*arabia/i],
+  ['阿联酋', /阿联酋|united\s*arab\s*emirates/i],
+  ['印度', /印度|india/i],
+  ['澳大利亚', /澳大利亚|澳洲|australia/i],
 ];
 
 export function inferIntakeTargets(message: string): IntakeTargets {

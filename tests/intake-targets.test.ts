@@ -10,6 +10,11 @@ test('infers explicitly named platforms and markets from a chat request', () => 
   assert.equal(targets.marketSource, 'message');
 });
 
+test('infers newly supported Amazon stores from seller requests', () => {
+  assert.deepEqual(inferIntakeTargets('亚马逊加拿大和法国站').markets, ['加拿大', '法国']);
+  assert.deepEqual(inferIntakeTargets('Amazon 阿联酋站').markets, ['阿联酋']);
+});
+
 test('requires seller selection when the message does not name a platform or market', () => {
   const targets = inferIntakeTargets('这些资料是同一个商品，帮我上新这款产品');
   assert.deepEqual(targets.platforms, []);

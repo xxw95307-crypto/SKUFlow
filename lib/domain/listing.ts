@@ -70,7 +70,7 @@ export interface ListingDraftPayload {
   sandboxPublication?: {
     provider: 'AMAZON_STATIC_SANDBOX';
     createdAt: string;
-    request: { sku: string; productType: string; body: { productType: string; requirements: 'LISTING'; attributes: Record<string, unknown> } };
+    request: { marketCode: string; marketplaceId: string; currency: string; languageTag: string; sku: string; productType: string; body: { productType: string; requirements: 'LISTING'; attributes: Record<string, unknown> } };
     response: { status: string; sandboxSku: string | null; submissionId: string | null; issueCodes: string[] };
     mediaPlanId: string;
     mediaAssetIds: string[];

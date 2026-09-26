@@ -1,6 +1,6 @@
-# Amazon 美国站适配边界
+# Amazon 多站点适配边界
 
-## 当前目标：只测试亚马逊官方静态沙箱
+## 当前目标：按所选站点测试亚马逊官方静态沙箱
 
 不用注册自己的专业卖家店铺，也不用找真实卖家授权，就可以先走官方沙箱。按[亚马逊开发者接入流程](https://developer-docs.amazon.com/sp-api/docs/onboarding-overview)：创建 Solution Provider Portal 账号，填写开发者资料，再创建 **Application type = Sandbox** 的 SP-API 应用。官方说明在开发者资料审核期间即可开始测试。应用后台的 **View sandbox credentials** 可取得沙箱 client ID / client secret，**Create Token** 可生成沙箱 refresh token；这个令牌并非真实卖家的授权令牌。[官方操作步骤](https://developer-docs.amazon.com/sp-api/docs/onboarding-step-5-make-your-first-call-to-the-sp-api-sandbox)
 
@@ -12,19 +12,19 @@ AMAZON_SP_API_SANDBOX_CLIENT_SECRET=
 AMAZON_SP_API_SANDBOX_REFRESH_TOKEN=
 ```
 
-运行 `npm run test:amazon-sandbox`，脚本会向亚马逊换取短期访问令牌，只调用北美官方沙箱域名：先读取 `LUGGAGE` 商品类型模拟响应，再执行一个 `VALIDATION_INVALID` 的 Listing 模拟预览。终端只显示状态、商品类型与错误代码，不输出令牌。脚本从不向正式 SP-API 域名提交商品。
+运行 `npm run test:amazon-sandbox` 会用美国站示例测试北美沙箱连通性。网站中的测试入口则按用户选择的站点，选择官方 marketplace ID 与北美、欧洲或远东沙箱地址。终端和网页都不输出令牌，也不向正式 SP-API 域名提交商品。
 
-Amazon 美国站演示审核稿中还有一个 **“运行 Amazon 官方沙箱连通测试”** 按钮，调用受登录保护的 `/api/integrations/amazon-sandbox`，显示同一组预设示例的结果。网页按钮使用**网站服务器运行环境**中的沙箱配置；本地 `.env.local` 不会自动同步到已发布的网站。如果线上页面提示“尚未配置”，需要把同名变量作为该网站的服务端环境变量配置后重新部署。这个按钮不发送当前 Listing 的字段，也不改变审核状态。
+Amazon 演示审核稿中有一个 **“单独测试此站点沙箱连通性”** 按钮，调用受登录保护的 `/api/integrations/amazon-sandbox`，显示该站点所在区域的预设示例响应。网页按钮使用**网站服务器运行环境**中的沙箱配置；本地 `.env.local` 不会自动同步到已发布的网站。这个按钮不发送当前 Listing 的字段，也不改变审核状态。
 
-**能力边界：**亚马逊的 Product Type Definitions 与 Listings Items 在托管沙箱中只支持**静态**响应，按请求参数匹配预置示例；`LUGGAGE` 示例中的 Schema 链接是占位值，不能据此取得美国站 T 恤的真实字段，也不能证明真实 Listing 会通过校验。当前应用审核稿仍标为 `MOCK`，不会因为沙箱请求成功就自动标记为官方规则或已上架。[亚马逊沙箱说明](https://developer-docs.amazon.com/sp-api/docs/sp-api-sandbox)
+**能力边界：**亚马逊的 Product Type Definitions 与 Listings Items 在托管沙箱中只支持**静态**响应，按请求参数匹配预置示例；`LUGGAGE` 示例中的 Schema 链接是占位值，不能据此取得所选站点 T 恤的真实字段，也不能证明真实 Listing 会通过校验。当前应用审核稿仍标为 `MOCK`，不会因为沙箱请求成功就自动标记为官方规则或已上架。[亚马逊沙箱说明](https://developer-docs.amazon.com/sp-api/docs/sp-api-sandbox)
 
-当前 Amazon Listing 是 SKUFlow 的演示审核稿，`mode=MOCK`。这些示例字段没有经过 Amazon 官方商品类型定义校验，也不会写入卖家店铺。美国站 marketplace ID 为 `ATVPDKIKX0DER`。
+当前 Amazon Listing 是 SKUFlow 的演示审核稿，`mode=MOCK`。这些示例字段没有经过 Amazon 官方商品类型定义校验，也不会写入卖家店铺。`lib/platforms/amazon-markets.ts` 列出了官方 23 个站点的 marketplace ID、区域、默认语言与币种；未知站点会在调用前明确报错，不会悄悄退回本地 Mock。站点 ID 和所属区域分别参照[官方 Marketplace IDs](https://developer-docs.amazon.com/sp-api/docs/marketplace-ids)与[官方 SP-API Endpoints](https://developer-docs.amazon.com/sp-api/docs/sp-api-endpoints)。
 
 ## SKUFlow 现有沙箱交付链路
 
-选择 Amazon 美国站后，SKUFlow 提取商品事实、生成中文审核稿，并提出商品类型代码候选值。卖家需核对商品类型、品牌、SKU、价格、库存和五点描述，逐项确认 Listing。视觉素材生成后，卖家选择图片/视频并确认媒体顺序。最终人工确认界面展示英语译文与测试模式说明。
+选择任一已列出的 Amazon 站点后，SKUFlow 提取商品事实、生成中文审核稿，并提出商品类型代码候选值。卖家需核对商品类型、品牌、SKU、所选站点币种的价格、库存和五点描述，逐项确认 Listing。视觉素材生成后，卖家选择图片/视频并确认媒体顺序。最终人工确认界面展示目标站点语言的译文与测试模式说明。
 
-确认后，服务端把已审核且已本地化的标题、品牌、五点描述、商品描述、售价、库存等映射为 `putListingsItem` 结构，以 `mode=VALIDATION_PREVIEW` 发送给 **`sandbox.sellingpartnerapi-na.amazon.com`**。本地保存请求摘要、媒体顺序与官方静态沙箱响应，页面标记“沙箱测试已完成”。图片/视频因目前没有面向 Amazon 的公开媒体地址而仅保留在 SKUFlow，**不随请求上传到 Amazon**。静态沙箱可能返回 `ACCEPTED` 和与请求不同的预置 SKU；这些都不是当前商品通过规则校验、创建草稿或上架成功的证据。
+确认后，服务端把已审核且已本地化的标题、品牌、五点描述、商品描述、售价、库存等映射为 `putListingsItem` 结构，以 `mode=VALIDATION_PREVIEW` 发送给所选站点对应的 **`sandbox.sellingpartnerapi-na/eu/fe.amazon.com`**。本地保存请求摘要、媒体顺序与官方静态沙箱响应，页面标记“沙箱测试已完成”。图片/视频因目前没有面向 Amazon 的公开媒体地址而仅保留在 SKUFlow，**不随请求上传到 Amazon**。静态沙箱可能返回 `ACCEPTED` 和与请求不同的预置 SKU；这些都不是当前商品通过规则校验、创建草稿或上架成功的证据。
 
 ## 已完成的接入基础
 
