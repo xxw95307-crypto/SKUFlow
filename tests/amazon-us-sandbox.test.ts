@@ -43,7 +43,7 @@ function reviewedAmazonDraft(): ListingDraftPayload {
     schema: { mode: 'MOCK', platformId: 'amazon', platformName: 'Amazon', market: '美国', locale: 'en_US', categoryId: 'shirt', categoryLabel: 'T恤', schemaVersion: 'demo', fields: [] },
     fields: { product_type_code: 'SHIRT', seller_sku: 'TEE-PINK-M', brand_name: 'Sample', item_name: '浅粉色短袖', bullet_points: ['第一点', '第二点', '第三点', '第四点', '第五点'], product_description: '棉质短袖', standard_price: 19.99, quantity: 5 },
     fieldSources: {}, confirmedInferredFields: [], source: { passportId: 'p', passportVersion: 1 },
-    localization: { status: 'READY', sourceLocale: 'zh-CN', targetLocale: 'en_US', targetLanguage: 'English', model: 'test', requestId: null, createdAt: '2026-01-01T00:00:00Z', fields: { item_name: 'Pink cotton shirt', bullet_points: ['One', 'Two', 'Three', 'Four', 'Five'], product_description: 'Cotton shirt' } },
+    localization: { status: 'READY', sourceLocale: 'zh-CN', targetLocale: 'en-US', targetLanguage: 'English', model: 'test', requestId: null, createdAt: '2026-01-01T00:00:00Z', fields: { item_name: 'Pink cotton shirt', bullet_points: ['One', 'Two', 'Three', 'Four', 'Five'], product_description: 'Cotton shirt' } },
   };
 }
 

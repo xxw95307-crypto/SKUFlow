@@ -60,7 +60,7 @@ export function buildAmazonUsSandboxListingRequest(payload: ListingDraftPayload)
   if (payload.schema.platformId !== 'amazon' || !['US', '美国'].includes(payload.schema.market)) {
     throw new Error('仅支持 Amazon 美国站沙箱测试');
   }
-  if (payload.localization?.status !== 'READY' || payload.localization.targetLocale !== 'en_US') {
+  if (payload.localization?.status !== 'READY' || !['en-US', 'en_US'].includes(payload.localization.targetLocale)) {
     throw new Error('请先完成 Amazon 美国站英文 Listing 预览');
   }
   const fields = { ...payload.fields, ...payload.localization.fields };

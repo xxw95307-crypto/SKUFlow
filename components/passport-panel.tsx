@@ -207,7 +207,7 @@ export function PassportPanel({
       <summary>查看平台适配与技术详情</summary>
       <div className="passport-structure-grid">
         <article><span className="tiny-label">证据记录</span><h3>{passport.evidence.length} 条可追溯证据</h3><p>每个属性都保留对应文件、页码、表格范围或图片区域，供需要时核查。</p></article>
-        <article><span className="tiny-label">平台草稿</span><h3>平台草稿矩阵</h3><div className="draft-chip-list">{passport.platformDrafts.map((draft) => <span key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b>{draft.market} · {draftStatusLabels[draft.status]}</span>)}</div></article>
+        <article><span className="tiny-label">平台交付</span><h3>平台交付矩阵</h3><div className="draft-chip-list">{passport.platformDrafts.map((draft) => <span key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b>{draft.market} · {draft.platformId === 'amazon' && draft.status === 'DRAFT_CREATED' ? '沙箱测试完成' : draftStatusLabels[draft.status]}</span>)}</div></article>
       </div>
     </details>
 
