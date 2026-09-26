@@ -217,13 +217,14 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
 }) {
   const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED');
   const shopifyCount = approved.filter((draft) => draft.platformId === 'shopify').length;
-  const mockCount = approved.length - shopifyCount;
-  const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
+  const amazonCount = approved.filter((draft) => draft.platformId === 'amazon' && ['US','美国'].includes(draft.market)).length;
+  const mockCount = approved.length - shopifyCount - amazonCount;
+  const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', amazonCount ? 'Amazon 美国站官方静态沙箱测试' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
   const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && draft.payload.localization?.status === 'READY');
   return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose} wide>
     <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 个平台 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
     <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
-    <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文将写入平台草稿</b></header>
+    <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文用于测试交付</b></header>
       {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>Agent 正在为各目标市场翻译 Listing，并校验字段长度与结构…</p></div>}
       {localizationError && <div className="publish-localization-error" role="alert"><p>{localizationError}</p><button type="button" onClick={onRetryLocalization}>重新生成译文</button></div>}
       {!localizationBusy && !localizationError && approved.map((draft) => {
@@ -233,8 +234,8 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
         return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{payload.localization.targetLanguage} · {payload.localization.targetLocale}</span></div><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl><small>由 {payload.localization.model} 根据已确认中文稿生成；SKU、价格、尺寸及其他经营字段保持原值。</small></article>;
       })}
     </section>
-    <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若测试店铺未配置，Agent 会暂停并提示所需连接信息。</span></div>
-    <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || localizationBusy || !localizationReady || Boolean(localizationError)} onClick={onPublish}>{busy ? '发布中…' : localizationBusy ? '正在准备译文…' : `确认译文并创建 ${approved.length} 个草稿`}</button></div>
+    <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{amazonCount ? 'Amazon 美国站将接收当前审核稿映射的请求并返回预设沙箱响应，不会创建店铺商品；媒体编排只保存在 SKUFlow；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若连接未配置，Agent 会暂停并提示所需信息。</span></div>
+    <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || localizationBusy || !localizationReady || Boolean(localizationError)} onClick={onPublish}>{busy ? '测试交付中…' : localizationBusy ? '正在准备译文…' : `确认译文并执行 ${approved.length} 个平台测试`}</button></div>
   </AgentDialog>;
 }
 
@@ -826,13 +827,14 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
       if (name === 'open_publish_confirmation') {
-        if(currentTask.platforms.includes('shopify')) {
+        if(currentTask.platforms.includes('shopify') || (currentTask.platforms.includes('amazon') && currentTask.markets.some((market) => ['US','美国'].includes(market)))) {
           setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…'); setBusyHint('编排主图、细节图与视频的展示顺序');
           await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
         }
-        setPhase('publish'); setPublishOpen(!currentTask.platforms.includes('shopify'));
+        const needsMediaPlan = currentTask.platforms.includes('shopify') || (currentTask.platforms.includes('amazon') && currentTask.markets.some((market) => ['US','美国'].includes(market)));
+        setPhase('publish'); setPublishOpen(!needsMediaPlan);
         mediaPlanRef.current=null;setMediaPlanReady(false);
-        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用测试发布工具。Shopify 会创建未公开的 Dev Store 草稿。', '等待最终确认', {
+        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用测试交付工具。Shopify 会创建未公开的 Dev Store 草稿；Amazon 美国站会调用官方静态沙箱。', '等待最终确认', {
           kind: 'publish',
           items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · 测试草稿`, status: '待确认' }],
         });
@@ -845,24 +847,29 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         const payload = await responseJson<{
           passport: ProductPassport;
           message?: string;
-          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'MOCK'; targetLocale?: string; targetLanguage?: string; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }> }>;
+          results: Array<{ platformId: string; mode: 'SHOPIFY_DEV' | 'AMAZON_SANDBOX' | 'MOCK'; targetLocale?: string; targetLanguage?: string; adminUrl?: string | null; warnings?: string[]; verification?: Array<{ field: string; status: string }>; sandboxStatus?: string; sandboxIssueCodes?: string[] }>;
         }>(await fetch(`/api/tasks/${currentTask.id}/publish-mock`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({selectedAssetIds:selectedAssetsRef.current,mediaPlanId:mediaPlanRef.current}) }), '平台测试草稿创建失败');
         setPassport(payload.passport); setPublishOpen(false); setPhase('complete');
         const shopifyCreated = payload.results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
+        const amazonTested = payload.results.filter((item) => item.mode === 'AMAZON_SANDBOX').length;
+        const mockCreated = payload.results.filter((item) => item.mode === 'MOCK').length;
         const warningCount = payload.results.reduce((count, item) => count + (item.warnings?.length ?? 0), 0);
         const languageSummary = payload.results.map((item) => item.targetLanguage ? `${item.targetLanguage}（${item.targetLocale}）` : '').filter(Boolean).join('、');
-        append('agent', `测试发布工具已完成，已按${languageSummary || '目标站点语言'}创建 ${payload.results.length} 个平台草稿。${shopifyCreated ? `其中 ${shopifyCreated} 个已写入 Shopify Dev Store，保持未公开状态。` : ''}${warningCount ? `另有 ${warningCount} 条非阻塞提示可在发布记录中核对。` : ''}`, '发布记录已保存', {
+        append('agent', `测试交付已按${languageSummary || '目标站点语言'}完成。${shopifyCreated ? `${shopifyCreated} 个 Shopify Dev Store 草稿已创建。` : ''}${amazonTested ? `${amazonTested} 个 Amazon 美国站请求已发送到官方静态沙箱；预设响应不是商品校验结果，也未创建店铺商品。` : ''}${mockCreated ? `${mockCreated} 个其他平台 Mock 草稿已记录。` : ''}${warningCount ? `另有 ${warningCount} 条说明可在发布记录中核对。` : ''}`, '测试结果已保存', {
           kind: 'publish',
           items: payload.passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').map((draft) => ({
             id: draft.id,
             label: platformNames.get(draft.platformId) ?? draft.platformId,
-            value: '平台草稿已创建',
+            value: draft.platformId === 'amazon' && isListingDraftPayload(draft.payload) && draft.payload.sandboxPublication ? '官方静态沙箱测试完成' : '平台草稿已创建',
             detail: draft.market,
             status: '成功',
           })),
         });
         for (const result of payload.results.filter((item) => item.mode === 'SHOPIFY_DEV')) {
           append('agent', `Shopify 字段核对：${(result.verification ?? []).map((item) => `${item.field}：${item.status === 'MATCH' ? '一致' : item.status === 'MISMATCH' ? '不一致' : item.status === 'NOT_SYNCED' ? '未同步' : item.status === 'PENDING' ? '平台处理中' : '核对失败'}`).join('；')}。${result.warnings?.join('；') ?? ''}`, '发布核对结果');
+        }
+        for (const result of payload.results.filter((item) => item.mode === 'AMAZON_SANDBOX')) {
+          append('agent', `Amazon 官方静态沙箱返回 ${result.sandboxStatus ?? '未知状态'}${result.sandboxIssueCodes?.length ? `，预设问题代码：${result.sandboxIssueCodes.join('、')}` : ''}。该响应不能证明当前商品符合美国站规则；图片和视频编排仅保存在 SKUFlow。`, 'Amazon 沙箱响应');
         }
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, message: payload.message, publishedDrafts: payload.results.length }, checkpoint: false, completed: true };
@@ -1310,10 +1317,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
           {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion/>}</AssetConversationCard></article>}
 
-          {phase === 'publish' && task?.platforms.includes('shopify') && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
-          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用发布工具。</p></div><button type="button" disabled={Boolean(task?.platforms.includes('shopify') && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认发布</button></div>}
+          {phase === 'publish' && (task?.platforms.includes('shopify') || (task?.platforms.includes('amazon') && task?.markets.some((market) => ['US','美国'].includes(market)))) && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
+          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用测试交付工具。</p></div><button type="button" disabled={Boolean((task?.platforms.includes('shopify') || (task?.platforms.includes('amazon') && task?.markets.some((market) => ['US','美国'].includes(market)))) && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
 
-          {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>草稿已创建</small><h3>{publishedCount} 个平台草稿已创建</h3><p>任务、商品事实、人工决策和发布结果均已保留追溯信息。</p></div><button type="button" onClick={recheckShopify}>重新核对 Shopify</button><button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
+          {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>测试交付已完成</small><h3>{publishedCount} 个平台结果已保存</h3><p>任务、商品事实、人工决策和测试结果均已保留追溯信息。</p></div>{task?.platforms.includes('shopify') && <button type="button" onClick={recheckShopify}>重新核对 Shopify</button>}<button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 
           {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{(canRetryFailedTurn || task) && <button type="button" onClick={resumeTask}>重试当前步骤</button>}</div>}
           <div ref={threadEnd} />

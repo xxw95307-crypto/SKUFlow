@@ -10,6 +10,7 @@ import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { localizedPublicationPayload } from '@/lib/agents/listing-localization';
+import { buildAmazonUsSandboxListingRequest, submitAmazonUsSandboxListing } from '@/lib/platforms/amazon-us-sandbox';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,9 @@ interface DeliveryResult {
   market: string;
   draftId: string;
   status: 'DRAFT_CREATED';
-  mode: 'SHOPIFY_DEV' | 'MOCK';
+  mode: 'SHOPIFY_DEV' | 'AMAZON_SANDBOX' | 'MOCK';
+  sandboxStatus?: string;
+  sandboxIssueCodes?: string[];
   adminUrl?: string | null;
   warnings?: string[];
   verification?: Array<{ field: string; status: string; expected?: unknown; actual?: unknown }>;
@@ -48,13 +51,16 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
     if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 项媒体'},{status:400});
     const media: ShopifyMediaInput[] = [];
+    let orderedMediaIds: string[] = [];
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
     const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload));
     if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建测试草稿' }, { status: 409 });
 
     const hasShopify = publishable.some((draft) => draft.platformId === 'shopify');
-    if(hasShopify) {
+    const hasAmazonUs = publishable.some((draft) => draft.platformId === 'amazon' && ['US','美国'].includes(draft.market));
+    const needsMediaPlan = hasShopify || hasAmazonUs;
+    if(needsMediaPlan) {
       const row=await DB.prepare("SELECT plan_json FROM media_order_plans WHERE task_id=? AND id=? AND status='CONFIRMED'").bind(taskId,body.mediaPlanId??'').first<{plan_json:string}>();
       if(!row)throw new Error('请先在对话中确认封面和媒体顺序，再发布');
       const latest=await DB.prepare('SELECT id FROM media_order_plans WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(taskId).first<{id:string}>();
@@ -62,7 +68,8 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       const candidates=await getSelectedMedia(DB,taskId,selectedIds);
       const plan=parseMediaOrderPlan(JSON.parse(row.plan_json),candidates);
       if(!sameMediaSelection(plan,selectedIds))throw new Error('选中的媒体已改变，请重新编排并确认');
-      for(const item of plan.items) {
+      orderedMediaIds = plan.items.map(item => item.id);
+      if(hasShopify) for(const item of plan.items) {
         const c=candidates.find(c=>c.id===item.id)!;
         const object=await bindings.UPLOADS.get(c.objectKey);if(!object)throw new Error('找不到选中的媒体文件');
         media.push({name:`${c.id}.${c.type==='VIDEO'?(c.contentType==='video/webm'?'webm':'mp4'):'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
@@ -105,6 +112,34 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
         continue;
       }
 
+      if (draft.platformId === 'amazon' && ['US','美国'].includes(draft.market)) {
+        const credentials = {
+          clientId: bindings.AMAZON_SP_API_SANDBOX_CLIENT_ID ?? '',
+          clientSecret: bindings.AMAZON_SP_API_SANDBOX_CLIENT_SECRET ?? '',
+          refreshToken: bindings.AMAZON_SP_API_SANDBOX_REFRESH_TOKEN ?? '',
+        };
+        const request = buildAmazonUsSandboxListingRequest(publicationPayload);
+        const tested = await submitAmazonUsSandboxListing(credentials, request);
+        const payload: ListingDraftPayload = {
+          ...currentPayload,
+          sandboxPublication: {
+            provider: 'AMAZON_STATIC_SANDBOX', createdAt: now,
+            request: tested.request, response: tested.response,
+            mediaPlanId: body.mediaPlanId!, mediaAssetIds: orderedMediaIds,
+          },
+        };
+        await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
+        results.push({
+          platformId: draft.platformId, market: draft.market, draftId: draft.id,
+          status: 'DRAFT_CREATED', mode: 'AMAZON_SANDBOX',
+          sandboxStatus: tested.response.status, sandboxIssueCodes: tested.response.issueCodes,
+          targetLocale: currentPayload.localization?.targetLocale,
+          targetLanguage: currentPayload.localization?.targetLanguage,
+          warnings: ['官方静态沙箱仅返回预设响应；不是当前商品的字段校验结果，也未创建亚马逊店铺草稿。图片和视频编排仅保存在 SKUFlow。'],
+        });
+        continue;
+      }
+
       const mockDraftId = `mock_${draft.platformId.replace(/-/g, '_')}_${crypto.randomUUID()}`;
       const payload: ListingDraftPayload = {
         ...currentPayload,
@@ -115,11 +150,13 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     }
 
     const realCount = results.filter((item) => item.mode === 'SHOPIFY_DEV').length;
-    const mockCount = results.length - realCount;
+    const amazonCount = results.filter((item) => item.mode === 'AMAZON_SANDBOX').length;
+    const mockCount = results.length - realCount - amazonCount;
     return Response.json({
-      mode: realCount ? (mockCount ? 'MIXED' : 'SHOPIFY_DEV') : 'MOCK',
+      mode: [realCount, amazonCount, mockCount].filter(Boolean).length > 1 ? 'MIXED' : realCount ? 'SHOPIFY_DEV' : amazonCount ? 'AMAZON_SANDBOX' : 'MOCK',
       message: [
         realCount ? `${realCount} 个 Shopify Dev Store 未发布草稿已创建` : '',
+        amazonCount ? `${amazonCount} 个 Amazon 美国站 Listing 已发送官方静态沙箱测试（无真实商品创建）` : '',
         mockCount ? `${mockCount} 个其他平台本地 Mock 草稿已创建` : '',
       ].filter(Boolean).join('；'),
       results,

@@ -20,6 +20,7 @@ const productNameField = () => fact('product_name', '商品名称', 'product.nam
 
 const amazonFields: ListingFieldDefinition[] = [
   productNameField(),
+  seller('product_type_code', 'Amazon 商品类型代码', 'string', true, { maxLength: 64, placeholder: '例如 SHIRT', helpText: 'Agent 根据已识别类目给出候选值；这是沙箱演示用代码，需你核对，不代表已通过 Amazon 类目审核。' }),
   ai('item_name', '商品标题', 'string', true, { maxLength: 200, helpText: '根据可信商品事实生成，适配站内搜索与可读性。' }),
   fact('brand_name', '品牌', 'product.brand', true, { maxLength: 120, allowAiInference: true }),
   fact('model_name', '型号', 'product.model', false, { maxLength: 120, allowAiInference: true }),

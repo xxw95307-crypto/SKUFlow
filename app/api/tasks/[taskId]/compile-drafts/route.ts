@@ -9,8 +9,9 @@ import { ensureSchema, getBindings } from '@/db/client';
 import { callBailianListingGeneration } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import type { DraftValidationIssue, ProductPassport } from '@/lib/domain/product-passport';
-import { compileMockListingDraft, isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
+import { compileMockListingDraft, isListingDraftPayload, validateMockListing } from '@/lib/mock-platforms/listing-compiler';
 import { resolveMockListingSchema } from '@/lib/mock-platforms/schemas';
+import { suggestAmazonUsProductType } from '@/lib/platforms/amazon-us-sandbox';
 import { getProductPassport, saveCompiledDrafts } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
@@ -103,6 +104,15 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         fieldNotes: generatedByDraft.get(draft.id)?.fieldNotes,
         existingPayload,
       });
+      if (draft.platformId === 'amazon' && ['US', '美国'].includes(draft.market) && !result.payload.fields.product_type_code) {
+        const suggestion = suggestAmazonUsProductType(categoryLabel, productName);
+        if (suggestion) {
+          result.payload.fields.product_type_code = suggestion;
+          result.payload.fieldSources.product_type_code = 'AI_INFERRED';
+          result.validationIssues = validateMockListing(result.payload.schema, result.payload.fields, result.payload.fieldSources, result.payload.confirmedInferredFields);
+          result.mappedFields += 1;
+        }
+      }
       const status = result.validationIssues.some((issue) => issue.severity === 'error') ? 'NEEDS_REVIEW' as const : 'VALIDATED' as const;
       writes.push({
         draftId: draft.id,

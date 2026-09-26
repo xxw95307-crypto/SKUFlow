@@ -67,6 +67,14 @@ export interface ListingDraftPayload {
     status: 'DRAFT_CREATED';
     createdAt: string;
   };
+  sandboxPublication?: {
+    provider: 'AMAZON_STATIC_SANDBOX';
+    createdAt: string;
+    request: { sku: string; productType: string; body: { productType: string; requirements: 'LISTING'; attributes: Record<string, unknown> } };
+    response: { status: string; sandboxSku: string | null; submissionId: string | null; issueCodes: string[] };
+    mediaPlanId: string;
+    mediaAssetIds: string[];
+  };
   testPublication?: {
     provider: 'SHOPIFY_DEV';
     productId: string;
