@@ -1021,6 +1021,18 @@ body {
   box-shadow: none;
 }
 
+.agent-shell-v2 .joined-action-bubble > .asset-conversation-card {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 18px 19px 19px;
+  border: 0;
+  border-top: 1px solid var(--sf-line);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
 .agent-shell-v2 .embedded-intake .dropzone.compact {
   min-height: 58px;
   display: flex;

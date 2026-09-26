@@ -54,9 +54,10 @@ function ListingFieldEditor({ field, value, source, confirmed, issue, evidence, 
   </div>;
 }
 
-export function ListingWorkspace({ task, onAssets, conversation = false }: {
+export function ListingWorkspace({ task, onAssets, onPassportChange, conversation = false }: {
   task: TaskSnapshot | null;
   onAssets: () => void;
+  onPassportChange?: (passport: ProductPassport) => void;
   conversation?: boolean;
 }) {
   const [passport, setPassport] = useState<ProductPassport | null>(null);
@@ -90,6 +91,7 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
         const payload = await response.json() as { passport?: ProductPassport; error?: string };
         if (!response.ok || !payload.passport) throw new Error(payload.error || '平台草稿加载失败');
         setPassport(payload.passport);
+        onPassportChange?.(payload.passport);
         setSelectedDraftId((current) => current || payload.passport!.platformDrafts.find((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED')?.id || payload.passport!.platformDrafts[0]?.id || '');
       })
       .catch((caught) => {
@@ -97,7 +99,7 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
         setError(caught instanceof Error ? caught.message : '平台草稿加载失败');
       });
     return () => controller.abort();
-  }, [task]);
+  }, [task, onPassportChange]);
 
   const selectedDraft = passport?.platformDrafts.find((draft) => draft.id === selectedDraftId) ?? passport?.platformDrafts[0];
   const listing = selectedDraft && isListingDraftPayload(selectedDraft.payload) ? selectedDraft.payload : null;
@@ -120,6 +122,7 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
       const payload = await response.json() as { passport?: ProductPassport; error?: string };
       if (!response.ok || !payload.passport) throw new Error(payload.error || '多平台 Listing 生成失败');
       setPassport(payload.passport);
+      onPassportChange?.(payload.passport);
       setSelectedDraftId(payload.passport.platformDrafts[0]?.id ?? '');
       setDraftEdits({});
       setDraftConfirmations({});
@@ -161,7 +164,10 @@ export function ListingWorkspace({ task, onAssets, conversation = false }: {
         body: JSON.stringify({ draftId: selectedDraft.id, action, fields, confirmedInferredFields: submittedConfirmations }),
       });
       const payload = await response.json() as { passport?: ProductPassport; error?: string };
-      if (payload.passport) setPassport(payload.passport);
+      if (payload.passport) {
+        setPassport(payload.passport);
+        onPassportChange?.(payload.passport);
+      }
       if (!response.ok || !payload.passport) {
         // Use the server's validation of this submission, never the stale issue list.
         const checkedDraft = payload.passport?.platformDrafts.find(draft => draft.id === selectedDraft.id);

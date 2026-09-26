@@ -85,6 +85,25 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
   </>;
 }
 
+function currentListingMessage(message: ChatMessage, passport: ProductPassport | null): ChatMessage {
+  if (message.kind !== 'listing' || !passport?.platformDrafts.length || !message.items?.length) return message;
+  const drafts = new Map(passport.platformDrafts.map((draft) => [draft.id, draft]));
+  const items = message.items.map((item) => {
+    const draft = drafts.get(item.id);
+    if (!draft) return item;
+    return { ...item, status: draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : '待审核' };
+  });
+  const allApproved = passport.platformDrafts.every((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
+  return {
+    ...message,
+    items,
+    ...(allApproved ? {
+      text: `${passport.platformDrafts.length} 份平台中文审校稿已确认。接下来一起检查图片和视频素材。`,
+      meta: 'Listing 已确认',
+    } : {}),
+  };
+}
+
 const initialMessages: ChatMessage[] = [{
   id: 'welcome',
   role: 'agent',
@@ -801,7 +820,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);
         const images=selectedAssetsRef.current.filter(id=>!id.startsWith('video_'));
         selectedAssetsRef.current=images;setSelectedAssets(images);setPhase('assets');
-        append('agent','已按你的修改要求重新规划并提交新视频，原有图片保留。请在下方查看新方案和生成进度，完成后可预览并选择。','视频生成中');
+        append('agent','已按你的修改要求重新规划并提交新视频，原有图片保留。请在下方查看新方案和生成进度，完成后可预览并选择。','视频生成中',{kind:'assets'});
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:payload.job.id},checkpoint:true};
       }
@@ -833,7 +852,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
         setPhase('assets');
-        append('agent', `我已经根据这个商品的类目、属性、目标平台和原始图片，动态规划并生成 ${completed.length} 项已完成素材。图片与视频已统一规划；视频如已启动会在下方显示生成进度。候选素材已经放在当前对话中；不满意的话，直接在下方告诉我想怎么修改。`, '等待素材选择');
+        append('agent', '图片素材已生成，视频进度和结果也会显示在这里。请一起预览并选择；需要修改，直接告诉我。', '等待素材选择', { kind: 'assets' });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -949,7 +968,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           content: payload.message.content,
           ...(payload.message.toolCalls.length ? { toolCalls: payload.message.toolCalls } : {}),
         }];
-        if (payload.message.content) append('agent', payload.message.content, payload.message.toolCalls.length ? '正在调用工具' : undefined);
+        const nextTool = payload.message.toolCalls[0]?.function.name;
+        if (payload.message.content && !['generate_visual_assets', 'open_asset_selection', 'revise_product_video'].includes(nextTool ?? '')) {
+          append('agent', payload.message.content, payload.message.toolCalls.length ? '正在调用工具' : undefined);
+        }
         const call = payload.message.toolCalls[0];
         if (!call) {
           modelHistory.current = history;
@@ -1186,8 +1208,11 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const publishedCount = passport?.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length ?? 0;
   const showWelcomeWorkspace = phase === 'idle' && messages.length === 1 && messages[0]?.id === 'welcome';
   const joinIntakeToLastAgentReply = phase === 'intake' && messages.at(-1)?.role === 'agent';
+  const joinAssetsToLastAgentReply = phase === 'assets' && messages.at(-1)?.role === 'agent'
+    && (messages.at(-1)?.meta === '等待素材选择' || messages.at(-1)?.meta === '视频生成中');
 
   const intakeCard = phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>;
+  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion/>}</AssetConversationCard>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
 
@@ -1280,12 +1305,16 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
           {!showWelcomeWorkspace && messages.map((message, index) => {
             const joinsIntake = joinIntakeToLastAgentReply && index === messages.length - 1;
+            const joinsAssets = joinAssetsToLastAgentReply && index === messages.length - 1;
+            const joinsAction = joinsIntake || joinsAssets;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
-            return <article className={`chat-message ${message.role}${joinsIntake ? ' joined-action' : ''}`} key={message.id}>
+            const displayedMessage = currentListingMessage(message, passport);
+            return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}`} key={message.id}>
               <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
-              <div className={`${richClass}${joinsIntake ? ' joined-action-bubble' : ''}`}>
-                {joinsIntake ? <div className="joined-message-copy"><RichMessageContent message={message} /></div> : <RichMessageContent message={message} />}
+              <div className={`${richClass}${joinsAction ? ' joined-action-bubble' : ''}`}>
+                {joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
                 {joinsIntake && intakeCard}
+                {joinsAssets && assetCard}
               </div>
             </article>;
           })}
@@ -1323,10 +1352,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'conflict' && passport && <ConflictConversationCard passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} />}
 
-          {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} conversation /></article>}
+          {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} onPassportChange={setPassport} conversation /></article>}
 
           {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
-          {phase === 'assets' && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span><AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={confirmAssets}>{task && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion/>}</AssetConversationCard></article>}
+          {phase === 'assets' && !joinAssetsToLastAgentReply && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span>{assetCard}</article>}
 
           {phase === 'publish' && (task?.platforms.includes('shopify') || task?.platforms.includes('amazon')) && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview hasShopify={task.platforms.includes('shopify')} hasAmazonSandbox={task.platforms.includes('amazon')} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用测试交付工具。</p></div><button type="button" disabled={Boolean((task?.platforms.includes('shopify') || task?.platforms.includes('amazon')) && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
