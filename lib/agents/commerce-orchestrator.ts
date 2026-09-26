@@ -1,6 +1,38 @@
 import type { AgentModelMessage, AgentToolDefinition, AgentToolName, AgentWorkflowState } from '../domain/agent-orchestrator.ts';
 import { inferIntakeTargets } from './intake-targets.ts';
 
+export function compactAgentModelHistory(messages: AgentModelMessage[], limit = 40): AgentModelMessage[] {
+  if (messages.length <= limit) return [...messages];
+  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
+  if (lastUserIndex < 0) return [];
+  const currentTurn = messages.slice(lastUserIndex);
+  if (currentTurn.length >= limit) {
+    const tail = currentTurn.slice(-(limit - 1));
+    while (tail[0]?.role === 'tool') tail.shift();
+    return [currentTurn[0], ...tail];
+  }
+  const earlier = messages.slice(0, lastUserIndex)
+    .filter((message) => message.role === 'user' || (message.role === 'assistant' && !message.toolCalls?.length))
+    .slice(-(limit - currentTurn.length));
+  while (earlier.length > 0 && earlier[0]?.role !== 'user') earlier.shift();
+  return [...earlier, ...currentTurn];
+}
+
+export function requiredMediaToolAfterUser(messages: AgentModelMessage[]): AgentToolName | null {
+  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
+  if (lastUserIndex < 0) return null;
+  const lastUser = messages[lastUserIndex];
+  if (lastUser.role !== 'user') return null;
+  const completed = new Set(messages.slice(lastUserIndex + 1).filter((message) => message.role === 'tool').map((message) => message.role === 'tool' ? message.name : ''));
+  if (lastUser.content.startsWith('我已确认图片生成需求，请生成图片')) {
+    if (completed.has('open_asset_selection')) return null;
+    return completed.has('generate_visual_assets') ? 'open_asset_selection' : 'generate_visual_assets';
+  }
+  if (lastUser.content.includes('我已确认最终图片，请根据这些图片生成视频')) return 'generate_product_video';
+  if (lastUser.content.includes('图片与视频阶段已完成，请进入最终交付确认') || lastUser.content.includes('我已确认图片，本次不需要视频，请进入最终交付确认')) return 'open_publish_confirmation';
+  return null;
+}
+
 const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   inspect_chat_attachments: '读取本轮聊天附件并返回可供回答的文档内容、表格内容或图片理解结果。仅当用户是在询问、总结或核对附件，而不是要求创建商品上新任务时调用。',
   create_listing_task_from_attachments: '把本轮聊天附件保存为新的商品上新任务。仅当用户明确要求上新，并且已经在消息中明确指定至少一个平台和一个目标市场/站点时调用；不得使用默认平台或默认站点。',

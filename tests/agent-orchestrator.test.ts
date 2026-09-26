@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { availableAgentTools, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, withBacktrackTools } from '../lib/agents/commerce-orchestrator.ts';
+import { availableAgentTools, compactAgentModelHistory, requiredMediaToolAfterUser, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, withBacktrackTools } from '../lib/agents/commerce-orchestrator.ts';
 import { callBailianOrchestrator } from '../lib/ai/bailian-client.ts';
 import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
@@ -88,6 +88,23 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
   assert.equal(result.message.content, '先读取资料。');
   assert.deepEqual(requestBody?.tool_choice, { type: 'function', function: { name: 'parse_product_sources' } });
   assert.equal(requestBody?.parallel_tool_calls, false);
+});
+
+test('confirmed image brief generates once, then moves to image selection', () => {
+  const user = { role: 'user' as const, content: '我已确认图片生成需求，请生成图片。数量：3 张' };
+  const call = { id: 'call_image', type: 'function' as const, function: { name: 'generate_visual_assets' as const, arguments: '{}' } };
+  assert.equal(requiredMediaToolAfterUser([user]), 'generate_visual_assets');
+  assert.equal(requiredMediaToolAfterUser([user, { role: 'assistant', content: null, toolCalls: [call] }, { role: 'tool', toolCallId: 'call_image', name: 'generate_visual_assets', content: '{"ok":true}' }]), 'open_asset_selection');
+});
+
+test('retry history remains within the API limit and keeps the current request with paired tool results', () => {
+  const prior = Array.from({ length: 36 }, (_, index) => ({ role: 'user' as const, content: `旧消息 ${index}` }));
+  const call = { id: 'call_image', type: 'function' as const, function: { name: 'generate_visual_assets' as const, arguments: '{}' } };
+  const current = [{ role: 'user' as const, content: '我已确认图片生成需求，请生成图片' }, { role: 'assistant' as const, content: null, toolCalls: [call] }, { role: 'tool' as const, toolCallId: 'call_image', name: 'generate_visual_assets' as const, content: '{"ok":true}' }];
+  const result = compactAgentModelHistory([...prior, ...current], 20);
+  assert.ok(result.length <= 20);
+  assert.deepEqual(result.slice(-3), current);
+  assert.equal(result[0]?.role, 'user');
 });
 
 test('Bailian 403 exposes the provider reason and does not retry a permission error', async () => {

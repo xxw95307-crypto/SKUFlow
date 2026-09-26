@@ -11,6 +11,7 @@ import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
+import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
@@ -484,7 +485,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         taskId: taskIdOverride === undefined ? task?.id ?? null : taskIdOverride,
         status: statusOverride ?? (phase === 'complete' ? 'COMPLETED' : 'ACTIVE'),
         messages: messagesRef.current,
-        modelHistory: modelHistory.current.slice(-48),
+        modelHistory: compactAgentModelHistory(modelHistory.current),
         toolRuns: toolRunsRef.current,
         selectedAssetIds: selectedAssetsRef.current,
       }),
@@ -879,8 +880,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         selectedAssetsRef.current = [];
         setSelectedAssets([]);
         if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
+        setPhase('assets');
+        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
         markToolRun(call, 'COMPLETED');
-        return { result: { ok: true, summary: payload.summary }, checkpoint: false };
+        return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }
       if (name === 'open_asset_selection') {
         const assets = await fetchGeneratedAssets(currentTask.id);
@@ -968,14 +971,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     const retainedHistory = modelHistory.current.length > 36
       ? modelHistory.current.filter((message) => message.role === 'user' || (message.role === 'assistant' && !message.toolCalls?.length)).slice(-20)
       : modelHistory.current;
-    let history: AgentModelMessage[] = options.resumeHistory
+    let history: AgentModelMessage[] = compactAgentModelHistory(options.resumeHistory
       ? [...options.resumeHistory]
-      : [...retainedHistory, { role: 'user', content: modelUserText }];
+      : [...retainedHistory, { role: 'user', content: modelUserText }]);
     let checkpointHistory = history;
     pauseRequestedRef.current = false; setPauseRequested(false);
     setPhase('processing'); setBusyLabel('Agent 正在规划下一步…'); setBusyHint('根据任务进度决定接下来解析、理解还是生成'); setError('');
     try {
       for (let step = 0; step < 10; step += 1) {
+        history = compactAgentModelHistory(history);
         if (pauseRequestedRef.current) {
           modelHistory.current = history;
           setPhase('idle');
@@ -1075,6 +1079,19 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     try {const data=await responseJson<{passport:ProductPassport;results:Array<{market:string;verification:Array<{field:string;status:string}>}>}>(await fetch(`/api/tasks/${task.id}/verify-shopify`,{method:'POST'}),'Shopify 回读失败');setPassport(data.passport);for(const r of data.results)append('agent',`${r.market}草稿核对：${r.verification.map(v=>`${v.field}：${v.status==='MATCH'?'一致':v.status==='PENDING'?'处理中':'需要检查'}`).join('；')}`,'回读核对');await persistConversation(task.id,'COMPLETED');}catch(e){append('agent',`核对失败：${(e as Error).message}。已创建的商品不受影响。`);}
   };
   const resumeTask = async () => {
+    if (task && (phase === 'error' || phase === 'resume') && imageBriefConfirmedFromMessages(messagesRef.current) && !imagesConfirmedFromMessages(messagesRef.current)) {
+      try {
+        const available = await fetchGeneratedAssets(task.id);
+        if (available.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED')) {
+          setGeneratedAssets(available);
+          setError(''); setCanRetryFailedTurn(false); failedTurnRef.current = null;
+          setPhase('assets');
+          append('agent', '已找到保存的候选图片。请检查是否符合最新要求；不满意可以直接告诉我修改。', '等待素材选择', { kind: 'assets' });
+          await persistConversation(task.id);
+          return;
+        }
+      } catch { /* If saved images cannot be read, retry the failed step below. */ }
+    }
     const failed = failedTurnRef.current;
     if (failed) {
       await runAgentTurn(failed.task, failed.userText, {

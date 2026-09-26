@@ -1,6 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, requiredMediaToolAfterUser } from '@/lib/agents/commerce-orchestrator';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
@@ -163,13 +163,7 @@ async function handlePOST(request: Request) {
       ? restrictIntakeToolsForListingRequest(stateTools, state, [...knownTargets.platforms, ...knownTargets.markets].join(' '))
       : stateTools;
     const candidateTools = withBacktrackTools(withRegenerationTool(targetAwareTools, messages, state), messages, state);
-    const requiredNext = lastUser?.role === 'user' && lastUser.content.startsWith('我已确认图片生成需求，请生成图片')
-      ? 'generate_visual_assets'
-      : lastUser?.role === 'user' && lastUser.content.includes('我已确认最终图片，请根据这些图片生成视频')
-      ? 'generate_product_video'
-      : lastUser?.role === 'user' && (lastUser.content.includes('图片与视频阶段已完成，请进入最终交付确认') || lastUser.content.includes('我已确认图片，本次不需要视频，请进入最终交付确认'))
-        ? 'open_publish_confirmation'
-        : null;
+    const requiredNext = requiredMediaToolAfterUser(messages);
     const tools = requiredNext && candidateTools.some((item) => item.function.name === requiredNext)
       ? candidateTools.filter((item) => item.function.name === requiredNext)
       : candidateTools;
