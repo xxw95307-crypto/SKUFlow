@@ -25,15 +25,19 @@ function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
   };
 }
 
-async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null }> {
+async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null }> {
   const raw = await request.text();
-  if (!raw.trim()) return { force: false, guidance: null };
+  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null };
   try {
-    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown };
+    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown };
+    if (value.count != null && (!Number.isInteger(value.count) || (value.count as number) < 1 || (value.count as number) > 6)) {
+      throw new Error('图片数量需为 1–6 张');
+    }
     const guidance = typeof value.guidance === 'string' ? value.guidance.trim().slice(0, 500) : '';
-    return { force: value.force === true, guidance: guidance || null };
+    const style = typeof value.style === 'string' ? value.style.trim().slice(0, 200) : '';
+    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null };
   } catch {
-    throw new Error('请求 JSON 格式无效');
+    throw new Error('图片生成参数无效，请检查张数是否在 1–6 之间');
   }
 }
 
@@ -69,7 +73,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
-    if (!options.force && !options.guidance && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
+    if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
 
     const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
     if (approved.length === 0 || approved.length < passport.platformDrafts.length) {
@@ -94,6 +98,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       sourceImageCount: images.results.length,
       sourceImageIds: images.results.map(image=>image.id),
       userGuidance: options.guidance,
+      requestedCount: options.count,
+      styleGuidance: options.style,
     });
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
@@ -136,7 +142,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     return Response.json({ assets, summary, reused: false, plan: plan.assets, plannerModel: plan.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视觉素材生成失败';
-    return Response.json({ error: message }, { status: message === '请求 JSON 格式无效' ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });
+    return Response.json({ error: message }, { status: message.startsWith('图片生成参数无效') ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });
   }
 }
 

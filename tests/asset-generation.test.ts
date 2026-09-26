@@ -32,13 +32,15 @@ const facts: ProductFact[] = [{
 test('asks the planning Agent to choose category-specific assets and includes seller guidance', () => {
   const messages = buildAssetPlanningMessages({
     productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon', 'shopify'], markets: ['美国'],
-    sourceImageCount: 3, userGuidance: '希望增加一张户外通勤穿搭图',
+    sourceImageCount: 3, userGuidance: '希望增加一张户外通勤穿搭图', requestedCount: 3, styleGuidance: '清新自然',
   });
-  assert.match(messages[0].content, /总数由你判断，必须为 2–4 张/);
+  assert.match(messages[0].content, /商家指定张数时必须严格按指定张数规划/);
   assert.match(messages[0].content, /必须且只能有一张 HERO/);
   assert.match(messages[1].content, /Amazon|amazon/);
   assert.match(messages[1].content, /3 张/);
   assert.match(messages[1].content, /户外通勤穿搭图/);
+  assert.match(messages[1].content, /3 张，必须严格遵守/);
+  assert.match(messages[1].content, /清新自然/);
 });
 
 test('accepts a dynamic plan and rejects plans without exactly one main image', () => {
@@ -49,6 +51,10 @@ test('accepts a dynamic plan and rejects plans without exactly one main image', 
   ] });
   const plan = parseAssetPlan(value);
   assert.deepEqual(plan.map((item) => item.kind), ['HERO', 'MODEL', 'DETAIL']);
+  assert.equal(parseAssetPlan(value, 3).length, 3);
+  assert.throws(() => parseAssetPlan(value, 2), /按商家要求规划 2 张/);
+  const oneImage = JSON.stringify({ assets: [{ kind: 'HERO', title: '商品主图', note: '展示商品', size: '1024*1024', instruction: '完整展示商品。' }] });
+  assert.equal(parseAssetPlan(oneImage, 1).length, 1);
   assert.throws(() => parseAssetPlan(JSON.stringify({ assets: [
     { kind: 'MODEL', title: '模特图', note: '展示穿着', size: '1024*1280', instruction: '模特穿着商品。' },
     { kind: 'DETAIL', title: '细节图', note: '展示细节', size: '1024*1024', instruction: '商品细节。' },

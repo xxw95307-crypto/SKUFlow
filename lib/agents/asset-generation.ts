@@ -23,6 +23,8 @@ export interface AssetPlanningContext {
   sourceImageCount: number;
   sourceImageIds?: string[];
   userGuidance?: string | null;
+  requestedCount?: number | null;
+  styleGuidance?: string | null;
 }
 
 function plainText(value: unknown): string {
@@ -57,7 +59,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 
 规则：
 0. 商家本轮要求优先于类目建议；明确排除的图类型或场景不得再次规划。例如“不要细节图”必须排除 DETAIL 与任何细节特写，改选其他有依据的素材。不把排除要求解释成仅调整细节图。
-1. 总数由你判断，必须为 2–4 张；必须且只能有一张 HERO 商品主图。
+1. 商家指定张数时必须严格按指定张数规划（1–6 张）；未指定时由你根据商品需求判断，规划 2–4 张。必须且只能有一张 HERO 商品主图；只有一张时只规划 HERO。
 2. 其他 kind 从 LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING 中选择，可按商品需要重复同一 kind，但场景和目的不得重复。
 3. 服装可优先考虑 MODEL、穿搭场景和面料细节；家电可考虑使用场景、结构细节和尺寸感；食品可考虑包装、食用场景和质感特写。必须根据当前商品判断。
 4. size 只能是 1024*1024、1024*1280 或 1280*1024。
@@ -74,12 +76,14 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 目标市场：${context.markets.join('、') || '未指定'}
 可用原始商品图：${context.sourceImageCount} 张；可用原图ID：${(context.sourceImageIds ?? []).join("、")}
 商家本轮补充要求：${plainText(context.userGuidance) || '无，由你根据商品与平台自主判断'}
+商家指定图片数量：${context.requestedCount == null ? '未指定，由你判断' : `${context.requestedCount} 张，必须严格遵守`}
+商家指定图片风格：${plainText(context.styleGuidance) || '未指定，由你根据商品与平台自主判断'}
 
 请为这个具体商品制定素材计划。`,
   }];
 }
 
-export function parseAssetPlan(value: string): AssetGenerationSpec[] {
+export function parseAssetPlan(value: string, requestedCount?: number | null): AssetGenerationSpec[] {
   let raw: unknown;
   try {
     raw = JSON.parse(value);
@@ -90,7 +94,7 @@ export function parseAssetPlan(value: string): AssetGenerationSpec[] {
     ? (raw as { assets: unknown[] }).assets
     : [];
   const assets: AssetGenerationSpec[] = [];
-  for (const candidate of candidates.slice(0, 4)) {
+  for (const candidate of candidates.slice(0, 6)) {
     if (!candidate || typeof candidate !== 'object') continue;
     const record = candidate as Record<string, unknown>;
     const kind = plainText(record.kind).toUpperCase();
@@ -102,7 +106,10 @@ export function parseAssetPlan(value: string): AssetGenerationSpec[] {
     if (!ALLOWED_SIZES.includes(size as AssetGenerationSpec['size'])) continue;
     assets.push({ kind: kind as GeneratedAssetKind, title, note, instruction, size: size as AssetGenerationSpec['size'] });
   }
-  if (assets.length < 2 || assets.length > 4) throw new Error('视觉策划 Agent 必须规划 2–4 张素材');
+  if (requestedCount != null) {
+    if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 6) throw new Error('图片数量需为 1–6 张');
+    if (assets.length !== requestedCount || candidates.length !== requestedCount) throw new Error(`视觉策划 Agent 必须按商家要求规划 ${requestedCount} 张图片`);
+  } else if (assets.length < 2 || assets.length > 4) throw new Error('视觉策划 Agent 未获指定数量时应规划 2–4 张图片');
   if (assets.filter((asset) => asset.kind === 'HERO').length !== 1) throw new Error('视觉策划 Agent 必须且只能规划一张商品主图');
   return assets;
 }

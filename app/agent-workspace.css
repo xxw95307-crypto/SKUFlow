@@ -1033,6 +1033,131 @@ body {
   box-shadow: none;
 }
 
+.agent-shell-v2 .image-brief-conversation > .image-brief-card {
+  width: min(1040px, calc(100% - 45px));
+  border: 1px solid var(--sf-line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--sf-shadow);
+}
+
+.agent-shell-v2 .joined-action-bubble > .image-brief-card {
+  border-top: 1px solid var(--sf-line);
+}
+
+.agent-shell-v2 .image-brief-card {
+  padding: 20px 22px;
+}
+
+.agent-shell-v2 .image-brief-heading > span {
+  color: var(--sf-accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agent-shell-v2 .image-brief-heading h3 {
+  margin: 5px 0;
+  font-size: 19px;
+}
+
+.agent-shell-v2 .image-brief-heading p,
+.agent-shell-v2 .image-brief-card small,
+.agent-shell-v2 .image-brief-card footer > span {
+  margin: 0;
+  color: #6b7e77;
+  font-size: 13px;
+}
+
+.agent-shell-v2 .image-brief-fields {
+  display: grid;
+  gap: 17px;
+  margin-top: 21px;
+}
+
+.agent-shell-v2 .image-brief-fields fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.agent-shell-v2 .image-brief-fields legend,
+.agent-shell-v2 .image-brief-fields label {
+  display: block;
+  margin-bottom: 8px;
+  color: #283c34;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.agent-shell-v2 .image-brief-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-shell-v2 .image-brief-counts button {
+  min-height: 38px;
+  padding: 7px 13px;
+  border: 1px solid #d9e4df;
+  border-radius: 8px;
+  background: #fff;
+  color: #365046;
+  cursor: pointer;
+}
+
+.agent-shell-v2 .image-brief-counts button.selected {
+  border-color: #438262;
+  background: #e9f3ed;
+  color: #286346;
+  font-weight: 700;
+}
+
+.agent-shell-v2 .image-brief-fields input,
+.agent-shell-v2 .image-brief-fields textarea {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 13px;
+  border: 1px solid #d9e4df;
+  border-radius: 8px;
+  background: #fff;
+  color: #233b32;
+  font: inherit;
+  font-weight: 400;
+  resize: vertical;
+}
+
+.agent-shell-v2 .image-brief-fields input:focus,
+.agent-shell-v2 .image-brief-fields textarea:focus {
+  border-color: #438262;
+  outline: 3px solid #dfeee5;
+}
+
+.agent-shell-v2 .image-brief-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 22px;
+  padding-top: 17px;
+  border-top: 1px solid var(--sf-line);
+}
+
+.agent-shell-v2 .image-brief-card footer button {
+  min-height: 42px;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #3c7e5b;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 .agent-shell-v2 .video-stage-card {
   width: min(1040px, calc(100% - 45px));
   padding: 18px 19px 19px;

@@ -51,7 +51,8 @@ test('listing requests with explicit platform and market can create from attachm
 
 test('Agent confirms images before video and requires video-stage completion before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
-  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets']);
+  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['merge_product_facts']);
+  assert.deepEqual(availableAgentTools({ ...approved, imageBriefConfirmed: true }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets']);
   assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'open_asset_selection']);
   const selected = { ...approved, generatedAssetCount: 3, selectedAssetCount: 2, selectedImageCount: 2, imagesConfirmed: true };
   assert.ok(!availableAgentTools({ ...selected, imagesConfirmed: false }).some((item) => item.function.name === 'generate_product_video'));

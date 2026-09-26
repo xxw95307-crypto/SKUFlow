@@ -32,7 +32,9 @@ import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { platformRegistry } from '@/lib/platforms/registry';
 
-type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
+type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'image_brief' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
+
+interface ImageBrief { count: number | null; style: string; notes: string }
 
 type ChatMessage = ConversationMessage;
 
@@ -115,6 +117,12 @@ function imagesConfirmedFromMessages(messages: ChatMessage[]): boolean {
 
 function videoStageCompleteFromMessages(messages: ChatMessage[]): boolean {
   return ['视频阶段已完成', '素材选择已记录'].includes(mediaCheckpoint(messages) ?? '');
+}
+
+function imageBriefConfirmedFromMessages(messages: ChatMessage[]): boolean {
+  const latestQuestion = messages.findLastIndex((message) => message.meta === '等待图片需求');
+  const latestAnswer = messages.findLastIndex((message) => message.meta === '图片需求已确认');
+  return latestAnswer >= 0 && latestAnswer > latestQuestion;
 }
 
 const initialMessages: ChatMessage[] = [{
@@ -318,6 +326,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const [mediaPlanReady,setMediaPlanReady] = useState(false);
   const [videoRevision,setVideoRevision] = useState(0);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
+  const [imageBriefCount, setImageBriefCount] = useState<number | null>(null);
+  const [imageBriefStyle, setImageBriefStyle] = useState('');
+  const [imageBriefNotes, setImageBriefNotes] = useState('');
+  const imageBriefRef = useRef<ImageBrief | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -345,7 +357,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const railResizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
-  const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
+  const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'image_brief' || phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
 
   useEffect(() => {
     if (!publishOpen || !task || !passport) return;
@@ -415,6 +427,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     modelHistory.current = conversation.modelHistory;
     toolRunsRef.current = conversation.toolRuns;
     mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance('');
+    imageBriefRef.current = null;
+    setImageBriefCount(null); setImageBriefStyle(''); setImageBriefNotes('');
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
     setPendingFiles([]);
@@ -456,7 +470,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     const imageSelected = validSelections.some((id) => loadedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO'));
     const imagesConfirmed = imagesConfirmedFromMessages(messagesRef.current);
     const videoDone = videoStageCompleteFromMessages(messagesRef.current);
-    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (imageSelected && imagesConfirmed ? videoDone ? 'publish' : 'video' : 'assets') : generated ? 'listing' : 'resume');
+    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (imageSelected && imagesConfirmed ? videoDone ? 'publish' : 'video' : loadedAssets.some((asset) => asset.kind !== 'VIDEO') ? 'assets' : 'image_brief') : generated ? 'listing' : 'resume');
     if (conversationUpgraded) await persistConversation(loadedTask.id, conversation.status);
   };
 
@@ -584,7 +598,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     if (state.openConflictCount > 0) return setPhase('conflict');
     if (state.generatedDraftCount > 0 && state.approvedDraftCount < state.draftCount) return setPhase('listing');
     if (state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
-      return setPhase((state.selectedImageCount ?? state.selectedAssetCount) > 0 && state.imagesConfirmed ? state.videoStageComplete ? 'publish' : 'video' : state.generatedAssetCount > 0 ? 'assets' : 'processing');
+      return setPhase((state.selectedImageCount ?? state.selectedAssetCount) > 0 && state.imagesConfirmed ? state.videoStageComplete ? 'publish' : 'video' : state.generatedAssetCount > 0 ? 'assets' : 'image_brief');
     }
     setPhase('resume');
   };
@@ -847,6 +861,11 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
       }
       if (name === 'generate_visual_assets') {
+        let toolOptions: { count?: unknown; style?: unknown } = {};
+        try { toolOptions = JSON.parse(call.function.arguments || '{}') as typeof toolOptions; } catch { /* The saved seller brief remains authoritative. */ }
+        const initialBrief = requestText.startsWith('我已确认图片生成需求，请生成图片') ? imageBriefRef.current : null;
+        const requestedCount = initialBrief ? initialBrief.count : Number.isInteger(toolOptions.count) && (toolOptions.count as number) >= 1 && (toolOptions.count as number) <= 6 ? toolOptions.count as number : null;
+        const requestedStyle = initialBrief ? initialBrief.style : typeof toolOptions.style === 'string' ? toolOptions.style : '';
         setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint('会生成多张候选图片，稍后由你挑选');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
@@ -854,7 +873,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force: true, guidance: requestText }),
+          body: JSON.stringify({ force: true, guidance: requestText, count: requestedCount, style: requestedStyle }),
         }), '视觉素材生成失败');
         setGeneratedAssets(payload.assets);
         selectedAssetsRef.current = [];
@@ -975,6 +994,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             messages: history,
             selectedAssetIds: selectedAssetsRef.current,
             imagesConfirmed: imagesConfirmedFromMessages(messagesRef.current),
+            imageBriefConfirmed: imageBriefConfirmedFromMessages(messagesRef.current),
             videoStageComplete: videoStageCompleteFromMessages(messagesRef.current),
             publishApproved: options.publishApproved === true,
             intakePresented: phase === 'intake' || toolRunsRef.current.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED'),
@@ -1098,18 +1118,37 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   };
 
   const refreshAfterListing = async () => {
-    if (!task) return;
+    if (!task) return false;
     try {
       const currentPassport = await fetchPassport(task.id);
       setPassport(currentPassport);
       const allApproved = currentPassport.platformDrafts.length > 0 && currentPassport.platformDrafts.every((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
-      setPhase(allApproved ? 'assets' : 'listing');
-    } catch { /* Listing editor already reports its own errors. */ }
+      setPhase(allApproved ? 'image_brief' : 'listing');
+      return allApproved;
+    } catch { return false; /* Listing editor already reports its own errors. */ }
   };
 
   const proceedToAssets = async () => {
-    await refreshAfterListing();
-    if (task) await runAgentTurn(task, '我已确认所有平台 Listing，请继续。', { appendUser: false });
+    if (!await refreshAfterListing() || !task) return;
+    try {
+      const available = await fetchGeneratedAssets(task.id);
+      setGeneratedAssets(available);
+      if (available.some((asset) => asset.kind !== 'VIDEO')) { setPhase('assets'); return; }
+      setPhase('image_brief');
+      if (messagesRef.current.at(-1)?.meta !== '等待图片需求') {
+        append('agent', 'Listing 已确认。生成图片前，你希望要几张？想要什么风格或场景？也可以交给我根据商品和平台规划。', '等待图片需求');
+        await persistConversation(task.id);
+      }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '图片生成准备失败'); }
+  };
+
+  const submitImageBrief = async (notesOverride?: string, countOverride?: number | null) => {
+    if (!task || phase === 'processing') return;
+    const brief: ImageBrief = { count: countOverride === undefined ? imageBriefCount : countOverride, style: imageBriefStyle.trim(), notes: (notesOverride ?? imageBriefNotes).trim() };
+    imageBriefRef.current = brief;
+    const request = `我已确认图片生成需求，请生成图片。数量：${brief.count == null ? '由 Agent 决定' : `${brief.count} 张`}；风格：${brief.style || '由 Agent 决定'}；其他要求：${brief.notes || '无'}。只生成图片，等我确认图片后再生成视频。`;
+    append('user', request, '图片需求已确认');
+    await runAgentTurn(task, request, { appendUser: false });
   };
 
   const confirmAssets = async (skipVideo = false) => {
@@ -1222,6 +1261,14 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const sendMessage = async () => {
     const typedText = composer.trim();
     if (!typedText && pendingFiles.length === 0) return;
+    if (phase === 'image_brief' && typedText && pendingFiles.length === 0 && !/改.{0,6}(平台|站点|市场)|重新解析|重新看图|改.{0,6}listing/i.test(typedText)) {
+      const countMatch = typedText.match(/([1-6一二三四五六])\s*张/);
+      const chineseCounts: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+      const count = countMatch ? chineseCounts[countMatch[1]] ?? Number(countMatch[1]) : imageBriefCount;
+      setComposer('');
+      await submitImageBrief(typedText, count);
+      return;
+    }
     const text = typedText || '请查看我随消息发送的这些附件。';
     const filesForTurn = [...pendingFiles];
     setComposer('');
@@ -1243,6 +1290,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const publishedCount = passport?.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length ?? 0;
   const showWelcomeWorkspace = phase === 'idle' && messages.length === 1 && messages[0]?.id === 'welcome';
   const joinIntakeToLastAgentReply = phase === 'intake' && messages.at(-1)?.role === 'agent';
+  const joinImageBriefToLastAgentReply = phase === 'image_brief' && messages.at(-1)?.role === 'agent' && messages.at(-1)?.meta === '等待图片需求';
   const joinAssetsToLastAgentReply = phase === 'assets' && messages.at(-1)?.role === 'agent'
     && messages.at(-1)?.meta === '等待素材选择';
   const joinVideoToLastAgentReply = phase === 'video' && messages.at(-1)?.role === 'agent'
@@ -1251,6 +1299,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     ? selectedAssets.filter((id) => id.startsWith('asset_')) : undefined;
 
   const intakeCard = phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>;
+  const imageBriefCard = phase === 'image_brief' && <div className="image-brief-card">
+    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。</p></div>
+    <div className="image-brief-fields">
+      <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>至少包含一张商品主图；其余图片按你的要求规划。</small></fieldset>
+      <label>图片风格<input value={imageBriefStyle} onChange={(event) => setImageBriefStyle(event.target.value)} maxLength={200} placeholder="例如：自然生活感、简洁高级、户外通勤" /></label>
+      <label>其他要求<textarea rows={3} value={imageBriefNotes} onChange={(event) => setImageBriefNotes(event.target.value)} maxLength={500} placeholder="例如：不要细节图；希望有一张真人穿搭图" /></label>
+    </div>
+    <footer><span>先生成并确认图片，再开始视频</span><button type="button" onClick={() => void submitImageBrief()}>{imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
+  </div>;
   const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} />;
   const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} /><footer><span>跳过后不加入交付包，已启动的视频任务不会取消</span><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认视频并继续</button></footer></div>;
 
@@ -1260,8 +1317,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     ? 'Agent 正在执行工具...'
     : pendingFiles.length
       ? '告诉 Agent 要处理附件，还是用这些资料上新...'
-      : phase === 'idle'
-        ? '描述你要上新的商品、目标平台，或先上传商品资料...'
+        : phase === 'idle'
+          ? '描述你要上新的商品、目标平台，或先上传商品资料...'
+        : phase === 'image_brief'
+          ? '也可以直接描述图片数量、风格和其他要求...'
         : phase === 'assets'
           ? '图片不满意可以直接说：换成户外场景、不要模特...'
           : phase === 'video'
@@ -1347,9 +1406,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
           {!showWelcomeWorkspace && messages.map((message, index) => {
             const joinsIntake = joinIntakeToLastAgentReply && index === messages.length - 1;
+            const joinsImageBrief = joinImageBriefToLastAgentReply && index === messages.length - 1;
             const joinsAssets = joinAssetsToLastAgentReply && index === messages.length - 1;
             const joinsVideo = joinVideoToLastAgentReply && index === messages.length - 1;
-            const joinsAction = joinsIntake || joinsAssets || joinsVideo;
+            const joinsAction = joinsIntake || joinsImageBrief || joinsAssets || joinsVideo;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
             const displayedMessage = currentListingMessage(message, passport);
             return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}`} key={message.id}>
@@ -1357,6 +1417,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
               <div className={`${richClass}${joinsAction ? ' joined-action-bubble' : ''}`}>
                 {joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
                 {joinsIntake && intakeCard}
+                {joinsImageBrief && imageBriefCard}
                 {joinsAssets && assetCard}
                 {joinsVideo && videoCard}
               </div>
@@ -1397,6 +1458,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           {phase === 'conflict' && passport && <ConflictConversationCard passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} />}
 
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} onPassportChange={setPassport} conversation /></article>}
+
+          {phase === 'image_brief' && !joinImageBriefToLastAgentReply && <article className="chat-message agent image-brief-conversation"><span className="chat-avatar">AI</span>{imageBriefCard}</article>}
 
           {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
           {phase === 'assets' && !joinAssetsToLastAgentReply && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span>{assetCard}</article>}

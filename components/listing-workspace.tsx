@@ -198,7 +198,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
           setDetailsOpen(false);
           setMessage('该平台 Listing 已确认，接下来请确认下一份。');
         } else {
-          setMessage('所有平台 Listing 均已确认，Agent 将继续生成视觉素材。');
+          setMessage('所有平台 Listing 均已确认，接下来先确认图片生成要求。');
           onAssets();
         }
       } else {

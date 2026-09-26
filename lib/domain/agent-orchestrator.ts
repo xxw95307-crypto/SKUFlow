@@ -55,6 +55,7 @@ export interface AgentWorkflowState {
   approvedDraftCount: number;
   publishedDraftCount: number;
   generatedAssetCount: number;
+  imageBriefConfirmed?: boolean;
   selectedAssetCount: number;
   selectedImageCount?: number;
   imagesConfirmed?: boolean;

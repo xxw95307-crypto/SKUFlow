@@ -498,7 +498,7 @@ export async function callBailianAssetPlanning(
         response_format: { type: 'json_object' },
         enable_thinking: false,
         temperature: 0.35,
-        max_completion_tokens: 2_048,
+        max_completion_tokens: 3_072,
         stream: false,
       }),
       signal: controller.signal,
@@ -511,7 +511,7 @@ export async function callBailianAssetPlanning(
     const content = responseText(payload.choices?.[0]?.message?.content);
     if (!content) throw new Error('百炼视觉策划返回内容为空');
     return {
-      assets: parseAssetPlan(content),
+      assets: parseAssetPlan(content, context.requestedCount),
       model: payload.model || model,
       usage: normalizeUsage(payload.usage),
       requestId: payload.id || response.headers.get('x-request-id'),

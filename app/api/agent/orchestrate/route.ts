@@ -22,6 +22,7 @@ interface RequestBody {
   messages?: unknown;
   selectedAssetIds?: unknown;
   imagesConfirmed?: unknown;
+  imageBriefConfirmed?: unknown;
   videoStageComplete?: unknown;
   publishApproved?: unknown;
   requireAction?: unknown;
@@ -85,6 +86,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0, resolvedConflictCount: 0,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
     generatedAssetCount: 0,
+    imageBriefConfirmed: body.imageBriefConfirmed === true,
     selectedAssetCount: 0, selectedImageCount: 0, imagesConfirmed: body.imagesConfirmed === true, videoJobCount: 0,
     videoStageComplete: body.videoStageComplete === true, publishApproved: body.publishApproved === true,
   };
@@ -124,6 +126,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     publishedDraftCount: passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length,
     videoCandidates: videos.results.map((v,index)=>{const p=JSON.parse(v.plan_json);return {id:v.id,title:p.title,duration:p.duration,ordinal:index+1};}),
     generatedAssetCount: completedAssets.length + videos.results.length,
+    imageBriefConfirmed: body.imageBriefConfirmed === true,
     selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length + videos.results.filter(v=>selectedAssetIds.has(v.id)).length,
     selectedImageCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length,
     imagesConfirmed: body.imagesConfirmed === true,
@@ -160,7 +163,9 @@ async function handlePOST(request: Request) {
       ? restrictIntakeToolsForListingRequest(stateTools, state, [...knownTargets.platforms, ...knownTargets.markets].join(' '))
       : stateTools;
     const candidateTools = withBacktrackTools(withRegenerationTool(targetAwareTools, messages, state), messages, state);
-    const requiredNext = lastUser?.role === 'user' && lastUser.content.includes('我已确认最终图片，请根据这些图片生成视频')
+    const requiredNext = lastUser?.role === 'user' && lastUser.content.startsWith('我已确认图片生成需求，请生成图片')
+      ? 'generate_visual_assets'
+      : lastUser?.role === 'user' && lastUser.content.includes('我已确认最终图片，请根据这些图片生成视频')
       ? 'generate_product_video'
       : lastUser?.role === 'user' && (lastUser.content.includes('图片与视频阶段已完成，请进入最终交付确认') || lastUser.content.includes('我已确认图片，本次不需要视频，请进入最终交付确认'))
         ? 'open_publish_confirmation'
