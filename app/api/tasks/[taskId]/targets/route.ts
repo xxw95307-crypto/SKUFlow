@@ -3,6 +3,8 @@ import { ensureSchema, getBindings } from '@/db/client';
 import { platformRegistry } from '@/lib/platforms/registry';
 import type { PlatformId } from '@/lib/domain/platform';
 import type { TaskSnapshot } from '@/lib/domain/task';
+import { targetsFromSharedSelection, validatePlatformTargets, type PlatformTarget } from '@/lib/platforms/market-options';
+import { ensureProductPassport } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,18 +58,21 @@ async function handlePUT(request: Request, context: { params: Promise<{ taskId: 
   try {
     await ensureSchema();
     const { taskId } = await context.params;
-    const body = await request.json() as { platforms?: unknown; markets?: unknown };
-    const platforms = cleanList(body.platforms, (item) => item.toLowerCase());
-    const markets = cleanList(body.markets, (item) => item.toUpperCase());
-    if (platforms.length === 0 || markets.length === 0) {
+    const body = await request.json() as { platforms?: unknown; markets?: unknown; targets?: unknown };
+    const requestedPlatforms = cleanList(body.platforms, (item) => item.toLowerCase());
+    const requestedMarkets = cleanList(body.markets, (item) => item);
+    if (!body.targets && (requestedPlatforms.length === 0 || requestedMarkets.length === 0)) {
       return Response.json({ error: '平台列表和市场列表都不能为空' }, { status: 400 });
     }
     const knownIds = new Set(platformRegistry.map((profile) => profile.id));
-    const invalid = platforms.find((item) => !knownIds.has(item as PlatformId));
+    const invalid = requestedPlatforms.find((item) => !knownIds.has(item as PlatformId));
     if (invalid) return Response.json({ error: `不支持的平台：${invalid}` }, { status: 400 });
-    if (platforms.length * markets.length > 24) {
-      return Response.json({ error: '平台与市场组合不能超过 24 个' }, { status: 400 });
-    }
+    if (body.targets && (!Array.isArray(body.targets) || body.targets.some((item) => !item || typeof item !== 'object' || typeof item.platformId !== 'string' || typeof item.market !== 'string'))) return Response.json({ error: '平台与站点配对格式无效' }, { status: 400 });
+    const targets = body.targets
+      ? validatePlatformTargets(body.targets as PlatformTarget[])
+      : targetsFromSharedSelection(requestedPlatforms as PlatformId[], requestedMarkets);
+    const platforms = [...new Set(targets.map((target) => target.platformId))];
+    const markets = [...new Set(targets.map((target) => target.market))];
 
     const { DB } = getBindings();
     const current = await DB.prepare('SELECT id FROM tasks WHERE id = ?').bind(taskId).first<{ id: string }>();
@@ -81,19 +86,25 @@ async function handlePUT(request: Request, context: { params: Promise<{ taskId: 
     }
 
     const now = new Date().toISOString();
-    // 更新目标并作废全部未发布的审校稿：目标变了，旧稿字段结构不再可信，
-    // 由编排器在下一轮根据新的 platform × market 组合重新生成。
+    await ensureProductPassport(DB, taskId);
+    const passport = await DB.prepare('SELECT id FROM product_passports WHERE task_id = ? ORDER BY version DESC LIMIT 1').bind(taskId).first<{ id: string }>();
+    if (!passport) throw new Error('商品档案不存在');
+    // Invalidate old reviews and recreate only the selected platform-market pairs.
     await DB.batch([
       DB.prepare('UPDATE tasks SET markets_json = ?, platforms_json = ?, updated_at = ? WHERE id = ?')
         .bind(JSON.stringify(markets), JSON.stringify(platforms), now, taskId),
       DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId),
+      ...targets.map((target) => DB.prepare(`INSERT INTO platform_drafts
+        (id,task_id,passport_id,platform_id,market,locale,category_id,status,schema_version,payload_json,validation_json,created_at,updated_at)
+        VALUES (?,?,?,?,?,'und',NULL,'PLANNED',NULL,'{}','[]',?,?)`)
+        .bind(`draft_${crypto.randomUUID()}`, taskId, passport.id, target.platformId, target.market, now, now)),
     ]);
 
     return Response.json({ task: await getTask(taskId), invalidatedDrafts: true });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : 'Unable to update task targets' },
-      { status: 500 },
+      { status: error instanceof Error && /站点|平台|组合/.test(error.message) ? 400 : 500 },
     );
   }
 }

@@ -46,6 +46,12 @@ const marketMatchers: Array<[string, RegExp]> = [
   ['阿联酋', /阿联酋|united\s*arab\s*emirates/i],
   ['印度', /印度|india/i],
   ['澳大利亚', /澳大利亚|澳洲|australia/i],
+  ['马来西亚', /马来西亚|malaysia/i],
+  ['泰国', /泰国|thailand/i],
+  ['越南', /越南|vietnam/i],
+  ['菲律宾', /菲律宾|philippines/i],
+  ['印度尼西亚', /印度尼西亚|印尼|indonesia/i],
+  ['中国台湾', /中国台湾|台湾站|taiwan/i],
 ];
 
 export function inferIntakeTargets(message: string): IntakeTargets {

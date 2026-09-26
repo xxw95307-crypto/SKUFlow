@@ -4,12 +4,18 @@ import { useRef, useState } from 'react';
 import type { PlatformId } from '@/lib/domain/platform';
 import { TASK_STATUS_LABELS, type TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
-import { amazonMarkets } from '@/lib/platforms/amazon-markets';
+import { marketOptionsForPlatform, normalizeMarket, type PlatformTarget } from '@/lib/platforms/market-options';
 
 const richMockPlatforms = new Set<PlatformId>(['amazon', 'tiktok-shop', 'shopify', 'shopee']);
 
-const marketOptions = amazonMarkets.map((market) => market.label);
 const acceptedTypes = '.jpg,.jpeg,.png,.webp,.pdf,.xlsx,.xls,.csv,.txt,.docx';
+
+function initialSelections(initialTargets?: { platforms: PlatformId[]; markets: string[] }): Partial<Record<PlatformId, string[]>> {
+  if (!initialTargets || (initialTargets.platforms.length > 1 && initialTargets.markets.length > 1)) return {};
+  return Object.fromEntries(initialTargets.platforms.map((platformId) => [platformId,
+    initialTargets.markets.map(normalizeMarket).filter((market) => marketOptionsForPlatform(platformId).includes(market)),
+  ])) as Partial<Record<PlatformId, string[]>>;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -23,8 +29,9 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
   initialTargets?: { platforms: PlatformId[]; markets: string[] };
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [markets, setMarkets] = useState<string[]>(initialTargets?.markets ?? []);
   const [platforms, setPlatforms] = useState<PlatformId[]>(initialTargets?.platforms ?? []);
+  const [marketSelections, setMarketSelections] = useState<Partial<Record<PlatformId, string[]>>>(() => initialSelections(initialTargets));
+  const [expandedMarkets, setExpandedMarkets] = useState<PlatformId[]>([]);
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,8 +51,11 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
     setPlatforms((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
 
-  const toggleMarket = (market: string) => {
-    setMarkets((current) => current.includes(market) ? current.filter((item) => item !== market) : [...current, market]);
+  const toggleMarket = (platformId: PlatformId, market: string) => {
+    setMarketSelections((current) => {
+      const selected = current[platformId] ?? [];
+      return { ...current, [platformId]: selected.includes(market) ? selected.filter((item) => item !== market) : [...selected, market] };
+    });
   };
 
   const generatePassport = async (currentTask: TaskSnapshot) => {
@@ -73,7 +83,11 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
 
   const createTask = async () => {
     if (files.length === 0) return setError('请先选择至少一个商品资料文件。');
-    if (platforms.length === 0 || markets.length === 0) return setError('请至少选择一个目标市场和一个平台。');
+    if (platforms.length === 0) return setError('请至少选择一个目标平台。');
+    const incomplete = platforms.find((platformId) => !(marketSelections[platformId]?.length));
+    if (incomplete) return setError(`请为 ${platformRegistry.find((item) => item.id === incomplete)?.shortName ?? incomplete} 选择目标站点。`);
+    const targets: PlatformTarget[] = platforms.flatMap((platformId) => (marketSelections[platformId] ?? []).map((market) => ({ platformId, market })));
+    const markets = [...new Set(targets.map((target) => target.market))];
     setBusy(true);
     setError('');
     try {
@@ -81,6 +95,7 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
       const body = new FormData();
       body.set('markets', JSON.stringify(markets));
       body.set('platforms', JSON.stringify(platforms));
+      body.set('targets', JSON.stringify(targets));
       files.forEach((file) => body.append('files', file));
 
       const response = await fetch('/api/tasks', { method: 'POST', body });
@@ -117,8 +132,15 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
     {!agentManaged && <div className="single-product-note"><b>一次任务对应一个商品</b><span>无需提前填写商品名称。请把该商品的图片、参数表、说明书和其他资料一起上传，模型会自动命名、合并属性并检查冲突。</span></div>}
 
     <div className="intake-fields">
-      {(!agentManaged || !initialTargets?.markets.length) && <fieldset><legend>目标市场 <small>Amazon 已覆盖官方列出的 23 个站点沙箱入口</small></legend><div className="choice-row">{marketOptions.map((market) => <button type="button" className={markets.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(market)} key={market}>{market}</button>)}</div></fieldset>}
-      {(!agentManaged || !initialTargets?.platforms.length) && <fieldset><legend>目标平台 <small>按平台能力执行测试交付</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{platform.id === 'amazon' ? '23 站点 · 官方静态沙箱' : platform.id === 'shopify' ? 'Dev Store 实际字段' : richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>}
+      <fieldset><legend>目标平台 <small>可多选，再分别指定站点</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{platform.id === 'amazon' ? '官方静态沙箱' : platform.id === 'shopify' ? 'Dev Store 实际字段' : richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>
+      {platforms.length === 0 ? <p className="market-selection-empty">先选择平台，再查看该平台可选的目标站点。</p> : <fieldset><legend>目标站点 <small>每个平台分别选择，不会生成无关组合</small></legend><div className="platform-market-list">{platforms.map((platformId) => {
+        const profile = platformRegistry.find((item) => item.id === platformId);
+        const options = marketOptionsForPlatform(platformId);
+        const selected = marketSelections[platformId] ?? [];
+        const expanded = expandedMarkets.includes(platformId);
+        const visible = options.length > 12 && !expanded ? options.filter((market, index) => index < 8 || selected.includes(market)) : options;
+        return <section className="platform-market-group" key={platformId}><div className="platform-market-head"><b>{profile?.shortName ?? platformId}</b><span>{selected.length ? `已选 ${selected.length} 个站点` : '请选择站点'}</span></div><div className="choice-row">{visible.map((market) => <button type="button" aria-pressed={selected.includes(market)} className={selected.includes(market) ? 'selected' : ''} onClick={() => toggleMarket(platformId, market)} key={market}>{market}</button>)}{options.length > 12 && <button type="button" className="market-expand" onClick={() => setExpandedMarkets((current) => expanded ? current.filter((item) => item !== platformId) : [...current, platformId])}>{expanded ? '收起' : `更多站点（${options.length - 8}）`}</button>}</div>{platformId === 'shopify' || platformId === 'woocommerce' ? <small className="market-help">这是内容本地化目标；实际销售范围取决于你的店铺设置。</small> : platformId !== 'amazon' ? <small className="market-help">当前可选的演示市场；该平台尚未接入真实发布。</small> : <small className="market-help">按所选站点接入对应区域的 Amazon 官方静态沙箱。</small>}</section>;
+      })}</div></fieldset>}
     </div>
 
     <input ref={fileInput} className="visually-hidden" type="file" multiple accept={acceptedTypes} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} />

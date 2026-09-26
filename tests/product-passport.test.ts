@@ -28,3 +28,13 @@ test('recognizes only supported fact states', () => {
   assert.equal(isFactStatus('CONFLICT'), true);
   assert.equal(isFactStatus('READY'), false);
 });
+
+test('explicit platform targets create only seller-selected drafts', () => {
+  let sequence = 0;
+  const passport = createInitialProductPassport({
+    taskId: 'task_selected', platforms: ['amazon', 'shopee'], markets: ['美国', '新加坡'],
+    targets: [{ platformId: 'amazon', market: '美国' }, { platformId: 'shopee', market: '新加坡' }],
+    now: '2026-09-26T00:00:00.000Z', idFactory: () => `id-${++sequence}`,
+  });
+  assert.deepEqual(passport.platformDrafts.map((draft) => `${draft.platformId}:${draft.market}`), ['amazon:美国', 'shopee:新加坡']);
+});

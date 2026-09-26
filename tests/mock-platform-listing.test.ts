@@ -55,6 +55,13 @@ test('Amazon draft shows the selected store currency and locale', () => {
   }
 });
 
+test('regional mock platforms show each market currency rather than a fixed default', () => {
+  const thaiShopee = resolveMockListingSchema({ platformId: 'shopee', market: '泰国' });
+  assert.equal(thaiShopee.fields.find((field) => field.key === 'price')?.unit, 'THB');
+  const brazilTikTok = resolveMockListingSchema({ platformId: 'tiktok-shop', market: '巴西' });
+  assert.equal(brazilTikTok.fields.find((field) => field.key === 'price')?.unit, 'BRL');
+});
+
 test('registered long-tail platforms receive a generic Mock Schema', () => {
   const schema = resolveMockListingSchema({ platformId: 'ebay', market: '英国' });
   assert.equal(schema.platformId, 'ebay');

@@ -1,8 +1,7 @@
 import type { ListingFieldDefinition, MockListingSchema } from '../domain/listing';
 import type { PlatformId } from '../domain/platform';
 import { getPlatformProfile } from '../platforms/registry.ts';
-import { marketLocale } from '../localization/market-locales.ts';
-import { findAmazonMarket } from '../platforms/amazon-markets.ts';
+import { marketCurrency, marketLocale } from '../localization/market-locales.ts';
 
 const fact = (key: string, label: string, factKey: string, required = false, extra: Partial<ListingFieldDefinition> = {}): ListingFieldDefinition => ({
   key, label, factKey, required, source: 'PRODUCT_FACT', type: 'string', ...extra,
@@ -120,7 +119,7 @@ export function resolveMockListingSchema(input: {
     categoryId,
     categoryLabel,
     schemaVersion: `mock-${input.platformId}-${marketLocale(input.market).locale.toLowerCase()}-v3`,
-    fields: fieldsFor(input.platformId).map((field) => ({ ...field, ...(input.platformId === 'amazon' && field.key === 'standard_price' ? { unit: findAmazonMarket(input.market)?.currency ?? 'USD' } : {}) })),
+    fields: fieldsFor(input.platformId).map((field) => ({ ...field, ...(['standard_price', 'variant_price', 'price'].includes(field.key) && marketCurrency(input.market) ? { unit: marketCurrency(input.market)! } : {}) })),
   };
 }
 

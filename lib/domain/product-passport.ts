@@ -1,4 +1,5 @@
 import type { PlatformId } from './platform';
+import type { PlatformTarget } from '../platforms/market-options';
 
 export const FACT_STATUSES = ['CONFIRMED', 'EXTRACTED', 'CONFLICT', 'MISSING'] as const;
 export type FactStatus = (typeof FACT_STATUSES)[number];
@@ -154,6 +155,7 @@ export interface InitialPassportInput {
   taskId: string;
   platforms: PlatformId[];
   markets: string[];
+  targets?: PlatformTarget[];
   now?: string;
   idFactory?: () => string;
 }
@@ -171,8 +173,8 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
 
   const evidence: EvidenceRecord[] = [];
 
-  const platformDrafts: PlatformDraft[] = input.platforms.flatMap((platformId) =>
-    input.markets.map((market) => ({
+  const selectedTargets = input.targets ?? input.platforms.flatMap((platformId) => input.markets.map((market) => ({ platformId, market })));
+  const platformDrafts: PlatformDraft[] = selectedTargets.map(({ platformId, market }) => ({
       id: `draft_${makeId()}`,
       taskId: input.taskId,
       passportId,
@@ -186,8 +188,7 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
       validationIssues: [],
       createdAt: now,
       updatedAt: now,
-    })),
-  );
+    }));
 
   return {
     id: passportId,

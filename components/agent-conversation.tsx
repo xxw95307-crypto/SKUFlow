@@ -11,6 +11,7 @@ import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
+import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
   AgentModelMessage,
@@ -588,8 +589,14 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         setBusyLabel('Agent 正在安全保存资料并创建商品任务…'); setBusyHint('资料加密存储，任务随时可在左侧会话找回');
         const body = new FormData();
         const targets = inferConversationTargets(modelHistory.current);
-        if (!targets.platforms.length || !targets.markets.length) {
-          throw new Error('请先明确目标平台和市场，现有附件会保留。');
+        let targetError = '';
+        try { targetsFromSharedSelection(targets.platforms, targets.markets); }
+        catch (error) { targetError = error instanceof Error ? error.message : '请分别指定平台和站点'; }
+        if (targetError) {
+          setPhase('intake');
+          append('agent', `${targetError}。已收到的 ${attachmentFiles.length} 份资料会保留，请在下方为每个平台选择站点。`, '补充目标站点');
+          markToolRun(call, 'COMPLETED');
+          return { result: { ok: true, presented: true }, checkpoint: true };
         }
         body.set('platforms', JSON.stringify(targets.platforms));
         body.set('markets', JSON.stringify(targets.markets));
@@ -629,13 +636,17 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (name === 'start_listing_workflow') {
         const targets = inferConversationTargets(modelHistory.current);
-        if (attachmentFiles.length && targets.platforms.length && targets.markets.length) {
+        let canCreateDirectly = false;
+        if (targets.platforms.length && targets.markets.length) {
+          try { targetsFromSharedSelection(targets.platforms, targets.markets); canCreateDirectly = true; } catch { /* use the platform-specific selection card */ }
+        }
+        if (attachmentFiles.length && canCreateDirectly) {
           markToolRun(call, 'COMPLETED');
           return executeTool({ ...call, function: { name: 'create_listing_task_from_attachments', arguments: '{}' } }, currentTask, publishApproved, attachmentFiles, requestText);
         }
         setPhase('intake');
         const missing = [!targets.platforms.length ? '目标平台' : '', !targets.markets.length ? '目标市场' : '', !attachmentFiles.length ? '商品资料' : ''].filter(Boolean);
-        append('agent', `${attachmentFiles.length ? `已收到 ${attachmentFiles.length} 份商品资料，无需重复上传。` : ''}还需要确认${missing.join('、')}。你可以直接在对话里告诉我，也可以使用下方选择卡。`, '仅补充缺失信息');
+        append('agent', `${attachmentFiles.length ? `已收到 ${attachmentFiles.length} 份商品资料，无需重复上传。` : ''}还需要确认${missing.length ? missing.join('、') : '各平台对应的目标站点'}。你可以直接在对话里告诉我，也可以使用下方选择卡。`, '仅补充缺失信息');
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }

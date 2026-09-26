@@ -23,6 +23,7 @@ test('market determines the real publication locale', () => {
   assert.equal(marketLocale('德国').locale, 'de-DE');
   assert.equal(marketLocale('加拿大').locale, 'en-CA');
   assert.equal(marketLocale('法国').locale, 'fr-FR');
+  assert.equal(marketLocale('泰国').locale, 'th-TH');
   assert.equal(marketLocale('未知市场').locale, 'en-US');
 });
 

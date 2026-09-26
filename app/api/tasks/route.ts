@@ -5,6 +5,7 @@ import type { PlatformId } from '@/lib/domain/platform';
 import { createInitialProductPassport } from '@/lib/domain/product-passport';
 import { PENDING_PRODUCT_NAME, type TaskFile, type TaskSnapshot, type TaskStatus } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
+import { targetsFromSharedSelection, validatePlatformTargets, type PlatformTarget } from '@/lib/platforms/market-options';
 import { prepareInitialPassportWrites } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
@@ -99,14 +100,24 @@ async function handlePOST(request: Request) {
     const inferredTargets = inferIntakeTargets(requestText);
     const marketField = form.get('markets');
     const platformField = form.get('platforms');
-    const markets = marketField === null ? inferredTargets.markets : parseStringArray(marketField, 'markets');
-    const platforms = (platformField === null ? inferredTargets.platforms : parseStringArray(platformField, 'platforms')) as PlatformId[];
+    const requestedMarkets = marketField === null ? inferredTargets.markets : parseStringArray(marketField, 'markets');
+    const requestedPlatforms = (platformField === null ? inferredTargets.platforms : parseStringArray(platformField, 'platforms')) as PlatformId[];
+    const targetField = form.get('targets');
+    const explicitTargets = typeof targetField === 'string' ? JSON.parse(targetField) as unknown : null;
+    if (explicitTargets !== null && (!Array.isArray(explicitTargets) || explicitTargets.some((item) => !item || typeof item !== 'object' || typeof item.platformId !== 'string' || typeof item.market !== 'string'))) {
+      throw new Error('平台与站点配对格式无效');
+    }
+    const targets = explicitTargets !== null
+      ? validatePlatformTargets(explicitTargets as PlatformTarget[])
+      : targetsFromSharedSelection(requestedPlatforms, requestedMarkets);
+    const markets = [...new Set(targets.map((target) => target.market))];
+    const platforms = [...new Set(targets.map((target) => target.platformId))];
     const files = form.getAll('files').filter((entry): entry is File => entry instanceof File);
 
     if (markets.length === 0 || markets.length > 8) throw new Error('请选择 1-8 个目标市场');
     if (platforms.length === 0 || platforms.length > platformRegistry.length) throw new Error('请至少选择一个目标平台');
     if (platforms.some((id) => !platformIds.has(id))) throw new Error('包含未知平台');
-    if (platforms.length * markets.length > 24) throw new Error('平台与市场组合不能超过 24 个');
+    if (targets.length > 24) throw new Error('平台与市场组合不能超过 24 个');
     if (files.length === 0 || files.length > MAX_FILE_COUNT) throw new Error(`请上传 1-${MAX_FILE_COUNT} 个资料文件`);
 
     files.forEach(validateFile);
@@ -115,7 +126,7 @@ async function handlePOST(request: Request) {
 
     const taskId = `task_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    const initialPassport = createInitialProductPassport({ taskId, platforms, markets, now });
+    const initialPassport = createInitialProductPassport({ taskId, platforms, markets, targets, now });
     const storedFiles: Array<TaskFile & { objectKey: string }> = [];
 
     for (const file of files) {
