@@ -47,11 +47,12 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_platform_listings: '读取所选平台字段（Shopify 使用真实接口），并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
-  generate_visual_assets: '按商家本轮任何具体视觉要求规划并生成商品图片；不得套用默认图种。若只修改已有图片，结合 imageCandidates 判断目标，在 targetIndices 填 1 起始序号，其他图片保持不变。要求整组重做时省略 targetIndices。绝不触发视频模型。',
+  generate_visual_assets: '分析商家本轮图片要求后规划并生成图片。必须明确 scope：FULL_SET 表示首次生成或重做整组；SELECTED 表示只修改已有图片，并在 targetIndices 填当前图片的 1 起始序号。图片目标、数量、人物和风格由你从自然语言判断，不得套用默认图种或触发视频模型。',
   generate_product_video: '商家确认最终图片后，使用已选图片作为首帧，规划并开始生成商品视频。仅首次生成或图片重新确认后调用。',
   revise_product_video: '依据已选图片、上一条视频方案和商家本轮要求重新规划并生成一条商品视频；仅修改视频时使用，保留已有图片。',
   trim_product_video: '自动裁剪已有视频并返回结果，不展示裁剪卡、时间输入或操作按钮，不调用生成模型、不重做图片。中央Agent根据用户的大致时间和视频时长决定start/end（秒）。videoId必须引用可信视频ID。仅目标视频确实无法判断时先自然语言询问。',
   open_asset_selection: '向商家展示已经真实生成并保存的候选图片，让商家确认最终图片，再进入视频阶段。',
+  revise_media_order: '仅在图片与视频选择完成后，按商家本轮自然语言要求重新规划封面或图片／视频顺序；不重新生成图片或视频。',
   open_publish_confirmation: '展示最终发布确认卡；调用此工具不会发布。',
   publish_mock_drafts: '在商家明确确认后创建平台测试草稿：Shopify 使用官方 Dev Store API 创建未公开 DRAFT，其他平台暂时使用本地 Mock。',
 };
@@ -67,7 +68,7 @@ function tool(name: AgentToolName): AgentToolDefinition {
         properties: name === 'trim_product_video'
           ? { videoId:{type:'string',description:'要裁剪的可信视频ID；不确定则省略'},start:{type:'number',description:'Agent决定的保留起点秒数；省略为0'},end:{type:'number',description:'Agent决定的保留终点秒数；省略为原视频终点'} }
           : name === 'generate_visual_assets'
-            ? { count: { type: 'integer', description: '首次生成或整组重做时商家明确指定的总张数，1–6；局部修改时不要填写' }, style: { type: 'string', description: '商家指定的图片风格，未指定则省略' }, targetIndices: { type: 'array', items: { type: 'integer' }, description: '只修改指定图片时填写当前图片顺序（从 1 开始），例如“第三张改成海报”填 [3]；整组重做时省略' } }
+            ? { scope: { type: 'string', enum: ['FULL_SET', 'SELECTED'], description: 'FULL_SET 为首次生成、重新生成整组或改变总张数；SELECTED 为只改已有图片中的指定几张' }, count: { type: 'integer', description: '仅 FULL_SET 且商家明确指定总张数时填写，1–6；局部修改时省略' }, style: { type: 'string', description: '商家指定的图片风格，未指定则省略' }, targetIndices: { type: 'array', items: { type: 'integer' }, description: '仅 SELECTED 时填写当前图片顺序（从 1 开始），例如“第三张改成海报”填 [3]；FULL_SET 时省略' } }
           : name === 'update_task_targets'
             ? {
                 platforms: { type: 'array', items: { type: 'string' }, description: '完整的目标平台 ID 列表（替换现有全部平台），如 ["amazon","tiktok-shop"]' },
@@ -75,6 +76,7 @@ function tool(name: AgentToolName): AgentToolDefinition {
               }
             : {},
         additionalProperties: false,
+        ...(name === 'generate_visual_assets' ? { required: ['scope'] } : {}),
       },
     },
   };
@@ -102,11 +104,12 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
     names.push('generate_platform_listings');
   }
   if (state.generatedDraftCount > 0 && !allDraftsApproved) names.push('open_listing_review');
-  if (allDraftsApproved && (state.imageBriefConfirmed || state.generatedAssetCount > 0) && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_visual_assets');
+  if (allDraftsApproved && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_visual_assets');
   if (allDraftsApproved && state.imagesConfirmed && selectedImageCount > 0 && videoJobCount === 0 && !state.videoStageComplete && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_product_video');
   if (allDraftsApproved && state.imagesConfirmed && selectedImageCount > 0 && videoJobCount > 0 && state.publishedDraftCount === 0 && !state.publishApproved) names.push('revise_product_video');
   if (allDraftsApproved && state.publishedDraftCount === 0 && state.generatedAssetCount > 0 && !state.imagesConfirmed) names.push('open_asset_selection');
   if (allDraftsApproved && state.publishedDraftCount === 0 && state.imagesConfirmed && selectedImageCount > 0 && state.videoStageComplete && !state.publishApproved) {
+    names.push('revise_media_order');
     names.push('open_publish_confirmation');
   }
   if (allDraftsApproved && state.publishedDraftCount === 0 && state.imagesConfirmed && selectedImageCount > 0 && state.videoStageComplete && state.publishApproved) {
@@ -157,7 +160,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；结合本会话用户的明确要求和后续补答判断；普通咨询不能触发上新。
 9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
 10.0 用户要裁剪、缩短、去掉已有视频片段时，必须调用 trim_product_video，不能调用图片或视频重新生成工具。你根据用户的大致时间描述和可信视频时长自行决定保留start/end；例如“去掉前半段”保留duration/2到终点，“保留后3秒”保留max(0,duration-3)到终点，“开头大约2秒不要”保留2到终点。无需让商家填写秒数或确认裁剪方案，工具内部完成加载、裁剪、保存，直接返回结果视频。不能声称已分析画面中空镜头的准确结束点；用户有大致时间时据此裁剪，完全没有时间且需画面判断时简短询问大致时段。视频编号按可信videoCandidates.ordinal。只有目标视频确实无法判断时才询问是哪条。结果可继续通过自然语言修改，发布仍遵守最终确认门禁。面向用户只说正在处理或已完成，不展示起止参数、编码步骤或裁剪操作教程。
-10. 首次生成图片前必须等商家确认图片要求；商家可以指定 1–6 张，也可以明确交给你决定。图片规划完全以商家本轮自然语言要求为准；不要补入未要求的主图、模特、细节或固定平台模板。图片工具 generate_visual_assets 只生成图片，绝不能启动视频。图片不满意时按要求修改：结合 imageCandidates 判断被指定的图片，在 targetIndices 填序号，仅替换这些图片；要求整组重做或改变总数量时不填 targetIndices。图片阶段只考虑视觉需求，封面及媒体顺序留给后续编排。视频只在商家确认最终图片后通过 generate_product_video 开始。用户仅修改视频时调用 revise_product_video，保留图片。
+10. 首次生成图片前必须等商家在卡片或自然语言中确认图片要求；商家可以指定 1–6 张，也可以明确交给你决定。你负责从本轮自然语言判断图片操作范围并给 generate_visual_assets 提供 scope：首次生成、整组重做或改变总数选 FULL_SET；只修改已有图片选 SELECTED，并根据可信 imageCandidates 填 targetIndices。若目标不能可靠判断，先简短询问，绝不猜测或默认整组重做。图片规划完全以商家本轮要求为准，不补入未要求的固定图种。图片工具只生成图片，绝不能启动视频。封面及媒体顺序留给后续编排；用户只改顺序时调用 revise_media_order，不调用图片生成。视频只在商家确认最终图片后通过 generate_product_video 开始；仅改视频调用 revise_product_video，保留图片。
 11. 图片生成后调用 open_asset_selection 展示本次图片，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等图片要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求；若指明具体图片就只改该图。海报属于可选图片风格，不应误判为整组重做。
 12. 商家确认图片后调用 generate_product_video；视频生成后让商家预览、选择或跳过，再进入发布确认。图片阶段绝不代替商家决定视频已完成。
 13. 回退与改目标：用户想“重新选站点/平台/市场”“改目标站点”“换平台再来”时，即使正处在冲突确认或 Listing 审核等检查点，也应优先响应这个意图：新目标明确（能列出完整的平台列表和市场列表）时直接调用 update_task_targets，并说明旧的审校稿会作废、稍后按新目标重新生成；不明确时先用自然语言问清完整目标再调用，绝不带着模糊目标调用。图文冲突和已确认的事实与平台无关，改目标不会丢失这些进度，改完目标后继续未完成的检查点。已发布过草稿的任务不可改目标，需如实告知。

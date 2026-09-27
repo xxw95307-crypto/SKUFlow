@@ -17,6 +17,7 @@ export const AGENT_TOOL_NAMES = [
   'revise_product_video',
   'trim_product_video',
   'open_asset_selection',
+  'revise_media_order',
   'open_publish_confirmation',
   'publish_mock_drafts',
 ] as const;
@@ -74,6 +75,7 @@ export interface AgentToolDefinition {
     parameters: {
       type: 'object';
       properties: Record<string, unknown>;
+      required?: string[];
       additionalProperties: false;
     };
   };

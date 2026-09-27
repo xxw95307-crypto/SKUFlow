@@ -13,7 +13,7 @@ import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
-import { imageTargetsFromRequest } from '@/lib/agents/asset-generation';
+import { parseVisualToolDecision } from '@/lib/agents/asset-generation';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
@@ -61,6 +61,7 @@ interface FailedAgentTurn {
   history: AgentModelMessage[];
   pendingFiles: File[];
   publishApproved: boolean;
+  allowConversation: boolean;
 }
 
 function formatBytes(bytes: number): string {
@@ -908,22 +909,19 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:payload.job.id},checkpoint:true};
       }
-      if (name === 'generate_visual_assets' && /封面|排序|顺序|(?:视频|图片).*放.*第/.test(requestText)) {
+      if (name === 'revise_media_order') {
         mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance(requestText);setPhase('publish');setPublishOpen(false);
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
       }
       if (name === 'generate_visual_assets') {
-        let toolOptions: { count?: unknown; style?: unknown; targetIndices?: unknown } = {};
-        try { toolOptions = JSON.parse(call.function.arguments || '{}') as typeof toolOptions; } catch { /* The saved seller brief remains authoritative. */ }
         const initialBrief = requestText.startsWith('我已确认图片生成需求，请生成图片') ? imageBriefRef.current : null;
         const existingImages = generatedAssets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED');
-        const agentTargets = Array.isArray(toolOptions.targetIndices) && toolOptions.targetIndices.every((index) => Number.isInteger(index) && index >= 1 && index <= existingImages.length)
-          ? [...new Set(toolOptions.targetIndices as number[])].sort((a, b) => a - b) : [];
-        const explicitTargets = imageTargetsFromRequest(requestText, existingImages.length);
-        const wholeSetRequested = /(?:重新|全部|整组|整批|换一批).{0,12}(?:生成|做|换).{0,8}(?:图片|图|素材)/.test(requestText);
-        const targetIndices = initialBrief || (wholeSetRequested && !explicitTargets.length) ? [] : explicitTargets.length ? explicitTargets : agentTargets;
-        const requestedCount = targetIndices.length ? null : initialBrief ? initialBrief.count : Number.isInteger(toolOptions.count) && (toolOptions.count as number) >= 1 && (toolOptions.count as number) <= 6 ? toolOptions.count as number : null;
-        const requestedStyle = initialBrief ? initialBrief.style : typeof toolOptions.style === 'string' ? toolOptions.style : '';
+        const decision = initialBrief
+          ? { scope: 'FULL_SET' as const, count: initialBrief.count, style: initialBrief.style, targetIndices: [] }
+          : parseVisualToolDecision(call.function.arguments, existingImages.length);
+        const targetIndices = decision.targetIndices;
+        const requestedCount = decision.count;
+        const requestedStyle = decision.style;
         setProgressStep(3); setBusyLabel(targetIndices.length ? '视觉策划 Agent 正在修改指定图片…' : '视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint(targetIndices.length ? '其他图片会保留，修改后可继续预览和选择' : '会生成多张候选图片，稍后由你挑选');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
@@ -1014,7 +1012,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const runAgentTurn = async (
     currentTask: TaskSnapshot | null,
     userText: string,
-    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean; pendingFiles?: File[]; resumeHistory?: AgentModelMessage[] } = {},
+    options: { appendUser?: boolean; publishApproved?: boolean; resetHistory?: boolean; pendingFiles?: File[]; resumeHistory?: AgentModelMessage[]; allowConversation?: boolean } = {},
   ) => {
     failedTurnRef.current = null;
     setCanRetryFailedTurn(false);
@@ -1064,7 +1062,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             publishApproved: options.publishApproved === true,
             intakePresented: phase === 'intake' || toolRunsRef.current.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED'),
             pendingAttachmentCount: activeFiles.length,
-            requireAction: activeTask !== null,
+            requireAction: activeTask !== null && options.allowConversation !== true,
           }),
         }), 'Agent 无法决定下一步');
         history = [...history, {
@@ -1109,6 +1107,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         history: checkpointHistory,
         pendingFiles: activeFiles,
         publishApproved: options.publishApproved === true,
+        allowConversation: options.allowConversation === true,
       };
       setCanRetryFailedTurn(true);
       setError(message); setPhase('error');
@@ -1146,6 +1145,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         appendUser: false,
         pendingFiles: failed.pendingFiles,
         publishApproved: failed.publishApproved,
+        allowConversation: failed.allowConversation,
         resumeHistory: failed.history,
       });
       return;
@@ -1346,18 +1346,10 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const sendMessage = async () => {
     const typedText = composer.trim();
     if (!typedText && pendingFiles.length === 0) return;
-    if (phase === 'image_brief' && typedText && pendingFiles.length === 0 && !/改.{0,6}(平台|站点|市场)|重新解析|重新看图|改.{0,6}listing/i.test(typedText)) {
-      const countMatch = typedText.match(/([1-6一二三四五六])\s*张/);
-      const chineseCounts: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
-      const count = countMatch ? chineseCounts[countMatch[1]] ?? Number(countMatch[1]) : imageBriefCount;
-      setComposer('');
-      await submitImageBrief(typedText, count);
-      return;
-    }
     const text = typedText || '请查看我随消息发送的这些附件。';
     const filesForTurn = [...pendingFiles];
     setComposer('');
-    await runAgentTurn(task, text, { pendingFiles: filesForTurn });
+    await runAgentTurn(task, text, { pendingFiles: filesForTurn, allowConversation: phase === 'image_brief' || phase === 'assets' || phase === 'publish' });
   };
 
   const toggleAsset = (id: string) => {

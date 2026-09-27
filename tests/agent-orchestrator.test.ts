@@ -51,14 +51,14 @@ test('listing requests with explicit platform and market can create from attachm
 
 test('Agent confirms images before video and requires video-stage completion before publishing', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
-  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['merge_product_facts']);
+  assert.deepEqual(availableAgentTools(approved).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets']);
   assert.deepEqual(availableAgentTools({ ...approved, imageBriefConfirmed: true }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets']);
   assert.deepEqual(availableAgentTools({ ...approved, generatedAssetCount: 3 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'open_asset_selection']);
   const selected = { ...approved, generatedAssetCount: 3, selectedAssetCount: 2, selectedImageCount: 2, imagesConfirmed: true };
   assert.ok(!availableAgentTools({ ...selected, imagesConfirmed: false }).some((item) => item.function.name === 'generate_product_video'));
   assert.deepEqual(availableAgentTools(selected).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'generate_product_video']);
   assert.deepEqual(availableAgentTools({ ...selected, videoJobCount: 1 }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video']);
-  assert.deepEqual(availableAgentTools({ ...selected, videoJobCount: 1, videoStageComplete: true }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'open_publish_confirmation']);
+  assert.deepEqual(availableAgentTools({ ...selected, videoJobCount: 1, videoStageComplete: true }).map((item) => item.function.name), ['merge_product_facts', 'generate_visual_assets', 'revise_product_video', 'revise_media_order', 'open_publish_confirmation']);
   assert.deepEqual(availableAgentTools({ ...selected, videoStageComplete: true, publishApproved: true }).map((item) => item.function.name), ['merge_product_facts', 'publish_mock_drafts']);
 });
 
@@ -88,6 +88,15 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
   assert.equal(result.message.content, '先读取资料。');
   assert.deepEqual(requestBody?.tool_choice, { type: 'function', function: { name: 'parse_product_sources' } });
   assert.equal(requestBody?.parallel_tool_calls, false);
+});
+
+test('visual requirements are routed through structured Agent tools', () => {
+  const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
+  const tool = availableAgentTools(approved).find((item) => item.function.name === 'generate_visual_assets');
+  assert.deepEqual(tool?.function.parameters.required, ['scope']);
+  assert.deepEqual((tool?.function.parameters.properties.scope as { enum: string[] }).enum, ['FULL_SET', 'SELECTED']);
+  const mediaReady = { ...approved, generatedAssetCount: 2, selectedAssetCount: 2, selectedImageCount: 2, imagesConfirmed: true, videoStageComplete: true };
+  assert.ok(availableAgentTools(mediaReady).some((item) => item.function.name === 'revise_media_order'));
 });
 
 test('confirmed image brief generates once, then moves to image selection', () => {

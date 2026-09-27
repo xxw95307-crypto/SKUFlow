@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAssetGenerationPrompt, buildAssetPlanningMessages, imageTargetsFromRequest, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
+import { buildAssetGenerationPrompt, buildAssetPlanningMessages, parseVisualToolDecision, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
 import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageAgainstIntent } from '../lib/ai/bailian-client.ts';
 import { loadBailianImageConfig, missingBailianImageConfig } from '../lib/config/bailian.ts';
 import type { ProductFact } from '../lib/domain/product-passport.ts';
@@ -137,8 +137,7 @@ test('image planning never asks the model to submit a video before image approva
 });
 
 test('plans a specified image revision without replacing the whole image set', () => {
-  assert.deepEqual(imageTargetsFromRequest('把第三张图生成海报样式，第一张保留', 3), [3]);
-  assert.deepEqual(imageTargetsFromRequest('把第三张图生成海报样式', 3), [3]);
+  assert.deepEqual(parseVisualToolDecision('{"scope":"SELECTED","targetIndices":[3]}', 3).targetIndices, [3]);
   const context = {
     productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon' as const], markets: ['美国'],
     sourceImageCount: 1, existingAssets: [
@@ -158,6 +157,15 @@ test('plans a specified image revision without replacing the whole image set', (
   const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(poster, null, [3])[0], productName: context.productName, facts, listings: [], previousAsset: context.existingAssets[2] });
   assert.match(prompt, /输入图片是本轮要修改的旧图/);
   assert.match(prompt, /海报式构图/);
+});
+
+test('visual tool decisions are model supplied and structurally validated without reading request wording', () => {
+  assert.deepEqual(parseVisualToolDecision('{"scope":"FULL_SET","count":2,"style":"海报和模特"}', 3), { scope: 'FULL_SET', count: 2, style: '海报和模特', targetIndices: [] });
+  assert.deepEqual(parseVisualToolDecision('{"scope":"SELECTED","targetIndices":[3,1]}', 3).targetIndices, [1, 3]);
+  assert.throws(() => parseVisualToolDecision('{}', 3), /未明确图片操作范围/);
+  assert.throws(() => parseVisualToolDecision('{"scope":"SELECTED","targetIndices":[]}', 3), /图片序号无效/);
+  assert.throws(() => parseVisualToolDecision('{"scope":"SELECTED","targetIndices":[4]}', 3), /图片序号无效/);
+  assert.throws(() => parseVisualToolDecision('{"scope":"FULL_SET","targetIndices":[3]}', 3), /不能指定局部/);
 });
 
 test('semantic plan review rejects a missed seller requirement without fixed image-kind rules', async () => {

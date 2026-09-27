@@ -30,14 +30,33 @@ export interface AssetPlanningContext {
   targetIndices?: readonly number[];
 }
 
-const imageOrdinals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+export interface VisualToolDecision {
+  scope: 'FULL_SET' | 'SELECTED';
+  count: number | null;
+  style: string | null;
+  targetIndices: number[];
+}
 
-export function imageTargetsFromRequest(request: string, assetCount: number): number[] {
-  const targets = [...request.matchAll(/第\s*([一二两三四五六1-6])\s*(?:张|幅|个)\s*(?:图|图片|素材)?/g)]
-    .filter((match) => !/(?:保留|不动|不用改|保持不变)\s*$/.test(request.slice(Math.max(0, (match.index ?? 0) - 6), match.index))
-      && !/^\s*(?:保留|不动|不用改|保持不变)/.test(request.slice((match.index ?? 0) + match[0].length)))
-    .map((match) => imageOrdinals[match[1]] ?? Number(match[1]));
-  return [...new Set(targets)].filter((index) => index >= 1 && index <= assetCount).sort((a, b) => a - b);
+export function parseVisualToolDecision(argumentsJson: string, existingImageCount: number): VisualToolDecision {
+  let parsed: unknown;
+  try { parsed = JSON.parse(argumentsJson); } catch { throw new Error('Agent 返回的图片操作参数不是有效 JSON'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Agent 返回的图片操作参数无效');
+  const options = parsed as Record<string, unknown>;
+  if (options.scope !== 'FULL_SET' && options.scope !== 'SELECTED') throw new Error('Agent 未明确图片操作范围，请重新描述要修改哪些图片');
+  const style = options.style == null ? null : typeof options.style === 'string' && options.style.trim().length <= 200 ? options.style.trim() || null : undefined;
+  if (style === undefined) throw new Error('Agent 返回的图片风格参数无效');
+  if (options.scope === 'FULL_SET') {
+    if (options.targetIndices != null && (!Array.isArray(options.targetIndices) || options.targetIndices.length > 0)) throw new Error('整组生成不能指定局部图片序号');
+    if (options.count != null && (!Number.isInteger(options.count) || (options.count as number) < 1 || (options.count as number) > 6)) throw new Error('图片数量需为 1–6 张');
+    return { scope: 'FULL_SET', count: options.count == null ? null : options.count as number, style, targetIndices: [] };
+  }
+  if (options.count != null) throw new Error('局部修改不能同时改变图片总数');
+  if (!Array.isArray(options.targetIndices) || options.targetIndices.length < 1 || options.targetIndices.length > existingImageCount
+    || options.targetIndices.some((index) => !Number.isInteger(index) || index < 1 || index > existingImageCount)
+    || new Set(options.targetIndices).size !== options.targetIndices.length) {
+    throw new Error('Agent 指定的图片序号无效，请重新指出要修改的图片');
+  }
+  return { scope: 'SELECTED', count: null, style, targetIndices: [...options.targetIndices].sort((a, b) => a - b) };
 }
 
 function plainText(value: unknown): string {
