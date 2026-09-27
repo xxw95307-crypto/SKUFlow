@@ -39,7 +39,6 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
   const [mode, setMode] = useState<'ai' | 'custom'>('ai');
   const [guidance, setGuidance] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
-  const [showNew, setShowNew] = useState(false);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/tasks/${taskId}/videos`);
@@ -63,7 +62,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
   const inProgress = visibleJobs.some((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job));
   const results = visibleJobs.filter((job) => job.status === 'SUCCEEDED' && job.videoUrl);
   const latestFailure = visibleJobs.find((job) => ['FAILED', 'UNKNOWN'].includes(job.status) || (job.status === 'SUBMISSION_UNKNOWN' && !isReusableVideoJob(job)));
-  const showPlanner = showSuggestion && !draft && !inProgress && (showNew || results.length === 0);
+  const showPlanner = showSuggestion && !draft && !inProgress && results.length === 0;
 
   const action = useCallback(async (id: string, actionName: 'start' | 'refresh', prompt?: string) => {
     setBusy(true); setError('');
@@ -90,7 +89,6 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || '视频提示词准备失败');
       await load();
-      setShowNew(false);
     } catch (caught) { setError((caught as Error).message); }
     finally { setBusy(false); }
   };
@@ -119,9 +117,8 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
     {inProgress && <div className="video-progress-row" role="status"><span className="agent-spinner" /><span>{labels[visibleJobs.find((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job))?.status ?? ''] || '视频生成中'}</span>{visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status)) && <button type="button" disabled={busy} onClick={() => void action(visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status))!.id, 'refresh')}>刷新状态</button>}</div>}
     {results.map((job) => <section className="video-result" key={job.id}>
       <video controls playsInline preload="metadata" src={job.videoUrl!} />
-      <div><span>视频已生成</span>{selectable && <label><input type="checkbox" checked={selected.includes(job.id)} onChange={() => onToggle(job.id)} />加入商品媒体</label>}<a href={job.videoUrl!} download={`${job.id}.mp4`}>下载视频</a></div>
+      <div>{selectable && <label><input type="checkbox" checked={selected.includes(job.id)} onChange={() => onToggle(job.id)} />选择视频</label>}<a href={job.videoUrl!} download={`${job.id}.mp4`}>下载</a></div>
     </section>)}
-    {latestFailure && !inProgress && <p className="video-inline-error" role="status">上次生成未成功：{latestFailure.status === 'SUBMISSION_UNKNOWN' ? '视频服务账号状态异常，恢复后可重新生成' : latestFailure.error || labels[latestFailure.status]}</p>}
-    {showSuggestion && !draft && !inProgress && results.length > 0 && !showNew && <button className="video-new-button" type="button" onClick={() => setShowNew(true)}>再生成一条视频</button>}
+    {latestFailure && !inProgress && results.length === 0 && <p className="video-inline-error" role="status">上次生成未成功：{latestFailure.status === 'SUBMISSION_UNKNOWN' ? '视频服务账号状态异常，恢复后可重新生成' : latestFailure.error || labels[latestFailure.status]}</p>}
   </div>;
 }
