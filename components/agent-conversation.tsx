@@ -6,6 +6,7 @@ import { MediaOrderReview } from '@/components/media-order-review';
 import { VideoConversation } from '@/components/video-conversation';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
@@ -230,12 +231,56 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
 }) {
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
   const selectedCount = completed.filter((asset) => selected.includes(asset.id)).length;
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const previewButtons = useRef<Array<HTMLButtonElement | null>>([]);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const closePreview = () => {
+    const previousIndex = previewIndex;
+    setPreviewIndex(null);
+    setZoomed(false);
+    if (previousIndex !== null) window.requestAnimationFrame(() => previewButtons.current[previousIndex]?.focus());
+  };
+  const movePreview = (direction: number) => {
+    setPreviewIndex((current) => current === null ? null : (current + direction + completed.length) % completed.length);
+    setZoomed(false);
+  };
+  useEffect(() => {
+    if (previewIndex === null) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButton.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closePreview(); }
+      if (event.key === 'ArrowLeft' && completed.length > 1) { event.preventDefault(); movePreview(-1); }
+      if (event.key === 'ArrowRight' && completed.length > 1) { event.preventDefault(); movePreview(1); }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', handleKeyDown); };
+  // The keyboard handler is renewed when the displayed image changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewIndex, completed.length]);
+  const previewAsset = previewIndex === null ? null : completed[previewIndex] ?? null;
   return <div className="asset-conversation-card image-picker-card">
     <h3 className="visually-hidden">选择商品图片</h3>
-    <div className="agent-asset-grid">{completed.map((asset) => <button type="button" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}${asset.title}`} aria-pressed={selected.includes(asset.id)} className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
-      <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i aria-hidden="true">{selected.includes(asset.id) ? '✓' : '+'}</i>{asset.kind === 'HERO' && <b>主图</b>}</span>
-    </button>)}</div>
+    <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
+      <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
+        <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized />{asset.kind === 'HERO' && <b>主图</b>}<span className="image-picker-view-label">预览</span></span>
+      </button>
+      <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>
+    </div>)}</div>
     <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>
+    {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
+      <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
+        <header><span>{previewIndex! + 1} / {completed.length}{previewAsset.kind === 'HERO' ? ' · 主图' : ''}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
+        <div className="asset-preview-stage">
+          {completed.length > 1 && <button className="asset-preview-nav previous" type="button" aria-label="上一张图片" onClick={() => movePreview(-1)}>‹</button>}
+          <div className={`asset-preview-viewport ${zoomed ? 'zoomed' : ''}`}><Image src={previewAsset.imageUrl!} alt={previewAsset.title} width={previewAsset.width ?? 1024} height={previewAsset.height ?? 1024} unoptimized onClick={() => setZoomed((value) => !value)} /></div>
+          {completed.length > 1 && <button className="asset-preview-nav next" type="button" aria-label="下一张图片" onClick={() => movePreview(1)}>›</button>}
+        </div>
+        <footer><button type="button" onClick={() => setZoomed((value) => !value)}>{zoomed ? '适应窗口' : '放大看细节'}</button><button type="button" className="primary" aria-pressed={selected.includes(previewAsset.id)} onClick={() => onToggle(previewAsset.id)}>{selected.includes(previewAsset.id) ? '✓ 已选择，点击取消' : '选择这张图片'}</button></footer>
+      </section>
+    </div>, document.body)}
   </div>;
 }
 
