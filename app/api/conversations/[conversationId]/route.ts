@@ -4,11 +4,13 @@ import { isAgentToolName, type AgentModelMessage } from '@/lib/domain/agent-orch
 import {
   CONVERSATION_MESSAGE_KINDS,
   type ConversationAttachment,
+  type ConversationAssetSnapshot,
   type ConversationMessage,
   type ConversationRichItem,
   type ConversationToolRun,
 } from '@/lib/domain/conversation';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
+import { GENERATED_ASSET_KINDS } from '@/lib/domain/generated-asset';
 import { deleteConversation, getConversation, updateConversation } from '@/lib/server/conversation-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 
@@ -50,6 +52,20 @@ function parseMessages(value: unknown): ConversationMessage[] {
         ...(typeof rich.status === 'string' ? { status: rich.status.slice(0, 100) } : {}),
       };
     }) : undefined;
+    const assets = Array.isArray(row.assets) ? row.assets.slice(0, 20).map((raw): ConversationAssetSnapshot => {
+      if (!raw || typeof raw !== 'object') throw new Error('图片结果格式无效');
+      const asset = raw as Record<string, unknown>;
+      if (typeof asset.id !== 'string' || !/^asset_[\w-]+$/.test(asset.id)
+        || typeof asset.taskId !== 'string' || !/^task_[\w-]+$/.test(asset.taskId)
+        || (asset.kind !== 'VIDEO' && !GENERATED_ASSET_KINDS.includes(asset.kind as (typeof GENERATED_ASSET_KINDS)[number]))
+        || typeof asset.title !== 'string') throw new Error('图片结果格式无效');
+      const dimension = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 10000 ? Math.round(value) : null;
+      return {
+        id: asset.id.slice(0, 100), taskId: asset.taskId.slice(0, 100), kind: asset.kind as ConversationAssetSnapshot['kind'],
+        title: asset.title.slice(0, 120), width: dimension(asset.width), height: dimension(asset.height),
+        error: typeof asset.error === 'string' ? asset.error.slice(0, 500) : null,
+      };
+    }) : undefined;
     let tool: ConversationMessage['tool'];
     if (row.tool && typeof row.tool === 'object') {
       const rawTool = row.tool as Record<string, unknown>;
@@ -66,6 +82,7 @@ function parseMessages(value: unknown): ConversationMessage[] {
       ...(kind ? { kind } : {}),
       ...(attachments?.length ? { attachments } : {}),
       ...(items?.length ? { items } : {}),
+      ...(assets?.length ? { assets } : {}),
       ...(tool ? { tool } : {}),
     };
   });

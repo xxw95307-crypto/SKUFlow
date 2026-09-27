@@ -24,6 +24,7 @@ import type {
 } from '@/lib/domain/agent-orchestrator';
 import type {
   AgentConversationRecord,
+  ConversationAssetSnapshot,
   ConversationAttachment,
   ConversationMessage,
   ConversationSummary,
@@ -39,6 +40,23 @@ type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'con
 interface ImageBrief { count: number | null; style: string; notes: string }
 
 type ChatMessage = ConversationMessage;
+
+type DisplayAsset = Pick<GeneratedAsset, 'id' | 'kind' | 'title' | 'status' | 'width' | 'height' | 'error' | 'imageUrl'>;
+
+function snapshotAssets(assets: readonly GeneratedAsset[]): ConversationAssetSnapshot[] {
+  return assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED').map((asset) => ({
+    id: asset.id, taskId: asset.taskId, kind: asset.kind, title: asset.title,
+    width: asset.width, height: asset.height, error: asset.error,
+  }));
+}
+
+function displaySnapshots(assets: readonly ConversationAssetSnapshot[]): DisplayAsset[] {
+  return assets.map((asset) => ({
+    id: asset.id, kind: asset.kind, title: asset.title, status: 'COMPLETED',
+    width: asset.width, height: asset.height, error: asset.error,
+    imageUrl: `/api/tasks/${asset.taskId}/generated-assets/${asset.id}/file`,
+  }));
+}
 
 const DEFAULT_RAIL_WIDTH = 272;
 const MIN_RAIL_WIDTH = 220;
@@ -225,12 +243,13 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo }: {
-  assets: GeneratedAsset[];
+function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, readOnly = false }: {
+  assets: DisplayAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
   onSkipVideo: () => void;
+  readOnly?: boolean;
 }) {
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
   const needsReview = completed.some((asset) => asset.error);
@@ -272,10 +291,10 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
         <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
       </button>
-      <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>
+      {!readOnly && <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>}
       {asset.error && <span className="image-picker-review-badge">需检查</span>}
     </div>)}</div>
-    <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>
+    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
       <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
         <header><span>{previewIndex! + 1} / {completed.length}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
@@ -285,7 +304,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
           {completed.length > 1 && <button className="asset-preview-nav next" type="button" aria-label="下一张图片" onClick={() => movePreview(1)}>›</button>}
         </div>
         {previewAsset.error && <p className="image-picker-review-detail">{previewAsset.error}</p>}
-        <footer><button type="button" onClick={() => setZoomed((value) => !value)}>{zoomed ? '适应窗口' : '放大看细节'}</button><button type="button" className="primary" aria-pressed={selected.includes(previewAsset.id)} onClick={() => onToggle(previewAsset.id)}>{selected.includes(previewAsset.id) ? '✓ 已选择，点击取消' : '选择这张图片'}</button></footer>
+        <footer><button type="button" onClick={() => setZoomed((value) => !value)}>{zoomed ? '适应窗口' : '放大看细节'}</button>{!readOnly && <button type="button" className="primary" aria-pressed={selected.includes(previewAsset.id)} onClick={() => onToggle(previewAsset.id)}>{selected.includes(previewAsset.id) ? '✓ 已选择，点击取消' : '选择这张图片'}</button>}</footer>
       </section>
     </div>, document.body)}
   </div>;
@@ -437,7 +456,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     role: ChatMessage['role'],
     text: string,
     meta?: string,
-    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items'>> = {},
+    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items' | 'assets'>> = {},
   ) => {
     const next = [...messagesRef.current, { id: messageId(), role, text, ...(meta ? { meta } : {}), ...rich }].slice(-200);
     messagesRef.current = next;
@@ -934,7 +953,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
         setPhase('assets');
         const needsReview = payload.assets.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.error);
-        append('agent', needsReview ? '图片已生成，部分画面需要你检查。点开预览，不满意可以直接告诉我改哪里。' : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
+        append('agent', needsReview ? '图片已生成，部分画面需要你检查。点开预览，不满意可以直接告诉我改哪里。' : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotAssets(payload.assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }
@@ -944,7 +963,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
         setPhase('assets');
-        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
+        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotAssets(assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -1158,7 +1177,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           setGeneratedAssets(available);
           setError(''); setCanRetryFailedTurn(false); failedTurnRef.current = null;
           setPhase('assets');
-          append('agent', '已找到保存的候选图片。请检查是否符合最新要求；不满意可以直接告诉我修改。', '等待素材选择', { kind: 'assets' });
+          append('agent', '已找到保存的候选图片。请检查是否符合最新要求；不满意可以直接告诉我修改。', '等待素材选择', { kind: 'assets', assets: snapshotAssets(available) });
           await persistConversation(task.id);
           return;
         }
@@ -1481,7 +1500,6 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             const joinsAssets = joinAssetsToLastAgentReply && index === messages.length - 1;
             const joinsVideo = joinVideoToLastAgentReply && index === messages.length - 1;
             const joinsAction = joinsIntake || joinsImageBrief || joinsAssets || joinsVideo;
-            if (message.meta === '等待素材选择' && !joinsAssets) return null;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
             const displayedMessage = currentListingMessage(message, passport);
             return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}`} key={message.id}>
@@ -1491,6 +1509,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
                 {joinsIntake && intakeCard}
                 {joinsImageBrief && imageBriefCard}
                 {joinsAssets && assetCard}
+                {!joinsAssets && message.kind === 'assets' && message.assets && message.assets.length > 0 && <AssetConversationCard assets={displaySnapshots(message.assets)} selected={[]} onToggle={() => {}} onConfirm={() => {}} onSkipVideo={() => {}} readOnly />}
                 {joinsVideo && videoCard}
               </div>
             </article>;
