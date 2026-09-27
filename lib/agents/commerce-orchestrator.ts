@@ -47,7 +47,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   generate_platform_listings: '读取所选平台字段（Shopify 使用真实接口），并由 Listing Agent 生成各平台中文审校稿。',
   open_conflict_review: '暂停自动执行，并在对话流中逐项询问商家如何处理图文冲突；不得打开遮罩弹窗。',
   open_listing_review: '暂停自动执行并向商家展示各平台中文 Listing 审核界面。',
-  generate_visual_assets: '只规划并生成商品图片；图片修改时可再次调用，绝不触发视频模型。图片由商家确认后才进入视频阶段。',
+  generate_visual_assets: '规划并生成商品图片。若商家只要求修改第几张图，在 targetIndices 填对应的 1 起始序号；只替换这些图片，其他图片保持不变。未指定具体图片而要求整组重做时省略 targetIndices。绝不触发视频模型。',
   generate_product_video: '商家确认最终图片后，使用已选图片作为首帧，规划并开始生成商品视频。仅首次生成或图片重新确认后调用。',
   revise_product_video: '依据已选图片、上一条视频方案和商家本轮要求重新规划并生成一条商品视频；仅修改视频时使用，保留已有图片。',
   trim_product_video: '自动裁剪已有视频并返回结果，不展示裁剪卡、时间输入或操作按钮，不调用生成模型、不重做图片。中央Agent根据用户的大致时间和视频时长决定start/end（秒）。videoId必须引用可信视频ID。仅目标视频确实无法判断时先自然语言询问。',
@@ -67,7 +67,7 @@ function tool(name: AgentToolName): AgentToolDefinition {
         properties: name === 'trim_product_video'
           ? { videoId:{type:'string',description:'要裁剪的可信视频ID；不确定则省略'},start:{type:'number',description:'Agent决定的保留起点秒数；省略为0'},end:{type:'number',description:'Agent决定的保留终点秒数；省略为原视频终点'} }
           : name === 'generate_visual_assets'
-            ? { count: { type: 'integer', description: '商家明确指定的图片张数，1–6；未指定则省略' }, style: { type: 'string', description: '商家指定的图片风格，未指定则省略' } }
+            ? { count: { type: 'integer', description: '首次生成或整组重做时商家明确指定的总张数，1–6；局部修改时不要填写' }, style: { type: 'string', description: '商家指定的图片风格，未指定则省略' }, targetIndices: { type: 'array', items: { type: 'integer' }, description: '只修改指定图片时填写当前图片顺序（从 1 开始），例如“第三张改成海报”填 [3]；整组重做时省略' } }
           : name === 'update_task_targets'
             ? {
                 platforms: { type: 'array', items: { type: 'string' }, description: '完整的目标平台 ID 列表（替换现有全部平台），如 ["amazon","tiktok-shop"]' },
@@ -157,8 +157,8 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
 9. 不要因为检测到附件就自行假设商品、平台或任务意图；结合本会话用户的明确要求和后续补答判断；普通咨询不能触发上新。
 9.1 不存在默认平台和默认站点。只有卖家在消息中明确说出，或在选择卡中主动选择，才可创建任务。
 10.0 用户要裁剪、缩短、去掉已有视频片段时，必须调用 trim_product_video，不能调用图片或视频重新生成工具。你根据用户的大致时间描述和可信视频时长自行决定保留start/end；例如“去掉前半段”保留duration/2到终点，“保留后3秒”保留max(0,duration-3)到终点，“开头大约2秒不要”保留2到终点。无需让商家填写秒数或确认裁剪方案，工具内部完成加载、裁剪、保存，直接返回结果视频。不能声称已分析画面中空镜头的准确结束点；用户有大致时间时据此裁剪，完全没有时间且需画面判断时简短询问大致时段。视频编号按可信videoCandidates.ordinal。只有目标视频确实无法判断时才询问是哪条。结果可继续通过自然语言修改，发布仍遵守最终确认门禁。面向用户只说正在处理或已完成，不展示起止参数、编码步骤或裁剪操作教程。
-10. 首次生成图片前必须等商家确认图片要求；商家可以指定 1–6 张，也可以明确交给你决定。图片工具 generate_visual_assets 只生成图片，绝不能启动视频。图片不满意时按要求重新生成图片，保留尚未改动的视频；视频只在商家确认最终图片后通过 generate_product_video 开始。用户仅修改视频时调用 revise_product_video，保留图片。只调整商品媒体顺序时进入媒体编排。
-11. 图片生成后调用 open_asset_selection 展示本次图片，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等图片要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求，再展示新结果。
+10. 首次生成图片前必须等商家确认图片要求；商家可以指定 1–6 张，也可以明确交给你决定。图片工具 generate_visual_assets 只生成图片，绝不能启动视频。图片不满意时按要求修改：明确指定第几张就把序号放在 targetIndices，仅替换这些图片，保留其他图片；要求全部重做或改变整组数量时不填 targetIndices。视频只在商家确认最终图片后通过 generate_product_video 开始。用户仅修改视频时调用 revise_product_video，保留图片。只调整商品媒体顺序时进入媒体编排。
+11. 图片生成后调用 open_asset_selection 展示本次图片，不要循环生成。用户说“不要细节图”“去掉模特”“不符合实际”等图片要求时，即使已有素材，也必须调用 generate_visual_assets 落实要求；若指明具体图片就只改该图。海报属于可选图片风格，不应误判为整组重做。
 12. 商家确认图片后调用 generate_product_video；视频生成后让商家预览、选择或跳过，再进入发布确认。图片阶段绝不代替商家决定视频已完成。
 13. 回退与改目标：用户想“重新选站点/平台/市场”“改目标站点”“换平台再来”时，即使正处在冲突确认或 Listing 审核等检查点，也应优先响应这个意图：新目标明确（能列出完整的平台列表和市场列表）时直接调用 update_task_targets，并说明旧的审校稿会作废、稍后按新目标重新生成；不明确时先用自然语言问清完整目标再调用，绝不带着模糊目标调用。图文冲突和已确认的事实与平台无关，改目标不会丢失这些进度，改完目标后继续未完成的检查点。已发布过草稿的任务不可改目标，需如实告知。
 14. 回退到更早的步骤：用户说“重新解析资料”“文件识别错了/内容更新了”调用 reparse_sources；“重新看图”“图片属性识别错了”调用 reanalyze_images；“重新裁决冲突”“改一下之前冲突的选择”调用 reopen_resolved_conflicts。这三个工具都会作废未发布的旧审校稿，完成后按状态继续正常流程（例如重新解析后继续重新理解图片、重新合并事实，再回到冲突确认或 Listing 生成）。merge_product_facts 在未发布前始终可用，用于事实变化后的重新合并；除此之外不要重复执行已完成的步骤。这些回退工具只在用户本轮明确提出对应意图时才会出现在工具列表里；如果列表里没有，先用自然语言向商家确认具体想回退到哪一步，不要尝试调用列表外的工具。所有回退在任务发布后不可用，需如实告知。

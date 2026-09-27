@@ -511,7 +511,7 @@ export async function callBailianAssetPlanning(
     const content = responseText(payload.choices?.[0]?.message?.content);
     if (!content) throw new Error('百炼视觉策划返回内容为空');
     return {
-      assets: parseAssetPlan(content, context.requestedCount),
+      assets: parseAssetPlan(content, context.requestedCount, context.targetIndices),
       model: payload.model || model,
       usage: normalizeUsage(payload.usage),
       requestId: payload.id || response.headers.get('x-request-id'),

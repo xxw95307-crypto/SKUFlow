@@ -25,19 +25,23 @@ function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
   };
 }
 
-async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null }> {
+async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null; targetIndices: number[] }> {
   const raw = await request.text();
-  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null };
+  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null, targetIndices: [] };
   try {
-    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown };
+    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown; targetIndices?: unknown };
     if (value.count != null && (!Number.isInteger(value.count) || (value.count as number) < 1 || (value.count as number) > 6)) {
       throw new Error('图片数量需为 1–6 张');
     }
     const guidance = typeof value.guidance === 'string' ? value.guidance.trim().slice(0, 500) : '';
     const style = typeof value.style === 'string' ? value.style.trim().slice(0, 200) : '';
-    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null };
+    const targetIndices = value.targetIndices == null ? [] : value.targetIndices;
+    if (!Array.isArray(targetIndices) || targetIndices.length > 6 || targetIndices.some((index) => !Number.isInteger(index) || index < 1 || index > 6) || new Set(targetIndices).size !== targetIndices.length) {
+      throw new Error('目标图片序号无效');
+    }
+    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null, targetIndices: [...targetIndices].sort((a, b) => a - b) };
   } catch {
-    throw new Error('图片生成参数无效，请检查张数是否在 1–6 之间');
+    throw new Error('图片生成参数无效，请检查张数或目标图片序号');
   }
 }
 
@@ -79,6 +83,10 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (approved.length === 0 || approved.length < passport.platformDrafts.length) {
       return Response.json({ error: '请先完成所有平台 Listing 审核，再生成视觉素材' }, { status: 409 });
     }
+    const priorImages = existing.filter((asset) => asset.status === 'COMPLETED' && asset.kind !== 'VIDEO');
+    if (options.targetIndices.some((index) => index > priorImages.length)) {
+      return Response.json({ error: `当前只有 ${priorImages.length} 张图片，请指定有效的图片序号` }, { status: 400 });
+    }
     const images = await bindings.DB.prepare(
       `SELECT id, object_key, content_type FROM task_files
        WHERE task_id = ? AND content_type LIKE 'image/%' ORDER BY created_at ASC`,
@@ -98,11 +106,57 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       sourceImageCount: images.results.length,
       sourceImageIds: images.results.map(image=>image.id),
       userGuidance: options.guidance,
-      requestedCount: options.count,
+      requestedCount: options.targetIndices.length ? null : options.count,
       styleGuidance: options.style,
+      existingAssets: priorImages,
+      targetIndices: options.targetIndices,
     });
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
+
+    if (options.targetIndices.length) {
+      const replacements = new Map<number, { id: string; spec: typeof plan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string }>();
+      for (const [position, targetIndex] of options.targetIndices.entries()) {
+        const oldAsset = priorImages[targetIndex - 1];
+        const spec = plan.assets[position];
+        if ((oldAsset.kind === 'HERO') !== (spec.kind === 'HERO')) throw new Error('局部修改不能改变商品主图的位置；请让 Agent 重新规划整组图片');
+        const oldRow = await bindings.DB.prepare("SELECT object_key, content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'")
+          .bind(taskId, oldAsset.id).first<{ object_key: string; content_type: string }>();
+        if (!oldRow?.object_key) throw new Error(`第 ${targetIndex} 张旧图不可用，请重新生成整组图片`);
+        const oldImage = await bindings.UPLOADS.get(oldRow.object_key);
+        if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
+        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset });
+        const generated = await callBailianImageGeneration(config, {
+          bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type, prompt, size: spec.size,
+        });
+        const id = `asset_${crypto.randomUUID()}`;
+        const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
+        await bindings.UPLOADS.put(objectKey, generated.bytes, {
+          httpMetadata: { contentType: generated.contentType },
+          customMetadata: { taskId, sourceFileId: oldAsset.sourceFileId, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
+        });
+        replacements.set(targetIndex, { id, spec, prompt, objectKey, contentType: generated.contentType, model: generated.model, width: generated.width, height: generated.height, sourceFileId: oldAsset.sourceFileId });
+      }
+      const retainedAssetIds: Record<string, string> = {};
+      const writes = priorImages.map((oldAsset, position) => {
+        const index = position + 1;
+        const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
+        const replacement = replacements.get(index);
+        if (replacement) return prepareGeneratedAssetInsert(bindings.DB, {
+          id: replacement.id, taskId, sourceFileId: replacement.sourceFileId, batchId,
+          kind: replacement.spec.kind, title: replacement.spec.title, note: replacement.spec.note,
+          prompt: replacement.prompt, objectKey: replacement.objectKey, contentType: replacement.contentType,
+          model: replacement.model, status: 'COMPLETED', width: replacement.width, height: replacement.height,
+          error: null, createdAt: timestamp, completedAt: timestamp,
+        });
+        retainedAssetIds[oldAsset.id] = oldAsset.id;
+        return bindings.DB.prepare("UPDATE generated_assets SET batch_id=?, created_at=? WHERE task_id=? AND id=? AND status='COMPLETED'")
+          .bind(batchId, timestamp, taskId, oldAsset.id);
+      });
+      await bindings.DB.batch(writes);
+      const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
+      return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: plan.assets, plannerModel: plan.model });
+    }
 
     await Promise.all(plan.assets.map(async (spec) => {
       const id = `asset_${crypto.randomUUID()}`;

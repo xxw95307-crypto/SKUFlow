@@ -13,6 +13,7 @@ import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
+import { imageTargetsFromRequest } from '@/lib/agents/asset-generation';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
@@ -171,6 +172,7 @@ function assetKindLabel(kind: GeneratedAsset['kind']): string {
     FEATURE: '卖点视觉',
     SCALE: '尺寸感展示',
     PACKAGING: '包装展示',
+    POSTER: '海报图',
     VIDEO: '商品视频',
   }[kind];
 }
@@ -906,26 +908,34 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         append('agent','请按最新要求重新安排封面与媒体顺序，并核对方案。','等待媒体编排确认');markToolRun(call,'COMPLETED');return {result:{ok:true,mediaReview:true},checkpoint:true};
       }
       if (name === 'generate_visual_assets') {
-        let toolOptions: { count?: unknown; style?: unknown } = {};
+        let toolOptions: { count?: unknown; style?: unknown; targetIndices?: unknown } = {};
         try { toolOptions = JSON.parse(call.function.arguments || '{}') as typeof toolOptions; } catch { /* The saved seller brief remains authoritative. */ }
         const initialBrief = requestText.startsWith('我已确认图片生成需求，请生成图片') ? imageBriefRef.current : null;
-        const requestedCount = initialBrief ? initialBrief.count : Number.isInteger(toolOptions.count) && (toolOptions.count as number) >= 1 && (toolOptions.count as number) <= 6 ? toolOptions.count as number : null;
+        const existingImages = generatedAssets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED');
+        const agentTargets = Array.isArray(toolOptions.targetIndices) && toolOptions.targetIndices.every((index) => Number.isInteger(index) && index >= 1 && index <= existingImages.length)
+          ? [...new Set(toolOptions.targetIndices as number[])].sort((a, b) => a - b) : [];
+        const explicitTargets = imageTargetsFromRequest(requestText, existingImages.length);
+        const targetIndices = initialBrief ? [] : explicitTargets.length ? explicitTargets : agentTargets;
+        const requestedCount = targetIndices.length ? null : initialBrief ? initialBrief.count : Number.isInteger(toolOptions.count) && (toolOptions.count as number) >= 1 && (toolOptions.count as number) <= 6 ? toolOptions.count as number : null;
         const requestedStyle = initialBrief ? initialBrief.style : typeof toolOptions.style === 'string' ? toolOptions.style : '';
-        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint('会生成多张候选图片，稍后由你挑选');
+        setProgressStep(3); setBusyLabel(targetIndices.length ? '视觉策划 Agent 正在修改指定图片…' : '视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint(targetIndices.length ? '其他图片会保留，修改后可继续预览和选择' : '会生成多张候选图片，稍后由你挑选');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
+          retainedAssetIds?: Record<string, string>;
         }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force: true, guidance: requestText, count: requestedCount, style: requestedStyle }),
+          body: JSON.stringify({ force: true, guidance: requestText, count: requestedCount, style: requestedStyle, targetIndices }),
         }), '视觉素材生成失败');
         setGeneratedAssets(payload.assets);
-        selectedAssetsRef.current = [];
-        setSelectedAssets([]);
+        selectedAssetsRef.current = targetIndices.length
+          ? selectedAssetsRef.current.filter((id) => id.startsWith('asset_')).flatMap((id) => payload.retainedAssetIds?.[id] ? [payload.retainedAssetIds[id]] : [])
+          : [];
+        setSelectedAssets(selectedAssetsRef.current);
         if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
         setPhase('assets');
-        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
+        append('agent', targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }

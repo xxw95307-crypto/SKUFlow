@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAssetGenerationPrompt, buildAssetPlanningMessages, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
+import { buildAssetGenerationPrompt, buildAssetPlanningMessages, imageTargetsFromRequest, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
 import { callBailianAssetPlanning, callBailianImageGeneration } from '../lib/ai/bailian-client.ts';
 import { loadBailianImageConfig, missingBailianImageConfig } from '../lib/config/bailian.ts';
 import type { ProductFact } from '../lib/domain/product-passport.ts';
@@ -129,6 +129,29 @@ test('image planning never asks the model to submit a video before image approva
  const messages=buildAssetPlanningMessages({productName:'T恤',facts,listings:[],platforms:['amazon'],markets:['US'],sourceImageCount:1,sourceImageIds:['original']});
  assert.match(messages[0].content,/只规划图片，不规划、提交或生成视频/);
  assert.doesNotMatch(messages[0].content,/videoDecision/);
+});
+
+test('plans a specified image revision without replacing the whole image set', () => {
+  assert.deepEqual(imageTargetsFromRequest('把第三张图生成海报样式，第一张保留', 3), [3]);
+  assert.deepEqual(imageTargetsFromRequest('把第三张图生成海报样式', 3), [3]);
+  const context = {
+    productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon' as const], markets: ['美国'],
+    sourceImageCount: 1, existingAssets: [
+      { kind: 'HERO' as const, title: '主图', note: '白底' },
+      { kind: 'LIFESTYLE' as const, title: '场景', note: '咖啡馆' },
+      { kind: 'MODEL' as const, title: '模特图', note: '户外穿搭' },
+    ], targetIndices: [3], userGuidance: '把第三张图生成海报样式',
+  };
+  const messages = buildAssetPlanningMessages(context);
+  assert.match(messages[0].content, /只输出 1 个 assets/);
+  assert.match(messages[1].content, /第 3 张/);
+  assert.match(messages[1].content, /咖啡馆/);
+  const poster = JSON.stringify({ assets: [{ kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '以原商品为主体，海报式构图。' }] });
+  assert.equal(parseAssetPlan(poster, null, [3])[0].kind, 'POSTER');
+  assert.throws(() => parseAssetPlan(poster), /2–4 张/);
+  const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(poster, null, [3])[0], productName: context.productName, facts, listings: [], previousAsset: context.existingAssets[2] });
+  assert.match(prompt, /输入图片是本轮要修改的旧图/);
+  assert.match(prompt, /海报式构图/);
 });
 
 test('video accepts only confirmed images from the latest generated batch',()=>{
