@@ -1649,6 +1649,11 @@ body {
   border-radius: 5px 11px 11px;
 }
 
+.agent-shell-v2 .chat-message.asset-conversation > .asset-conversation-card {
+  margin-left: 0;
+  margin-right: auto;
+}
+
 /* Image replies should follow the number of visible choices, including saved rounds. */
 .agent-shell-v2 .chat-message > div.joined-action-bubble:has(> .image-picker-card .image-picker-tile:only-child),
 .agent-shell-v2 .chat-message > div.rich-message-bubble:has(> .image-picker-card .image-picker-tile:only-child),
