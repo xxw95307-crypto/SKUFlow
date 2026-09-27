@@ -1076,7 +1076,8 @@ body {
 }
 
 .agent-shell-v2 .image-picker-card .agent-asset-preview > img {
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
 }
 
 .agent-shell-v2 .image-picker-card .agent-asset-preview::after {
