@@ -119,7 +119,6 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       for (const [position, targetIndex] of options.targetIndices.entries()) {
         const oldAsset = priorImages[targetIndex - 1];
         const spec = plan.assets[position];
-        if ((oldAsset.kind === 'HERO') !== (spec.kind === 'HERO')) throw new Error('局部修改不能改变商品主图的位置；请让 Agent 重新规划整组图片');
         const oldRow = await bindings.DB.prepare("SELECT object_key, content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'")
           .bind(taskId, oldAsset.id).first<{ object_key: string; content_type: string }>();
         if (!oldRow?.object_key) throw new Error(`第 ${targetIndex} 张旧图不可用，请重新生成整组图片`);

@@ -72,7 +72,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 
 规则：
 0. 商家本轮要求优先于类目建议；明确排除的图类型或场景不得再次规划。例如“不要细节图”必须排除 DETAIL 与任何细节特写，改选其他有依据的素材。不把排除要求解释成仅调整细节图。
-1. ${targeted ? `这是局部修改，只输出 ${context.targetIndices!.length} 个 assets，依照指定序号的顺序一一对应。其余图片必须原样保留，不要重新规划，不要补一张 HERO。原图若为 HERO，应继续保持 HERO。` : '商家指定张数时必须严格按指定张数规划（1–6 张）；未指定时由你根据商品需求判断，规划 2–4 张。必须且只能有一张 HERO 商品主图；只有一张时只规划 HERO。'}
+1. ${targeted ? `这是局部修改，只输出 ${context.targetIndices!.length} 个 assets，依照指定序号的顺序一一对应。其余图片必须原样保留，不要重新规划，不要强制补一张 HERO。商家要求将原 HERO 改为海报或其他用途时可以改变 kind；后续媒体编排会另行选择封面。` : '商家指定张数时必须严格按指定张数规划（1–6 张）；未指定时由你根据商品需求判断，规划 2–4 张。必须且只能有一张 HERO 商品主图；只有一张时只规划 HERO。'}
 2. 其他 kind 从 LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING、POSTER 中选择，可按商品需要重复同一 kind，但场景和目的不得重复。POSTER 是海报式构图，不能编造商品卖点或平台标识。
 3. 服装可优先考虑 MODEL、穿搭场景和面料细节；家电可考虑使用场景、结构细节和尺寸感；食品可考虑包装、食用场景和质感特写。必须根据当前商品判断。
 4. size 只能是 1024*1024、1024*1280 或 1280*1024。

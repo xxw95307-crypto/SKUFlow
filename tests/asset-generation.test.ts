@@ -148,6 +148,7 @@ test('plans a specified image revision without replacing the whole image set', (
   assert.match(messages[1].content, /咖啡馆/);
   const poster = JSON.stringify({ assets: [{ kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '以原商品为主体，海报式构图。' }] });
   assert.equal(parseAssetPlan(poster, null, [3])[0].kind, 'POSTER');
+  assert.equal(parseAssetPlan(poster, null, [1])[0].kind, 'POSTER');
   assert.throws(() => parseAssetPlan(poster), /2–4 张/);
   const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(poster, null, [3])[0], productName: context.productName, facts, listings: [], previousAsset: context.existingAssets[2] });
   assert.match(prompt, /输入图片是本轮要修改的旧图/);
