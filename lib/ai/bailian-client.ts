@@ -519,7 +519,7 @@ export async function callBailianAssetPlanning(
             method: 'POST',
             headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
             body: JSON.stringify({ model, messages: [
-              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。逐项核对数量、每张画面、人物、风格、排除项和局部修改范围。尤其检查计划是否把商家明确要求出现的元素（例如某张要模特）写成禁止出现；也检查是否凭空添加了本轮未要求的排除项。出现任何这种冲突就返回 satisfies=false，reason 要指出冲突的原话及计划文字。不得自行加上主图、模特或平台规则。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
+              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。先把原话拆成每张独立目标，再核对计划的每一张是否有相应且不同的画面任务及可检验的验收标准。只有标题写“海报”而 instruction 只是普通人物场景照，不算完成海报；不同目标不能都规划成同一类场景图。逐项核对数量、人物、风格、排除项和局部修改范围。计划把商家明确要求出现的元素写成禁止出现、或凭空添加排除项时必须拒绝。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
               { role: 'user', content: JSON.stringify({ request: context.userGuidance, requestedCount: context.requestedCount, targetIndices: context.targetIndices, existingAssets: context.existingAssets, plan: assets }) },
             ], response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 300, stream: false }),
             signal: controller.signal,
@@ -553,7 +553,7 @@ export async function callBailianAssetPlanning(
 
 export async function checkGeneratedImageAgainstIntent(
   config: BailianConfig,
-  input: { bytes: Uint8Array; contentType: string; acceptance: string; instruction: string; userGuidance?: string | null; reference?: { bytes: Uint8Array; contentType: string } },
+  input: { bytes: Uint8Array; contentType: string; acceptance: string; instruction: string; userGuidance?: string | null; imageRole?: string; otherRoles?: string[]; reference?: { bytes: Uint8Array; contentType: string } },
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ matches: boolean; reason: string }> {
   if (!input.contentType.startsWith('image/') || !input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new Error('待核对图片无效或超过 8 MB');
@@ -567,7 +567,7 @@ export async function checkGeneratedImageAgainstIntent(
       messages: [{ role: 'user', content: [
         { type: 'image_url', image_url: { url: `data:${input.contentType};base64,${toBase64(input.bytes)}` } },
         ...(reference ? [{ type: 'image_url', image_url: { url: `data:${reference.contentType};base64,${toBase64(reference.bytes)}` } }] : []),
-        { type: 'text', text: `你是独立的成图核对员。第一张图是生成结果，${reference ? '第二张是原始商品参考图。' : ''}商家本轮原话：${input.userGuidance?.trim() || '未补充'}。本张策划验收标准：${input.acceptance}。创作指令：${input.instruction}。以商家本轮原话为准；若策划标准与本轮原话冲突，不得按冲突标准判失败，应按本轮原话判断并在理由中指出策划冲突。核对可见的关键元素、商品身份与真实标识；参考图文字或刺绣辨认不清时不要猜测。风格允许合理判断，不要凭空要求未指定元素。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
+        { type: 'text', text: `你是独立的成图核对员。第一张图是生成结果，${reference ? '第二张是原始商品参考图。' : ''}商家整组原话仅用于理解分工：${input.userGuidance?.trim() || '未补充'}。你只核对当前这一张的任务：${input.imageRole || '以本张策划为准'}；同组其他图片的任务：${input.otherRoles?.join('；') || '无'}，不得拿其他图片的要求为本张判通过。本张策划验收标准：${input.acceptance}。本张创作指令：${input.instruction}。先检查画面形式是否一眼可辨为本张目标，再检查元素、商品身份与真实标识。海报等设计图需有设计构图和视觉层次，不能把普通模特场景照片当成海报；是否包含人物以本张要求为准。若策划标准与商家原话冲突，按本张在原话中的目标判断。参考图文字或刺绣辨认不清时不要猜测。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
       ] }],
       response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 200, stream: false,
     }),

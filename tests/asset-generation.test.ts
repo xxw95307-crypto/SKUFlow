@@ -201,8 +201,12 @@ test('the latest seller request overrides exclusions inherited from older image 
   await callBailianAssetPlanning({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'test-model' }, context, fetchMock);
   assert.match(sent[0], /本轮明确提出的要求覆盖旧图/);
   assert.match(sent[1], /不可把旧图或以前的偏好当成本轮限制/);
-  const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(plan)[1], productName: context.productName, facts, listings: [], userGuidance: guidance });
-  assert.match(prompt, /商家本轮原话：重新生成两张图片/);
+  const posterPrompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(plan)[0], productName: context.productName, facts, listings: [] });
+  assert.match(posterPrompt, /本张图片的视觉类型：POSTER/);
+  assert.doesNotMatch(posterPrompt, /一张真人模特穿着展示/);
+  const modelPrompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(plan)[1], productName: context.productName, facts, listings: [] });
+  assert.match(modelPrompt, /本张图片的视觉类型：MODEL/);
+  assert.doesNotMatch(modelPrompt, /一张海报风格/);
 });
 
 test('checks any generated image against its own visual acceptance criteria', async () => {
@@ -223,7 +227,7 @@ test('image review sees the latest request and original product image', async ()
     return Response.json({ choices: [{ message: { content: '{"matches":true,"reason":"符合本轮要求"}' } }] });
   };
   const result = await checkGeneratedImageAgainstIntent({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, {
-    bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', instruction: '模特穿着商品', acceptance: '真人模特穿着商品', userGuidance: '一张海报，一张模特图',
+    bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', instruction: '模特穿着商品', acceptance: '真人模特穿着商品', userGuidance: '一张海报，一张模特图', imageRole: 'MODEL｜穿着展示', otherRoles: ['POSTER｜商品海报'],
     reference: { bytes: new Uint8Array([4, 5, 6]), contentType: 'image/png' },
   }, fetchMock);
   assert.equal(result.matches, true);

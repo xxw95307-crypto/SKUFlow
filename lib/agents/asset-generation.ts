@@ -72,10 +72,10 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 这一阶段只规划图片，不规划、提交或生成视频。视频会在商家确认最终图片后单独处理。
 
 规则：
-0. 逐项落实商家本轮对数量、内容、人物、风格、背景、角度、排除项和指定图片的要求。本轮明确提出的要求覆盖旧图的风格和早先的偏好；旧图只用于理解商品或定位修改对象，不得从中继承排除项。例如旧图没有人物，不代表本轮不能生成人物图。明确不需要的元素绝不加入；商家没有要求的模特、主图、细节图等绝不作为必需项补入。
+0. 先把商家本轮要求拆成每一张独立的视觉任务，再逐项落实数量、内容、人物、风格、背景、角度、排除项和指定图片的要求。每张的 instruction 只能描述这一张的目标，不得混入其他图片的目标。例如“一张海报、一张模特图”应有两个可辨认且不同的画面形式，不能都只是模特场景照。本轮明确提出的要求覆盖旧图的风格和早先的偏好；旧图只用于理解商品或定位修改对象，不得从中继承排除项。明确不需要的元素绝不加入；商家没有要求的模特、主图、细节图等绝不作为必需项补入。
 1. ${targeted ? `本轮只修改第 ${context.targetIndices!.join('、')} 张。只输出 ${context.targetIndices!.length} 个 assets，与这些序号依次对应。其余图片保持原样。` : `生成整组图片。${context.requestedCount == null ? '未指定数量时由你根据本轮要求决定 1–6 张；若自然语言明确列出了若干张，按列出的张数生成。' : `严格生成 ${context.requestedCount} 张。`}`}
 2. kind 只是可选展示标签，可用 HERO、LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING、POSTER；不贴切时用 CUSTOM。不得让标签反过来限制商家需求。封面和顺序由后续 Agent 决定，本阶段不指定主图。
-3. instruction 应描述每张图的主体、动作或摆放、构图、场景、光线、风格和必须避免的元素；acceptance 要把本轮要求转成视觉上可核对的标准，不得只写“符合要求”。禁止把本轮商家明确要求出现的元素写进排除项；任何额外排除项都必须有本轮原话或商品事实支持。
+3. instruction 应描述每张图的主体、动作或摆放、构图、场景、光线、风格和必须避免的元素；acceptance 要把本轮要求转成视觉上可核对的标准，不得只写“符合要求”。当商家用不同名称指定多张时，验收标准必须能区分各张的画面形式，不能只检查商品或背景。若要求海报，验收要检查可辨认的海报设计构图、视觉层次与可用信息区域，普通人物场景照不能充当海报；是否有人物仍以商家要求为准。禁止把本轮商家明确要求出现的元素写进排除项；任何额外排除项都必须有本轮原话或商品事实支持。
 4. size 只能是 1024*1024、1024*1280 或 1280*1024。
 5. 商品身份、外形、颜色、结构、材质和真实标识必须与原图及已确认事实一致；不得虚构功能、配件、认证、促销或价格。海报文字仅可使用已确认事实，难以可靠生成时预留排版空间。
 6. title、note、instruction、acceptance 使用简体中文。`,
@@ -153,7 +153,6 @@ export function buildAssetGenerationPrompt(input: {
   facts: readonly ProductFact[];
   listings: readonly ListingDraftPayload[];
   previousAsset?: Pick<GeneratedAsset, 'title' | 'note' | 'kind'> | null;
-  userGuidance?: string | null;
 }): string {
   return `你是跨境电商商品摄影与视觉设计师。${input.previousAsset ? '输入图片是本轮要修改的旧图。只修改这张图，严格执行商家的新要求；保留商品身份，无须复刻旧图的背景和构图。' : '请以输入图片中的真实商品作为唯一主体，执行视觉策划 Agent 制定的单张素材任务。'}
 
@@ -161,15 +160,17 @@ export function buildAssetGenerationPrompt(input: {
 1. 严格保持商品身份、外形、颜色、结构、材质、图案、商标和部件数量与参考图一致；不要把商品替换成相似款。
 2. 去除参考截图中的 App 界面、价格、按钮、状态栏和无关文字；不要照搬水印。
 3. 只能使用下方已确认商品事实，不得添加资料没有支持的配件、功能、认证、促销或文字。
-4. 严格完成下方具体视觉任务和验收标准。本轮商家的明确要求优先于旧图描述或策划中的推断；如果策划内容与本轮要求冲突，按本轮要求执行。不要自行添加商家未要求的模特、文字、道具或场景。若任务需要海报文字，只使用已确认的商品名称或事实，不能可靠生成时预留排版空间。
-5. 保持商业摄影质感、真实比例、自然光影和清晰细节。
+4. 只执行下方这一张的视觉任务与验收标准，绝不同时制作同组其他图片的形式。不要自行添加这张任务未要求的人物、文字、道具或场景。若任务需要海报文字，只使用已确认的商品名称或事实，不能可靠生成时预留排版空间。
+5. 按这张图要求的媒介表达：摄影图保持真实比例和自然光影；海报、插画或信息设计应呈现清晰的设计构图、视觉层次和可用排版区域，不能只把普通场景照片当成设计成品。商品本身保持清晰。
 
 商品名称：${input.productName}
 已确认商品事实：${factText(input.facts) || '以参考图可见内容为准'}
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
 ${input.previousAsset ? `待修改旧图：${input.previousAsset.kind}｜${input.previousAsset.title}｜${input.previousAsset.note}` : ''}
-商家本轮原话：${input.userGuidance?.trim() || '未补充'}
 
+本张图片的视觉类型：${input.spec.kind}
+本张图片的标题：${input.spec.title}
+本张图片的用途：${input.spec.note}
 视觉策划任务：${input.spec.instruction}
 成图验收标准：${input.spec.acceptance}`;
 }

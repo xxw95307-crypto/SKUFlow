@@ -25,6 +25,7 @@ async function generateVerifiedImage(
   prompt: string,
   userGuidance: string | null,
   reference: { bytes: Uint8Array; contentType: string },
+  otherRoles: string[],
 ) {
   let feedback = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -34,7 +35,7 @@ async function generateVerifiedImage(
     try {
       const check = await checkGeneratedImageAgainstIntent(reviewConfig, {
         bytes: generated.bytes, contentType: generated.contentType, acceptance: spec.acceptance, instruction: spec.instruction,
-        userGuidance, reference,
+        userGuidance, reference, imageRole: `${spec.kind}｜${spec.title}｜${spec.note}`, otherRoles,
       });
       if (check.matches) return { generated, reviewWarning: null };
       feedback = check.reason || '画面没有满足本张图片的验收标准';
@@ -154,10 +155,10 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         if (!oldRow?.object_key) throw new Error(`第 ${targetIndex} 张旧图不可用，请重新生成整组图片`);
         const oldImage = await bindings.UPLOADS.get(oldRow.object_key);
         if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
-        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset, userGuidance: options.guidance });
+        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset });
         const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, {
           bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type,
-        }, spec, prompt, options.guidance, { bytes, contentType: image.content_type });
+        }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
         const id = `asset_${crypto.randomUUID()}`;
         const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
         await bindings.UPLOADS.put(objectKey, generated.bytes, {
@@ -188,8 +189,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }
 
     const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
-      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, userGuidance: options.guidance });
-      const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type });
+      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
+      const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
       return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
     }));
     const writes = await Promise.all(prepared.map(async ({ spec, prompt, generated, reviewWarning, id, position }) => {
