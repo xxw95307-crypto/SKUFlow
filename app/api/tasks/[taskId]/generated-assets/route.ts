@@ -1,7 +1,7 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt, type AssetGenerationSpec } from '@/lib/agents/asset-generation';
-import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageAgainstIntent } from '@/lib/ai/bailian-client';
+import { callBailianAssetPlanning, callBailianImageGeneration, callBailianVisualIntent, checkGeneratedImageAgainstIntent } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, loadBailianImageConfig, missingBailianConfig, missingBailianImageConfig } from '@/lib/config/bailian';
 import type { GeneratedAsset, GeneratedAssetSummary } from '@/lib/domain/generated-asset';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
@@ -55,23 +55,19 @@ function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
   };
 }
 
-async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null; targetIndices: number[] }> {
+async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null; confirmedBrief: boolean }> {
   const raw = await request.text();
-  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null, targetIndices: [] };
+  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null, confirmedBrief: false };
   try {
-    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown; targetIndices?: unknown };
+    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown; confirmedBrief?: unknown };
     if (value.count != null && (!Number.isInteger(value.count) || (value.count as number) < 1 || (value.count as number) > 6)) {
       throw new Error('图片数量需为 1–6 张');
     }
     const guidance = typeof value.guidance === 'string' ? value.guidance.trim().slice(0, 500) : '';
     const style = typeof value.style === 'string' ? value.style.trim().slice(0, 200) : '';
-    const targetIndices = value.targetIndices == null ? [] : value.targetIndices;
-    if (!Array.isArray(targetIndices) || targetIndices.length > 6 || targetIndices.some((index) => !Number.isInteger(index) || index < 1 || index > 6) || new Set(targetIndices).size !== targetIndices.length) {
-      throw new Error('目标图片序号无效');
-    }
-    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null, targetIndices: [...targetIndices].sort((a, b) => a - b) };
+    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null, confirmedBrief: value.confirmedBrief === true };
   } catch {
-    throw new Error('图片生成参数无效，请检查张数或目标图片序号');
+    throw new Error('图片生成参数无效，请检查张数');
   }
 }
 
@@ -114,9 +110,12 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return Response.json({ error: '请先完成所有平台 Listing 审核，再生成视觉素材' }, { status: 409 });
     }
     const priorImages = existing.filter((asset) => asset.status === 'COMPLETED' && asset.kind !== 'VIDEO');
-    if (options.targetIndices.some((index) => index > priorImages.length)) {
-      return Response.json({ error: `当前只有 ${priorImages.length} 张图片，请指定有效的图片序号` }, { status: 400 });
-    }
+    const decision = options.confirmedBrief
+      ? { scope: 'FULL_SET' as const, count: options.count, style: options.style, targetIndices: [] as number[] }
+      : await callBailianVisualIntent(planningConfig, {
+          request: options.guidance || '请根据当前商品生成图片',
+          existingAssets: priorImages.map(({ kind, title, note }) => ({ kind, title, note })),
+        });
     const images = await bindings.DB.prepare(
       `SELECT id, object_key, content_type FROM task_files
        WHERE task_id = ? AND content_type LIKE 'image/%' ORDER BY created_at ASC`,
@@ -127,7 +126,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (!source) return Response.json({ error: '对象存储中未找到原始商品图' }, { status: 404 });
     const bytes = new Uint8Array(await source.arrayBuffer());
     const listings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [draft.payload] : []);
-    const requestedCount = options.targetIndices.length ? null : options.count;
+    const requestedCount = decision.targetIndices.length ? null : decision.count;
     const plan = await callBailianAssetPlanning(planningConfig, {
       productName: task.productName,
       facts: passport.facts,
@@ -138,16 +137,16 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       sourceImageIds: images.results.map(image=>image.id),
       userGuidance: options.guidance,
       requestedCount,
-      styleGuidance: options.style,
+      styleGuidance: decision.style,
       existingAssets: priorImages,
-      targetIndices: options.targetIndices,
+      targetIndices: decision.targetIndices,
     });
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
 
-    if (options.targetIndices.length) {
+    if (decision.targetIndices.length) {
       const replacements = new Map<number, { id: string; spec: typeof plan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string; reviewWarning: string | null }>();
-      for (const [position, targetIndex] of options.targetIndices.entries()) {
+      for (const [position, targetIndex] of decision.targetIndices.entries()) {
         const oldAsset = priorImages[targetIndex - 1];
         const spec = plan.assets[position];
         const oldRow = await bindings.DB.prepare("SELECT object_key, content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'")
@@ -185,7 +184,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       });
       await bindings.DB.batch(writes);
       const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
-      return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: plan.assets, plannerModel: plan.model });
+      return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: plan.assets, plannerModel: plan.model, decision });
     }
 
     const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
@@ -208,7 +207,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }));
     await bindings.DB.batch(writes);
     const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
-    return Response.json({ assets, summary: summarize(assets), reused: false, plan: plan.assets, plannerModel: plan.model });
+    return Response.json({ assets, summary: summarize(assets), reused: false, plan: plan.assets, plannerModel: plan.model, decision });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视觉素材生成失败';
     return Response.json({ error: message }, { status: message.startsWith('图片生成参数无效') ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });

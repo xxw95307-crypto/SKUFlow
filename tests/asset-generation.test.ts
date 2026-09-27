@@ -1,7 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildAssetGenerationPrompt, buildAssetPlanningMessages, parseVisualToolDecision, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
-import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageAgainstIntent } from '../lib/ai/bailian-client.ts';
+import { callBailianAssetPlanning, callBailianImageGeneration, callBailianVisualIntent, checkGeneratedImageAgainstIntent } from '../lib/ai/bailian-client.ts';
+
+test('visual intent Agent retries incomplete output and recognizes a full two-image redo', async () => {
+  let calls = 0;
+  const fetchMock = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls += 1;
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+    assert.match(body.messages[1].content, /一张是海报风格，一张是模特图/);
+    return Response.json({ choices: [{ message: { content: calls === 1 ? '{}' : '{"scope":"FULL_SET","count":2,"style":"一张海报风格，一张模特图","targetIndices":[]}' } }] });
+  }) as typeof fetch;
+  const result = await callBailianVisualIntent(
+    { apiKey: 'test-key', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'test-model' },
+    { request: '重新帮我生成图片，一张是海报风格，一张是模特图', existingAssets: [{ kind: 'CUSTOM', title: '旧图一', note: '' }, { kind: 'CUSTOM', title: '旧图二', note: '' }] },
+    fetchMock,
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual(result, { scope: 'FULL_SET', count: 2, style: '一张海报风格，一张模特图', targetIndices: [] });
+});
+
+test('visual intent Agent can identify a single existing image for editing', async () => {
+  const fetchMock = (async () => Response.json({ choices: [{ message: { content: '{"scope":"SELECTED","count":null,"style":"海报风格","targetIndices":[2]}' } }] })) as typeof fetch;
+  const result = await callBailianVisualIntent(
+    { apiKey: 'test-key', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'test-model' },
+    { request: '把第二张改成海报风格', existingAssets: [{ kind: 'CUSTOM', title: '旧图一', note: '' }, { kind: 'CUSTOM', title: '旧图二', note: '' }] },
+    fetchMock,
+  );
+  assert.deepEqual(result.targetIndices, [2]);
+});
 import { loadBailianImageConfig, missingBailianImageConfig } from '../lib/config/bailian.ts';
 import type { ProductFact } from '../lib/domain/product-passport.ts';
 import type { GeneratedAsset } from '../lib/domain/generated-asset.ts';

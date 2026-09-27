@@ -93,8 +93,8 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
 test('visual requirements are routed through structured Agent tools', () => {
   const approved = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, generatedDraftCount: 2, approvedDraftCount: 2 });
   const tool = availableAgentTools(approved).find((item) => item.function.name === 'generate_visual_assets');
-  assert.deepEqual(tool?.function.parameters.required, ['scope']);
-  assert.deepEqual((tool?.function.parameters.properties.scope as { enum: string[] }).enum, ['FULL_SET', 'SELECTED']);
+  assert.deepEqual(tool?.function.parameters.properties, {});
+  assert.equal(tool?.function.parameters.required, undefined);
   const mediaReady = { ...approved, generatedAssetCount: 2, selectedAssetCount: 2, selectedImageCount: 2, imagesConfirmed: true, videoStageComplete: true };
   assert.ok(availableAgentTools(mediaReady).some((item) => item.function.name === 'revise_media_order'));
 });

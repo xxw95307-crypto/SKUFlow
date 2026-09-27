@@ -13,7 +13,6 @@ import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
-import { parseVisualToolDecision } from '@/lib/agents/asset-generation';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
@@ -915,23 +914,18 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       }
       if (name === 'generate_visual_assets') {
         const initialBrief = requestText.startsWith('我已确认图片生成需求，请生成图片') ? imageBriefRef.current : null;
-        const existingImages = generatedAssets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED');
-        const decision = initialBrief
-          ? { scope: 'FULL_SET' as const, count: initialBrief.count, style: initialBrief.style, targetIndices: [] }
-          : parseVisualToolDecision(call.function.arguments, existingImages.length);
-        const targetIndices = decision.targetIndices;
-        const requestedCount = decision.count;
-        const requestedStyle = decision.style;
-        setProgressStep(3); setBusyLabel(targetIndices.length ? '视觉策划 Agent 正在修改指定图片…' : '视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint(targetIndices.length ? '其他图片会保留，修改后可继续预览和选择' : '会生成多张候选图片，稍后由你挑选');
+        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在理解要求并生成商品图片…'); setBusyHint('会根据你的描述决定生成整组或修改指定图片');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
           retainedAssetIds?: Record<string, string>;
+          decision: { targetIndices: number[] };
         }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force: true, guidance: requestText, count: requestedCount, style: requestedStyle, targetIndices }),
+          body: JSON.stringify({ force: true, guidance: requestText, confirmedBrief: Boolean(initialBrief), count: initialBrief?.count ?? null, style: initialBrief?.style ?? null }),
         }), '视觉素材生成失败');
+        const targetIndices = payload.decision.targetIndices;
         setGeneratedAssets(payload.assets);
         selectedAssetsRef.current = targetIndices.length
           ? selectedAssetsRef.current.filter((id) => id.startsWith('asset_')).flatMap((id) => payload.retainedAssetIds?.[id] ? [payload.retainedAssetIds[id]] : [])

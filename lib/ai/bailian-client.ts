@@ -2,7 +2,7 @@ import { buildFactExtractionMessages, parseFactExtractionOutput, type Extraction
 import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/vision-analysis.ts';
 import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
 import { buildListingLocalizationMessages, parseListingLocalizationOutput, type ListingLocalizationContext } from '../agents/listing-localization.ts';
-import { buildAssetPlanningMessages, parseAssetPlan, type AssetGenerationSpec, type AssetPlanningContext } from '../agents/asset-generation.ts';
+import { buildAssetPlanningMessages, parseAssetPlan, parseVisualToolDecision, type AssetGenerationSpec, type AssetPlanningContext, type VisualToolDecision } from '../agents/asset-generation.ts';
 import type { BailianConfig, BailianImageConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
@@ -474,6 +474,41 @@ export async function callBailianListingLocalization(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function callBailianVisualIntent(
+  config: BailianConfig,
+  input: { request: string; existingAssets: readonly { kind: string; title: string; note: string }[] },
+  fetchImpl: typeof fetch = fetch,
+): Promise<VisualToolDecision> {
+  const apiKey = config.apiKey.trim();
+  const model = config.model.trim();
+  if (!apiKey || !model) throw new Error('百炼图片需求分析配置不完整');
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [{
+    role: 'system',
+    content: `你是商品图片需求分析 Agent。只分析商家本轮原话，不生成图片。返回 JSON：{"scope":"FULL_SET 或 SELECTED","count":数字或null,"style":字符串或null,"targetIndices":数组}。
+FULL_SET 表示首次生成、重新生成整组、改变图片总数，或列出要生成的几种新图片；targetIndices 必须为空。SELECTED 只用于商家明确指向当前已有的一张或数张图片进行修改；targetIndices 填当前图片从 1 开始的序号，count 必须为 null。“一张海报、一张模特图”是在列出新图类型，不是在指已有图片序号。不要把前一轮偏好当成本轮要求。若没有现有图片，只能 FULL_SET。若本轮原话只要求重新生成图片且没有指向已有图片，选择 FULL_SET。count 只有商家明确指定总数时才填写，范围 1–6；style 仅填商家提出的风格或视觉要求。必须明确填写 scope。`,
+  }, { role: 'user', content: JSON.stringify(input) }];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetchImpl(`${normalizeBaseUrl(config.baseUrl)}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages, response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 300, stream: false }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!response.ok) throw new Error(`百炼图片需求分析失败（HTTP ${response.status}）`);
+    const payload = await response.json() as ChatCompletionResponse;
+    const content = responseText(payload.choices?.[0]?.message?.content);
+    try {
+      const decision = parseVisualToolDecision(content, input.existingAssets.length);
+      if (!input.existingAssets.length && decision.scope !== 'FULL_SET') throw new Error('当前没有可修改的已有图片');
+      return decision;
+    } catch (error) {
+      if (attempt === 1) throw new Error('暂时无法确定要生成整组图片还是修改指定图片，请说明图片范围后重试');
+      messages.push({ role: 'user', content: `上一版图片范围判断无效：${error instanceof Error ? error.message : '格式错误'}。请重新分析本轮原话，必须输出完整 JSON；整组重新生成应选择 FULL_SET。` });
+    }
+  }
+  throw new Error('图片需求分析未完成');
 }
 
 export async function callBailianAssetPlanning(
