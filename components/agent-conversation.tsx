@@ -229,14 +229,13 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   onSkipVideo: () => void;
 }) {
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
-  return <div className="asset-conversation-card">
-    <header><span>第一步 · 确认商品图片</span><h3>我为这个商品生成了 {completed.length} 张候选图</h3><p>先挑选和修改图片。确认后才会开始视频生成。</p></header>
-    <div className="agent-asset-grid">{completed.map((asset) => <button type="button" className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
-      <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i>{selected.includes(asset.id) ? '✓' : '+'}</i><b>{assetKindLabel(asset.kind)}</b></span>
-      <strong>{asset.title}</strong><small>{asset.note}</small><em>{asset.model}</em>
+  const selectedCount = completed.filter((asset) => selected.includes(asset.id)).length;
+  return <div className="asset-conversation-card image-picker-card">
+    <h3 className="visually-hidden">选择商品图片</h3>
+    <div className="agent-asset-grid">{completed.map((asset) => <button type="button" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}${asset.title}`} aria-pressed={selected.includes(asset.id)} className={selected.includes(asset.id) ? 'selected' : ''} onClick={() => onToggle(asset.id)} key={asset.id}>
+      <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={512} height={512} unoptimized /><i aria-hidden="true">{selected.includes(asset.id) ? '✓' : '+'}</i>{asset.kind === 'HERO' && <b>主图</b>}</span>
     </button>)}</div>
-    <div className="asset-conversation-hint"><span>↳</span><div><b>图片不满意？</b><p>直接在下方告诉我修改要求，例如“换成户外场景，不要模特”。这一步只重做图片，不会调用视频模型。</p></div></div>
-    <footer><span>已选择 {completed.filter((asset) => selected.includes(asset.id)).length} 张图片</span><button type="button" disabled={selected.length === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selected.length === 0} onClick={onConfirm}>确认图片，开始生成视频</button></footer>
+    <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>
   </div>;
 }
 
@@ -1427,12 +1426,13 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             const joinsAssets = joinAssetsToLastAgentReply && index === messages.length - 1;
             const joinsVideo = joinVideoToLastAgentReply && index === messages.length - 1;
             const joinsAction = joinsIntake || joinsImageBrief || joinsAssets || joinsVideo;
+            if (message.meta === '等待素材选择' && !joinsAssets) return null;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
             const displayedMessage = currentListingMessage(message, passport);
             return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}`} key={message.id}>
               <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
               <div className={`${richClass}${joinsAction ? ' joined-action-bubble' : ''}`}>
-                {joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
+                {joinsAssets ? null : joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
                 {joinsIntake && intakeCard}
                 {joinsImageBrief && imageBriefCard}
                 {joinsAssets && assetCard}
