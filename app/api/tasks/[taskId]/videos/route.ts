@@ -6,6 +6,7 @@ import { listLatestGeneratedAssets } from '@/lib/server/generated-asset-store';
 import { selectConfirmedVideoImages } from '@/lib/agents/asset-generation';
 import { loadBailianConfig } from '@/lib/config/bailian';
 import { loadWanVideoConfig, parseVideoPlan } from '@/lib/ai/wan-video';
+import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +61,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const selectedImageIds = images.map((image) => image.id);
     if (body.purpose === 'initial') {
       const existing = await bindings.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? ORDER BY created_at DESC LIMIT 50').bind(taskId).all<VideoJobRow>();
-      const active = existing.results.find((job) => selectedImageIds.includes(job.source_file_id) && !['CANCELED', 'TRIM_DRAFT'].includes(job.status));
+      const active = existing.results.find((job) => selectedImageIds.includes(job.source_file_id) && isReusableVideoJob(job));
       if (active) return Response.json({ job: publicJob(active), reused: true });
     }
 

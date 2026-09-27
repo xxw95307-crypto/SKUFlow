@@ -1,6 +1,7 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, requiredMediaToolAfterUser } from '@/lib/agents/commerce-orchestrator';
+import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import {
@@ -106,7 +107,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
   ]);
   const completedAssets = generatedAssets.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith('asset_dynamic_'));
   const videos=await DB.prepare("SELECT id,plan_json FROM video_jobs WHERE task_id=? AND status='SUCCEEDED' ORDER BY created_at DESC, id DESC").bind(taskId).all<{id:string;plan_json:string}>();
-  const relevantVideoJobs = await DB.prepare("SELECT source_file_id FROM video_jobs WHERE task_id=? AND status NOT IN ('CANCELED','TRIM_DRAFT')").bind(taskId).all<{source_file_id:string}>();
+  const relevantVideoJobs = await DB.prepare('SELECT source_file_id,status,error FROM video_jobs WHERE task_id=?').bind(taskId).all<{source_file_id:string;status:string;error:string|null}>();
   const generatedDrafts = passport.platformDrafts.filter((draft) => draft.status !== 'PLANNED' && Object.keys(draft.payload).length > 0);
   const approvedDrafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
   return {
@@ -131,7 +132,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length + videos.results.filter(v=>selectedAssetIds.has(v.id)).length,
     selectedImageCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length,
     imagesConfirmed: body.imagesConfirmed === true,
-    videoJobCount: relevantVideoJobs.results.filter((job) => selectedAssetIds.has(job.source_file_id)).length,
+    videoJobCount: relevantVideoJobs.results.filter((job) => selectedAssetIds.has(job.source_file_id) && isReusableVideoJob(job)).length,
     videoStageComplete: body.videoStageComplete === true,
     publishApproved: body.publishApproved === true,
   };

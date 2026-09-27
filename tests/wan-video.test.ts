@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,submitWanVideo,queryWanVideo} from '../lib/ai/wan-video.ts';
+import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,submitWanVideo,queryWanVideo,WanVideoRequestError} from '../lib/ai/wan-video.ts';
+import {isReusableVideoJob} from '../lib/domain/video-job-retry.ts';
 const c={apiKey:'test-secret',baseUrl:'https://dashscope.aliyuncs.com/api/v1',model:'wan2.7-i2v'};
 const plan={title:'商品展示',prompt:'保持商品结构一致，缓慢推进镜头',duration:5,resolution:'720P' as const,sourceFileId:'asset_cover',shots:['商品全貌','细节']};
 test('video configuration reuses authorized Bailian key but always uses native video endpoint',()=>{
@@ -18,4 +19,14 @@ test('submit uses async native video API and returns provider ID rather than cla
 test('polling uses existing task ID; failed task stays failed and invalid download host is rejected',async()=>{
  const failed=await queryWanVideo(c,'provider-1',async(url,init)=>{assert.match(String(url),/tasks\/provider-1$/);assert.equal(init?.method,'GET');return Response.json({output:{task_status:'FAILED',message:'quota'}});});assert.equal(failed.task_status,'FAILED');
  await assert.rejects(()=>queryWanVideo(c,'p',async()=>Response.json({output:{task_status:'SUCCEEDED',video_url:'https://example.com/movie.mp4'}})),/地址无效/);
+});
+test('a definite account denial can be retried with a fresh video job without exposing provider prose',async()=>{
+ await assert.rejects(
+  ()=>submitWanVideo(c,plan,'data:image/png;base64,AAA',async()=>Response.json({code:'Arrearage',message:'Access denied, please make sure your account is in good standing. For details, see: https://help.aliyun.com/zh/model-studio/error-code#overdue-payment'},{status:400})),
+  (error:unknown)=>error instanceof WanVideoRequestError && /视频 API Key 对应账号/.test(error.message) && !/https:\/\//.test(error.message),
+ );
+ assert.equal(isReusableVideoJob({status:'FAILED',error:'账号欠费'}),false);
+ assert.equal(isReusableVideoJob({status:'SUBMISSION_UNKNOWN',error:'提交结果未确认：Access denied, please make sure your account is in good standing. https://help.aliyun.com/zh/model-studio/error-code#overdue-payment'}),false);
+ assert.equal(isReusableVideoJob({status:'SUBMISSION_UNKNOWN',error:'网络超时'}),true);
+ assert.equal(isReusableVideoJob({status:'PENDING'}),true);
 });

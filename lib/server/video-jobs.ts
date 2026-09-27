@@ -1,6 +1,6 @@
 import {ensureSchema,getBindings} from '@/db/client';
 import {getProductPassport} from '@/lib/server/passport-store';
-import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo} from '@/lib/ai/wan-video';
+import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo,WanVideoRequestError} from '@/lib/ai/wan-video';
 interface VideoJobRow { id:string; task_id:string; source_file_id:string; plan_json:string; status:string; provider_task_id:string|null; error:string|null; }
 const publicJob=(r:VideoJobRow)=>({id:r.id,status:r.status,plan:JSON.parse(r.plan_json),error:r.error,videoUrl:r.status==='SUCCEEDED'?`/api/tasks/${r.task_id}/videos/${r.id}/file`:null});
 export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:string}>}) {
@@ -12,7 +12,12 @@ export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:str
  if(!source)throw new Error('已选首帧图片不存在');const image=await b.UPLOADS.get(source.object_key);if(!image)throw new Error('首帧图片内容不存在');const bytes=new Uint8Array(await image.arrayBuffer());if(bytes.length>20*1024*1024)throw new Error('首帧图片超过20MB');
  const lock=await b.DB.prepare("UPDATE video_jobs SET status='SUBMITTING' WHERE id=? AND task_id=? AND status='DRAFT'").bind(id,taskId).run();if(!lock.meta.changes)return Response.json({job:publicJob(job)});
  try {let text='';for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));const providerId=await submitWanVideo(c,JSON.parse(job.plan_json),`data:${source.content_type};base64,${btoa(text)}`);await b.DB.prepare("UPDATE video_jobs SET status='PENDING',provider_task_id=? WHERE id=?").bind(providerId,id).run();}
- catch(e){await b.DB.prepare("UPDATE video_jobs SET status='SUBMISSION_UNKNOWN',error=? WHERE id=?").bind('提交结果未确认：'+(e as Error).message,id).run();throw e;}
+ catch(e){
+  const rejected=e instanceof WanVideoRequestError;
+  await b.DB.prepare('UPDATE video_jobs SET status=?,error=? WHERE id=?')
+   .bind(rejected?'FAILED':'SUBMISSION_UNKNOWN',rejected?(e as Error).message:'提交结果未确认：'+(e as Error).message,id).run();
+  throw e;
+ }
  }
  if(action==='refresh'&&['PENDING','RUNNING'].includes(job.status)) {
  if(!job.provider_task_id)throw new Error('视频服务任务 ID 缺失，请核对服务记录');const out=await queryWanVideo(c,job.provider_task_id);if(out.task_status==='SUCCEEDED') {

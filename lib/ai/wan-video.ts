@@ -1,5 +1,8 @@
 export interface WanVideoConfig { apiKey:string; baseUrl:string; model:string }
 export interface VideoPlan {title:string;prompt:string;duration:number;resolution:'720P'|'1080P';sourceFileId:string;shots:string[]}
+export class WanVideoRequestError extends Error {
+ constructor(message:string) {super(message);this.name='WanVideoRequestError';}
+}
 export function loadWanVideoConfig(e:{BAILIAN_API_KEY?:string;BAILIAN_VIDEO_API_KEY?:string;BAILIAN_VIDEO_BASE_URL?:string;BAILIAN_VIDEO_MODEL?:string}):WanVideoConfig {
  return {apiKey:e.BAILIAN_VIDEO_API_KEY?.trim()||e.BAILIAN_API_KEY?.trim()||'',baseUrl:e.BAILIAN_VIDEO_BASE_URL?.trim().replace(/\/$/,'')||'https://dashscope.aliyuncs.com/api/v1',model:e.BAILIAN_VIDEO_MODEL?.trim()||'wan2.7-i2v'};
 }
@@ -14,7 +17,17 @@ export function parseVideoPlan(raw:any,sourceIds:string[]):VideoPlan {
 }
 async function api(c:WanVideoConfig,path:string,body:unknown|undefined,fetcher:typeof fetch) {
  requireWanConfig(c);const r=await fetcher(c.baseUrl+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${c.apiKey}`,'content-type':'application/json',...(body?{'X-DashScope-Async':'enable'}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
- const d=await r.json() as any;if(!r.ok||d.code||!d.output)throw new Error(`视频服务请求失败：${String(d.message??d.code??r.status).slice(0,300)}`);return d.output;
+ const d=await r.json() as any;
+ if(!r.ok||d.code||!d.output) {
+  const detail=String(d.message??d.code??r.status);
+  if(d.code==='Arrearage'||/overdue-payment|account is in good standing/i.test(detail)) {
+   throw new WanVideoRequestError('视频服务所属阿里云账号存在欠费或账户状态异常。请检查视频 API Key 对应账号的费用与账单；恢复后重试当前步骤。');
+  }
+  const message=`视频服务拒绝了请求（${String(d.code??`HTTP ${r.status}`).slice(0,60)}）：${detail.slice(0,240)}`;
+  if(!r.ok||d.code) throw new WanVideoRequestError(message);
+  throw new Error(message);
+ }
+ return d.output;
 }
 export async function submitWanVideo(c:WanVideoConfig,plan:VideoPlan,image:string,fetcher:typeof fetch=fetch):Promise<string> {
  parseVideoPlan(plan,[plan.sourceFileId]);if(!/^data:image\/(png|jpeg|webp|bmp);base64,/.test(image))throw new Error('视频首帧图片格式不支持');
