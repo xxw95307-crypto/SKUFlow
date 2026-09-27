@@ -1,7 +1,7 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt, imageKindsFromRequest } from '@/lib/agents/asset-generation';
-import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageKind } from '@/lib/ai/bailian-client';
+import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt, type AssetGenerationSpec } from '@/lib/agents/asset-generation';
+import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageAgainstIntent } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, loadBailianImageConfig, missingBailianConfig, missingBailianImageConfig } from '@/lib/config/bailian';
 import type { GeneratedAsset, GeneratedAssetSummary } from '@/lib/domain/generated-asset';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
@@ -15,6 +15,27 @@ interface ImageFileRow {
   id: string;
   object_key: string;
   content_type: string;
+}
+
+async function generateVerifiedImage(
+  imageConfig: Parameters<typeof callBailianImageGeneration>[0],
+  reviewConfig: Parameters<typeof checkGeneratedImageAgainstIntent>[0],
+  source: { bytes: Uint8Array; contentType: string },
+  spec: AssetGenerationSpec,
+  prompt: string,
+) {
+  let feedback = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const generated = await callBailianImageGeneration(imageConfig, {
+      ...source, prompt: feedback ? `${prompt}\n\n上一版未通过画面验收：${feedback}。请优先纠正，严格满足：${spec.acceptance}` : prompt, size: spec.size,
+    });
+    const check = await checkGeneratedImageAgainstIntent(reviewConfig, {
+      bytes: generated.bytes, contentType: generated.contentType, acceptance: spec.acceptance, instruction: spec.instruction,
+    });
+    if (check.matches) return generated;
+    feedback = check.reason || '画面没有满足本张图片的验收标准';
+  }
+  throw new Error(`生成图片两次未达到要求：${feedback}；本轮未保存不符合要求的图片`);
 }
 
 function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
@@ -97,11 +118,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (!source) return Response.json({ error: '对象存储中未找到原始商品图' }, { status: 404 });
     const bytes = new Uint8Array(await source.arrayBuffer());
     const listings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [draft.payload] : []);
-    const requiredKinds = options.targetIndices.length ? [] : imageKindsFromRequest(options.guidance ?? '');
-    const requestedCount = options.targetIndices.length ? null : options.count ?? (requiredKinds.length > 1 ? requiredKinds.length : null);
-    if (requestedCount != null && requiredKinds.length > requestedCount) {
-      return Response.json({ error: '指定的图片类型数量超过总张数，请调整图片需求' }, { status: 400 });
-    }
+    const requestedCount = options.targetIndices.length ? null : options.count;
     const plan = await callBailianAssetPlanning(planningConfig, {
       productName: task.productName,
       facts: passport.facts,
@@ -115,7 +132,6 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       styleGuidance: options.style,
       existingAssets: priorImages,
       targetIndices: options.targetIndices,
-      requiredKinds,
     });
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
@@ -131,23 +147,9 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         const oldImage = await bindings.UPLOADS.get(oldRow.object_key);
         if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
         const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset });
-        let generated = await callBailianImageGeneration(config, {
-          bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type, prompt, size: spec.size,
-        });
-        if (spec.kind === 'MODEL' || spec.kind === 'POSTER') {
-          let check = await checkGeneratedImageKind(planningConfig, { bytes: generated.bytes, contentType: generated.contentType, kind: spec.kind });
-          if (!check.matches) {
-            const source = await bindings.UPLOADS.get(oldRow.object_key);
-            if (!source) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
-            generated = await callBailianImageGeneration(config, {
-              bytes: new Uint8Array(await source.arrayBuffer()), contentType: oldRow.content_type,
-              prompt: `${prompt}\n\n上一版图片未满足要求：${check.reason}。请明显呈现${spec.kind === 'MODEL' ? '真人模特穿着商品' : '海报式设计构图'}。`,
-              size: spec.size,
-            });
-            check = await checkGeneratedImageKind(planningConfig, { bytes: generated.bytes, contentType: generated.contentType, kind: spec.kind });
-            if (!check.matches) throw new Error(`第 ${targetIndex} 张修改后仍未符合要求：${check.reason || '图片类型不符'}；旧图片已保留`);
-          }
-        }
+        const generated = await generateVerifiedImage(config, planningConfig, {
+          bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type,
+        }, spec, prompt);
         const id = `asset_${crypto.randomUUID()}`;
         const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
         await bindings.UPLOADS.put(objectKey, generated.bytes, {
@@ -177,78 +179,27 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: plan.assets, plannerModel: plan.model });
     }
 
-    if (requiredKinds.length) {
-      const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
-        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
-        let generated = await callBailianImageGeneration(config, { bytes, contentType: image.content_type, prompt, size: spec.size });
-        if ((spec.kind === 'MODEL' || spec.kind === 'POSTER') && requiredKinds.includes(spec.kind)) {
-          let check = await checkGeneratedImageKind(planningConfig, { bytes: generated.bytes, contentType: generated.contentType, kind: spec.kind });
-          if (!check.matches) {
-            generated = await callBailianImageGeneration(config, {
-              bytes, contentType: image.content_type,
-              prompt: `${prompt}\n\n上一版图片未满足指定类型：${check.reason}。请纠正，必须清晰满足${spec.kind === 'MODEL' ? '真人模特实际穿着商品' : '真正的海报式视觉构图'}。`,
-              size: spec.size,
-            });
-            check = await checkGeneratedImageKind(planningConfig, { bytes: generated.bytes, contentType: generated.contentType, kind: spec.kind });
-            if (!check.matches) throw new Error(`第 ${position + 1} 张${spec.kind === 'MODEL' ? '模特图' : '海报图'}两次生成仍未符合要求：${check.reason || '图片类型不符'}；旧图片已保留`);
-          }
-        }
-        return { spec, prompt, generated, id: `asset_${crypto.randomUUID()}`, position };
-      }));
-      const writes = await Promise.all(prepared.map(async ({ spec, prompt, generated, id, position }) => {
-        const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
-        await bindings.UPLOADS.put(objectKey, generated.bytes, {
-          httpMetadata: { contentType: generated.contentType },
-          customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
-        });
-        const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
-        return prepareGeneratedAssetInsert(bindings.DB, {
-          id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
-          prompt, objectKey, contentType: generated.contentType, model: generated.model, status: 'COMPLETED',
-          width: generated.width, height: generated.height, error: null, createdAt: timestamp, completedAt: timestamp,
-        });
-      }));
-      await bindings.DB.batch(writes);
-      const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
-      return Response.json({ assets, summary: summarize(assets), reused: false, plan: plan.assets, plannerModel: plan.model });
-    }
-
-    await Promise.all(plan.assets.map(async (spec) => {
-      const id = `asset_${crypto.randomUUID()}`;
+    const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
       const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
-      try {
-        const generated = await callBailianImageGeneration(config, {
-          bytes,
-          contentType: image.content_type,
-          prompt,
-          size: spec.size,
-        });
-        const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
-        await bindings.UPLOADS.put(objectKey, generated.bytes, {
-          httpMetadata: { contentType: generated.contentType },
-          customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
-        });
-        await prepareGeneratedAssetInsert(bindings.DB, {
-          id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
-          prompt, objectKey, contentType: generated.contentType, model: generated.model, status: 'COMPLETED',
-          width: generated.width, height: generated.height, error: null, createdAt, completedAt: new Date().toISOString(),
-        }).run();
-      } catch (error) {
-        await prepareGeneratedAssetInsert(bindings.DB, {
-          id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
-          prompt, objectKey: null, contentType: null, model: config.model, status: 'FAILED', width: null, height: null,
-          error: error instanceof Error ? error.message : '素材生成失败', createdAt, completedAt: new Date().toISOString(),
-        }).run();
-      }
+      const generated = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt);
+      return { spec, prompt, generated, id: `asset_${crypto.randomUUID()}`, position };
     }));
-
+    const writes = await Promise.all(prepared.map(async ({ spec, prompt, generated, id, position }) => {
+      const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
+      await bindings.UPLOADS.put(objectKey, generated.bytes, {
+        httpMetadata: { contentType: generated.contentType },
+        customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
+      });
+      const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
+      return prepareGeneratedAssetInsert(bindings.DB, {
+        id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
+        prompt, objectKey, contentType: generated.contentType, model: generated.model, status: 'COMPLETED',
+        width: generated.width, height: generated.height, error: null, createdAt: timestamp, completedAt: timestamp,
+      });
+    }));
+    await bindings.DB.batch(writes);
     const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
-    const summary = summarize(assets);
-    if (summary.completed === 0) {
-      const reason = assets.find((asset) => asset.error)?.error || '图像模型未返回有效素材';
-      return Response.json({ error: `视觉素材生成失败：${reason}`, assets, summary }, { status: 502 });
-    }
-    return Response.json({ assets, summary, reused: false, plan: plan.assets, plannerModel: plan.model });
+    return Response.json({ assets, summary: summarize(assets), reused: false, plan: plan.assets, plannerModel: plan.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视觉素材生成失败';
     return Response.json({ error: message }, { status: message.startsWith('图片生成参数无效') ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });

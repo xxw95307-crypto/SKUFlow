@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAssetGenerationPrompt, buildAssetPlanningMessages, imageKindsFromRequest, imageTargetsFromRequest, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
-import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageKind } from '../lib/ai/bailian-client.ts';
+import { buildAssetGenerationPrompt, buildAssetPlanningMessages, imageTargetsFromRequest, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
+import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageAgainstIntent } from '../lib/ai/bailian-client.ts';
 import { loadBailianImageConfig, missingBailianImageConfig } from '../lib/config/bailian.ts';
 import type { ProductFact } from '../lib/domain/product-passport.ts';
 import type { GeneratedAsset } from '../lib/domain/generated-asset.ts';
@@ -34,8 +34,8 @@ test('asks the planning Agent to choose category-specific assets and includes se
     productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon', 'shopify'], markets: ['美国'],
     sourceImageCount: 3, userGuidance: '希望增加一张户外通勤穿搭图', requestedCount: 3, styleGuidance: '清新自然',
   });
-  assert.match(messages[0].content, /商家指定张数时必须严格按指定张数规划/);
-  assert.match(messages[0].content, /必须且只能有一张 HERO/);
+  assert.match(messages[0].content, /严格生成 3 张/);
+  assert.match(messages[0].content, /商家没有要求的模特、主图、细节图等绝不作为必需项补入/);
   assert.match(messages[1].content, /Amazon|amazon/);
   assert.match(messages[1].content, /3 张/);
   assert.match(messages[1].content, /户外通勤穿搭图/);
@@ -43,22 +43,26 @@ test('asks the planning Agent to choose category-specific assets and includes se
   assert.match(messages[1].content, /清新自然/);
 });
 
-test('accepts a dynamic plan and rejects plans without exactly one main image', () => {
+test('accepts a dynamic image plan without requiring a main image', () => {
   const value = JSON.stringify({ assets: [
-    { kind: 'HERO', title: '平台商品主图', note: '清楚展示商品正面', size: '1024*1024', instruction: '纯净背景正面平铺，柔和光线。' },
-    { kind: 'MODEL', title: '通勤穿搭图', note: '展示真实穿着效果', size: '1024*1280', instruction: '成年模特在自然通勤场景穿着参考商品。' },
-    { kind: 'DETAIL', title: '面料细节图', note: '突出已确认的棉质纹理', size: '1024*1024', instruction: '微距拍摄面料纹理与领口走线。' },
+    { kind: 'HERO', title: '平台商品主图', note: '清楚展示商品正面', size: '1024*1024', instruction: '纯净背景正面平铺，柔和光线。', acceptance: '商品正面完整可见' },
+    { kind: 'MODEL', title: '通勤穿搭图', note: '展示真实穿着效果', size: '1024*1280', instruction: '成年模特在自然通勤场景穿着参考商品。', acceptance: '真人模特穿着商品' },
+    { kind: 'DETAIL', title: '面料细节图', note: '突出已确认的棉质纹理', size: '1024*1024', instruction: '微距拍摄面料纹理与领口走线。', acceptance: '面料纹理可见' },
   ] });
   const plan = parseAssetPlan(value);
   assert.deepEqual(plan.map((item) => item.kind), ['HERO', 'MODEL', 'DETAIL']);
   assert.equal(parseAssetPlan(value, 3).length, 3);
   assert.throws(() => parseAssetPlan(value, 2), /按商家要求规划 2 张/);
-  const oneImage = JSON.stringify({ assets: [{ kind: 'HERO', title: '商品主图', note: '展示商品', size: '1024*1024', instruction: '完整展示商品。' }] });
+  const oneImage = JSON.stringify({ assets: [{ kind: 'HERO', title: '商品主图', note: '展示商品', size: '1024*1024', instruction: '完整展示商品。', acceptance: '完整商品可见' }] });
   assert.equal(parseAssetPlan(oneImage, 1).length, 1);
-  assert.throws(() => parseAssetPlan(JSON.stringify({ assets: [
-    { kind: 'MODEL', title: '模特图', note: '展示穿着', size: '1024*1280', instruction: '模特穿着商品。' },
-    { kind: 'DETAIL', title: '细节图', note: '展示细节', size: '1024*1024', instruction: '商品细节。' },
-  ] })), /必须且只能规划一张商品主图/);
+  const withoutHero = parseAssetPlan(JSON.stringify({ assets: [
+    { kind: 'MODEL', title: '模特图', note: '展示穿着', size: '1024*1280', instruction: '模特穿着商品。', acceptance: '模特穿着' },
+    { kind: 'DETAIL', title: '细节图', note: '展示细节', size: '1024*1024', instruction: '商品细节。', acceptance: '细节可见' },
+  ] }));
+  assert.deepEqual(withoutHero.map((asset) => asset.kind), ['MODEL', 'DETAIL']);
+  assert.equal(parseAssetPlan(oneImage).length, 1);
+  const custom = JSON.stringify({ assets: [{ kind: 'CUSTOM', title: '手绘植物主题', note: '无人物的插画风商品图', size: '1024*1024', instruction: '保留原商品颜色和形状，背景使用手绘植物元素，不出现人物。', acceptance: '商品清楚可见，周围有手绘植物，不出现人物' }] });
+  assert.equal(parseAssetPlan(custom, 1)[0].kind, 'CUSTOM');
 });
 
 test('calls the text model to plan assets in JSON mode', async () => {
@@ -68,8 +72,8 @@ test('calls the text model to plan assets in JSON mode', async () => {
     return Response.json({
       id: 'plan_req_1', model: 'qwen3.8-max',
       choices: [{ message: { content: JSON.stringify({ assets: [
-        { kind: 'HERO', title: '商品主图', note: '平台首图', size: '1024*1024', instruction: '正面商品主图。' },
-        { kind: 'LIFESTYLE', title: '通勤场景', note: '展示使用氛围', size: '1024*1280', instruction: '户外通勤场景。' },
+        { kind: 'HERO', title: '商品主图', note: '平台首图', size: '1024*1024', instruction: '正面商品主图。', acceptance: '商品正面可见' },
+        { kind: 'LIFESTYLE', title: '通勤场景', note: '展示使用氛围', size: '1024*1280', instruction: '户外通勤场景。', acceptance: '户外通勤场景可见' },
       ] }) } }],
     });
   };
@@ -89,7 +93,7 @@ test('builds source-grounded prompts without asking the image model to invent cl
   const prompt = buildAssetGenerationPrompt({
     spec: {
       kind: 'HERO', title: '平台商品主图', note: '清楚展示商品本体', size: '1024*1024',
-      instruction: '纯净背景正面平铺，柔和光线，完整展示浅粉色圆领短袖T恤。',
+      instruction: '纯净背景正面平铺，柔和光线，完整展示浅粉色圆领短袖T恤。', acceptance: '完整展示商品。',
     }, productName: '浅粉色圆领短袖T恤', facts, listings: [],
   });
   assert.match(prompt, /真实商品作为唯一主体/);
@@ -117,10 +121,11 @@ test('calls the Token Plan native image endpoint with a private reference image 
     bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), contentType: 'image/jpeg', prompt: '生成商品主图', size: '1024*1024',
   }, fetchMock);
   assert.equal(calls[0].url, 'https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation');
-  const body = JSON.parse(String(calls[0].init?.body)) as { model: string; input: { messages: Array<{ content: Array<{ image?: string }> }> }; parameters: { watermark: boolean } };
+  const body = JSON.parse(String(calls[0].init?.body)) as { model: string; input: { messages: Array<{ content: Array<{ image?: string }> }> }; parameters: { watermark: boolean; prompt_extend: boolean } };
   assert.equal(body.model, 'qwen-image-2.0');
   assert.match(body.input.messages[0].content[0].image ?? '', /^data:image\/jpeg;base64,/);
   assert.equal(body.parameters.watermark, false);
+  assert.equal(body.parameters.prompt_extend, false);
   assert.deepEqual([...result.bytes], [137, 80, 78, 71]);
   assert.equal(result.width, 1024);
 });
@@ -146,50 +151,47 @@ test('plans a specified image revision without replacing the whole image set', (
   assert.match(messages[0].content, /只输出 1 个 assets/);
   assert.match(messages[1].content, /第 3 张/);
   assert.match(messages[1].content, /咖啡馆/);
-  const poster = JSON.stringify({ assets: [{ kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '以原商品为主体，海报式构图。' }] });
+  const poster = JSON.stringify({ assets: [{ kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '以原商品为主体，海报式构图。', acceptance: '明显海报式构图' }] });
   assert.equal(parseAssetPlan(poster, null, [3])[0].kind, 'POSTER');
   assert.equal(parseAssetPlan(poster, null, [1])[0].kind, 'POSTER');
-  assert.throws(() => parseAssetPlan(poster), /2–4 张/);
+  assert.equal(parseAssetPlan(poster).length, 1);
   const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(poster, null, [3])[0], productName: context.productName, facts, listings: [], previousAsset: context.existingAssets[2] });
   assert.match(prompt, /输入图片是本轮要修改的旧图/);
   assert.match(prompt, /海报式构图/);
 });
 
-test('honors an explicit poster and model pair without inserting a main image', async () => {
+test('semantic plan review rejects a missed seller requirement without fixed image-kind rules', async () => {
   const guidance = '重新帮我生成图片，一张是海报风格，一张是模特图';
-  const kinds = imageKindsFromRequest(guidance);
-  assert.deepEqual(kinds, ['POSTER', 'MODEL']);
-  const context = { productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon' as const], markets: ['美国'], sourceImageCount: 1, userGuidance: guidance, requestedCount: 2, requiredKinds: kinds };
+  const context = { productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon' as const], markets: ['美国'], sourceImageCount: 1, userGuidance: guidance };
   const messages = buildAssetPlanningMessages(context);
-  assert.match(messages[0].content, /不额外插入 HERO/);
+  assert.match(messages[0].content, /不指定主图/);
   const wrong = JSON.stringify({ assets: [
-    { kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '海报式构图。' },
-    { kind: 'HERO', title: '白底主图', note: '商品主图', size: '1024*1024', instruction: '白底商品图。' },
+    { kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '海报式构图。', acceptance: '有海报式设计' },
+    { kind: 'HERO', title: '白底主图', note: '商品主图', size: '1024*1024', instruction: '白底商品图。', acceptance: '白底商品照' },
   ] });
   const correct = JSON.stringify({ assets: [
-    { kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '海报式构图。' },
-    { kind: 'MODEL', title: '模特展示', note: '真人穿着', size: '1024*1280', instruction: '真人模特穿着参考商品。' },
+    { kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '海报式构图。', acceptance: '明显海报式构图' },
+    { kind: 'MODEL', title: '模特展示', note: '真人穿着', size: '1024*1280', instruction: '真人模特穿着参考商品。', acceptance: '真人模特穿着这件T恤' },
   ] });
-  assert.throws(() => parseAssetPlan(wrong, 2, [], kinds), /MODEL/);
-  assert.deepEqual(parseAssetPlan(correct, 2, [], kinds).map((asset) => asset.kind), kinds);
+  assert.equal(parseAssetPlan(wrong).length, 2);
   let calls = 0;
-  const fetchMock: typeof fetch = async () => Response.json({ choices: [{ message: { content: calls++ === 0 ? wrong : correct } }] });
+  const responses = [wrong, '{"satisfies":false,"reason":"缺少模特穿着图"}', correct, '{"satisfies":true,"reason":"满足"}'];
+  const fetchMock: typeof fetch = async () => Response.json({ choices: [{ message: { content: responses[calls++] } }] });
   const result = await callBailianAssetPlanning({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'test-model' }, context, fetchMock);
-  assert.equal(calls, 2);
-  assert.deepEqual(result.assets.map((asset) => asset.kind), kinds);
+  assert.equal(calls, 4);
+  assert.deepEqual(result.assets.map((asset) => asset.kind), ['POSTER', 'MODEL']);
   const modelPrompt = buildAssetGenerationPrompt({ spec: result.assets[1], productName: context.productName, facts, listings: [] });
-  assert.match(modelPrompt, /真人模特实际穿着/);
-  assert.match(modelPrompt, /不得输出平铺/);
+  assert.match(modelPrompt, /真人模特穿着这件T恤/);
 });
 
-test('checks generated model imagery from pixels before accepting it', async () => {
+test('checks any generated image against its own visual acceptance criteria', async () => {
   const fetchMock: typeof fetch = async (_input, init) => {
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
-    assert.match(body.messages[0].content.find((part) => part.type === 'text')?.text ?? '', /真人模特实际穿着/);
-    return Response.json({ choices: [{ message: { content: '{"matches":false,"reason":"只有平铺的T恤，没有模特"}' } }] });
+    assert.match(body.messages[0].content.find((part) => part.type === 'text')?.text ?? '', /画面有手绘植物边框/);
+    return Response.json({ choices: [{ message: { content: '{"matches":false,"reason":"没有植物边框"}' } }] });
   };
-  const result = await checkGeneratedImageKind({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', kind: 'MODEL' }, fetchMock);
-  assert.deepEqual(result, { matches: false, reason: '只有平铺的T恤，没有模特' });
+  const result = await checkGeneratedImageAgainstIntent({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', instruction: '为商品做植物主题图片', acceptance: '画面有手绘植物边框' }, fetchMock);
+  assert.deepEqual(result, { matches: false, reason: '没有植物边框' });
 });
 
 test('video accepts only confirmed images from the latest generated batch',()=>{

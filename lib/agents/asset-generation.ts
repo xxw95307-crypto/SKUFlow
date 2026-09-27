@@ -3,7 +3,7 @@ import { GENERATED_ASSET_KINDS, type GeneratedAsset, type GeneratedAssetKind } f
 import type { PlatformId } from '../domain/platform.ts';
 import type { ProductFact } from '../domain/product-passport.ts';
 
-export const ASSET_PLAN_VERSION = 'dynamic-v2';
+export const ASSET_PLAN_VERSION = 'dynamic-v3';
 const ALLOWED_SIZES = ['1024*1024', '1024*1280', '1280*1024'] as const;
 
 export interface AssetGenerationSpec {
@@ -12,6 +12,7 @@ export interface AssetGenerationSpec {
   note: string;
   size: (typeof ALLOWED_SIZES)[number];
   instruction: string;
+  acceptance: string;
 }
 
 export interface AssetPlanningContext {
@@ -27,7 +28,6 @@ export interface AssetPlanningContext {
   styleGuidance?: string | null;
   existingAssets?: readonly Pick<GeneratedAsset, 'kind' | 'title' | 'note'>[];
   targetIndices?: readonly number[];
-  requiredKinds?: readonly GeneratedAssetKind[];
 }
 
 const imageOrdinals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
@@ -38,26 +38,6 @@ export function imageTargetsFromRequest(request: string, assetCount: number): nu
       && !/^\s*(?:保留|不动|不用改|保持不变)/.test(request.slice((match.index ?? 0) + match[0].length)))
     .map((match) => imageOrdinals[match[1]] ?? Number(match[1]));
   return [...new Set(targets)].filter((index) => index >= 1 && index <= assetCount).sort((a, b) => a - b);
-}
-
-export function imageKindsFromRequest(request: string): GeneratedAssetKind[] {
-  const clauses = [...request.matchAll(/([一二两三四五六1-6])\s*张(?:是|为|要|做成|生成|的)?\s*/g)];
-  const kinds: GeneratedAssetKind[] = [];
-  for (const [position, match] of clauses.entries()) {
-    const count = imageOrdinals[match[1]] ?? Number(match[1]);
-    const next = clauses[position + 1]?.index ?? request.length;
-    const description = request.slice((match.index ?? 0) + match[0].length, next).replace(/^[图片素材，,；;\s]+/, '').trim();
-    const kind: GeneratedAssetKind | null = /海报/.test(description) ? 'POSTER'
-      : /模特|真人穿着|上身展示/.test(description) ? 'MODEL'
-      : /主图|白底/.test(description) ? 'HERO'
-      : /细节|特写/.test(description) ? 'DETAIL'
-      : /场景|生活方式/.test(description) ? 'LIFESTYLE'
-      : /包装/.test(description) ? 'PACKAGING'
-      : /尺寸|大小对比/.test(description) ? 'SCALE'
-      : /卖点|功能展示/.test(description) ? 'FEATURE' : null;
-    if (kind && count >= 1 && count <= 6) kinds.push(...Array(count).fill(kind));
-  }
-  return kinds.slice(0, 6);
 }
 
 function plainText(value: unknown): string {
@@ -83,25 +63,22 @@ function listingText(listings: readonly ListingDraftPayload[]): string {
 
 export function buildAssetPlanningMessages(context: AssetPlanningContext): Array<{ role: 'system' | 'user'; content: string }> {
   const targeted = Boolean(context.targetIndices?.length);
-  const exactTypes = !targeted && Boolean(context.requiredKinds?.length && context.requiredKinds.length === context.requestedCount);
   return [{
     role: 'system',
-    content: `你是跨境电商视觉策划 Agent。请根据商品类目、可信属性、已审核 Listing、目标平台和原图数量，规划最适合该商品的一组视觉素材，而不是套用固定场景。
+    content: `你是跨境电商视觉策划 Agent。根据商家本轮自然语言要求、已有图片和可信商品事实，自由规划这一轮要生成的商品图片。商家要求是唯一的创作目标，不套用固定图种组合。
 
-只输出 JSON：{"assets":[{"kind":"HERO","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的中文生成指令"}]}。
+只输出 JSON：{"assets":[{"kind":"CUSTOM","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的详细中文生成指令","acceptance":"该图完成后可从画面判断的具体验收标准"}]}。
 
 这一阶段只规划图片，不规划、提交或生成视频。视频会在商家确认最终图片后单独处理。
 
 规则：
-0. 商家本轮要求优先于类目建议；明确排除的图类型或场景不得再次规划。例如“不要细节图”必须排除 DETAIL 与任何细节特写，改选其他有依据的素材。不把排除要求解释成仅调整细节图。
-1. ${targeted ? `这是局部修改，只输出 ${context.targetIndices!.length} 个 assets，依照指定序号的顺序一一对应。其余图片必须原样保留，不要重新规划，不要强制补一张 HERO。商家要求将原 HERO 改为海报或其他用途时可以改变 kind；后续媒体编排会另行选择封面。` : exactTypes ? `商家已经明确指定全部 ${context.requestedCount} 张的用途，严格按指定类型规划，不额外插入 HERO 或其他图片；封面由后续媒体编排确定。` : '商家指定张数时必须严格按指定张数规划（1–6 张）；未指定时由你根据商品需求判断，规划 2–4 张。必须且只能有一张 HERO 商品主图，但不要挤占商家明确指定的图片类型。'}
-2. 其他 kind 从 LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING、POSTER 中选择，可按商品需要重复同一 kind，但场景和目的不得重复。POSTER 是海报式构图，不能编造商品卖点或平台标识。
-3. 服装可优先考虑 MODEL、穿搭场景和面料细节；家电可考虑使用场景、结构细节和尺寸感；食品可考虑包装、食用场景和质感特写。必须根据当前商品判断。
+0. 逐项落实商家对数量、内容、人物、风格、背景、角度、排除项和指定图片的要求。明确不需要的元素绝不加入；商家没有要求的模特、主图、细节图等绝不作为必需项补入。
+1. ${targeted ? `本轮只修改第 ${context.targetIndices!.join('、')} 张。只输出 ${context.targetIndices!.length} 个 assets，与这些序号依次对应。其余图片保持原样。` : `生成整组图片。${context.requestedCount == null ? '未指定数量时由你根据本轮要求决定 1–6 张；若自然语言明确列出了若干张，按列出的张数生成。' : `严格生成 ${context.requestedCount} 张。`}`}
+2. kind 只是可选展示标签，可用 HERO、LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING、POSTER；不贴切时用 CUSTOM。不得让标签反过来限制商家需求。封面和顺序由后续 Agent 决定，本阶段不指定主图。
+3. instruction 应描述每张图的主体、动作或摆放、构图、场景、光线、风格和必须避免的元素；acceptance 要把本轮要求转成视觉上可核对的标准，不得只写“符合要求”。
 4. size 只能是 1024*1024、1024*1280 或 1280*1024。
-5. instruction 必须明确构图、环境、镜头、光线和要突出的可信事实，并要求保持原商品身份一致。
-6. 不得虚构功能、配件、认证、促销、尺寸或商品事实；不得要求生成价格、标题、角标、平台 Logo 或大段文字。
-7. 如果资料不支持包装、模特、尺寸对照或使用方式，不要规划对应素材。
-8. title、note 和 instruction 使用简体中文。`,
+5. 商品身份、外形、颜色、结构、材质和真实标识必须与原图及已确认事实一致；不得虚构功能、配件、认证、促销或价格。海报文字仅可使用已确认事实，难以可靠生成时预留排版空间。
+6. title、note、instruction、acceptance 使用简体中文。`,
   }, {
     role: 'user',
     content: `商品名称：${context.productName}
@@ -114,14 +91,13 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 本轮只修改：${targeted ? context.targetIndices!.map((index) => `第 ${index} 张`).join('、') : '未指定，生成整组'}
 商家本轮补充要求：${plainText(context.userGuidance) || '无，由你根据商品与平台自主判断'}
 商家指定图片数量：${targeted ? '局部修改，不改变总张数' : context.requestedCount == null ? '未指定，由你判断' : `${context.requestedCount} 张，必须严格遵守`}
-商家明确指定的图片类型：${context.requiredKinds?.join('、') || '未指定'}${exactTypes ? '；这些就是全部图片，不得添加 HERO' : ''}
 商家指定图片风格：${plainText(context.styleGuidance) || '未指定，由你根据商品与平台自主判断'}
 
 请为这个具体商品制定素材计划。`,
   }];
 }
 
-export function parseAssetPlan(value: string, requestedCount?: number | null, targetIndices?: readonly number[], requiredKinds?: readonly GeneratedAssetKind[]): AssetGenerationSpec[] {
+export function parseAssetPlan(value: string, requestedCount?: number | null, targetIndices?: readonly number[]): AssetGenerationSpec[] {
   let raw: unknown;
   try {
     raw = JSON.parse(value);
@@ -139,30 +115,20 @@ export function parseAssetPlan(value: string, requestedCount?: number | null, ta
     const title = plainText(record.title).slice(0, 40);
     const note = plainText(record.note).slice(0, 120);
     const instruction = plainText(record.instruction).slice(0, 1_200);
+    const acceptance = plainText(record.acceptance).slice(0, 500);
     const size = plainText(record.size);
-    if (!GENERATED_ASSET_KINDS.includes(kind as (typeof GENERATED_ASSET_KINDS)[number]) || !title || !note || !instruction) continue;
+    if (!GENERATED_ASSET_KINDS.includes(kind as (typeof GENERATED_ASSET_KINDS)[number]) || !title || !note || !instruction || !acceptance) continue;
     if (!ALLOWED_SIZES.includes(size as AssetGenerationSpec['size'])) continue;
-    assets.push({ kind: kind as GeneratedAssetKind, title, note, instruction, size: size as AssetGenerationSpec['size'] });
+    assets.push({ kind: kind as GeneratedAssetKind, title, note, instruction, acceptance, size: size as AssetGenerationSpec['size'] });
   }
   if (targetIndices?.length) {
     if (assets.length !== targetIndices.length || candidates.length !== targetIndices.length) throw new Error(`视觉策划 Agent 必须只规划指定的 ${targetIndices.length} 张图片`);
     return assets;
   }
-  if (requiredKinds?.length) {
-    const remaining = [...assets.map((asset) => asset.kind)];
-    for (const kind of requiredKinds) {
-      const index = remaining.indexOf(kind);
-      if (index < 0) throw new Error(`视觉策划 Agent 未按商家要求规划 ${kind} 图片`);
-      remaining.splice(index, 1);
-    }
-  }
   if (requestedCount != null) {
     if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 6) throw new Error('图片数量需为 1–6 张');
     if (assets.length !== requestedCount || candidates.length !== requestedCount) throw new Error(`视觉策划 Agent 必须按商家要求规划 ${requestedCount} 张图片`);
-  } else if (assets.length < 2 || assets.length > 4) throw new Error('视觉策划 Agent 未获指定数量时应规划 2–4 张图片');
-  if (requiredKinds?.length === assets.length) {
-    if (requiredKinds.some((kind) => !assets.some((asset) => asset.kind === kind))) throw new Error('视觉策划 Agent 未遵守商家指定的全部图片类型');
-  } else if (assets.filter((asset) => asset.kind === 'HERO').length !== 1) throw new Error('视觉策划 Agent 必须且只能规划一张商品主图');
+  } else if (assets.length < 1 || assets.length > 6) throw new Error('视觉策划 Agent 应根据商家要求规划 1–6 张图片');
   return assets;
 }
 
@@ -194,15 +160,14 @@ export function buildAssetGenerationPrompt(input: {
 1. 严格保持商品身份、外形、颜色、结构、材质、图案、商标和部件数量与参考图一致；不要把商品替换成相似款。
 2. 去除参考截图中的 App 界面、价格、按钮、状态栏和无关文字；不要照搬水印。
 3. 只能使用下方已确认商品事实，不得添加资料没有支持的配件、功能、认证、促销或文字。
-4. ${input.spec.kind === 'POSTER' ? '使用海报式构图、层次和留白；如需文字只能使用已确认的商品名称或事实，不得杜撰卖点、价格、认证和平台 Logo。不能可靠生成文字时留出排版空间。' : '画面内不要生成标题、价格、卖点文字、角标或平台 Logo；后续会由排版工具另行添加。'}
+4. 严格完成下方具体视觉任务和验收标准；不要自行添加商家未要求的模特、文字、道具或场景。若任务需要海报文字，只使用已确认的商品名称或事实，不能可靠生成时预留排版空间。
 5. 保持商业摄影质感、真实比例、自然光影和清晰细节。
-${input.spec.kind === 'MODEL' ? '6. 这张必须是商品由真人模特实际穿着的模特展示图；模特和穿着状态清晰可见，不得输出平铺、衣架或单独商品照。' : ''}
-${input.spec.kind === 'POSTER' ? '6. 这张必须有明显的海报式视觉构图与层次，商品仍清楚可见；不得退化为普通白底主图或简单场景照。' : ''}
 
 商品名称：${input.productName}
 已确认商品事实：${factText(input.facts) || '以参考图可见内容为准'}
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
 ${input.previousAsset ? `待修改旧图：${input.previousAsset.kind}｜${input.previousAsset.title}｜${input.previousAsset.note}` : ''}
 
-视觉策划任务：${input.spec.instruction}`;
+视觉策划任务：${input.spec.instruction}
+成图验收标准：${input.spec.acceptance}`;
 }

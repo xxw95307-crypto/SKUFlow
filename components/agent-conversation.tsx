@@ -173,6 +173,7 @@ function assetKindLabel(kind: GeneratedAsset['kind']): string {
     SCALE: '尺寸感展示',
     PACKAGING: '包装展示',
     POSTER: '海报图',
+    CUSTOM: '创意图片',
     VIDEO: '商品视频',
   }[kind];
 }
@@ -267,14 +268,14 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
     <h3 className="visually-hidden">选择商品图片</h3>
     <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
-        <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized />{asset.kind === 'HERO' && <b>主图</b>}</span>
+        <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
       </button>
       <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>
     </div>)}</div>
     <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
       <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
-        <header><span>{previewIndex! + 1} / {completed.length}{previewAsset.kind === 'HERO' ? ' · 主图' : ''}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
+        <header><span>{previewIndex! + 1} / {completed.length}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
         <div className="asset-preview-stage">
           {completed.length > 1 && <button className="asset-preview-nav previous" type="button" aria-label="上一张图片" onClick={() => movePreview(-1)}>‹</button>}
           <div className={`asset-preview-viewport ${zoomed ? 'zoomed' : ''}`}><Image src={previewAsset.imageUrl!} alt={previewAsset.title} width={previewAsset.width ?? 1024} height={previewAsset.height ?? 1024} unoptimized onClick={() => setZoomed((value) => !value)} /></div>
@@ -1381,7 +1382,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const imageBriefCard = phase === 'image_brief' && <div className="image-brief-card">
     <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。</p></div>
     <div className="image-brief-fields">
-      <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>至少包含一张商品主图；其余图片按你的要求规划。</small></fieldset>
+      <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>按你的需求规划图片内容；封面与顺序稍后再确认。</small></fieldset>
       <label>图片风格<input value={imageBriefStyle} onChange={(event) => setImageBriefStyle(event.target.value)} maxLength={200} placeholder="例如：自然生活感、简洁高级、户外通勤" /></label>
       <label>其他要求<textarea rows={3} value={imageBriefNotes} onChange={(event) => setImageBriefNotes(event.target.value)} maxLength={500} placeholder="例如：不要细节图；希望有一张真人穿搭图" /></label>
     </div>

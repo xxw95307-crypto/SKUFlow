@@ -126,6 +126,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     publishedDraftCount: passport.platformDrafts.filter((draft) => draft.status === 'DRAFT_CREATED').length,
     videoCandidates: videos.results.map((v,index)=>{const p=JSON.parse(v.plan_json);return {id:v.id,title:p.title,duration:p.duration,ordinal:index+1};}),
     generatedAssetCount: completedAssets.length + videos.results.length,
+    imageCandidates: completedAssets.map((asset, index) => ({ id: asset.id, title: asset.title, note: asset.note, ordinal: index + 1 })),
     imageBriefConfirmed: body.imageBriefConfirmed === true,
     selectedAssetCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length + videos.results.filter(v=>selectedAssetIds.has(v.id)).length,
     selectedImageCount: completedAssets.filter((asset) => selectedAssetIds.has(asset.id)).length,

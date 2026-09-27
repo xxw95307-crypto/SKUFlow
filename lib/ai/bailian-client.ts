@@ -280,7 +280,7 @@ export async function callBailianImageGeneration(
         parameters: {
           n: 1,
           size: input.size,
-          prompt_extend: true,
+          prompt_extend: false,
           watermark: false,
           negative_prompt: '改变商品本体、错误文字、错误商标、额外商品、低清晰度、畸变、比例错误、虚假配件',
         },
@@ -513,15 +513,33 @@ export async function callBailianAssetPlanning(
       const content = responseText(payload.choices?.[0]?.message?.content);
       if (!content) throw new Error('百炼视觉策划返回内容为空');
       try {
+        const assets = parseAssetPlan(content, context.requestedCount, context.targetIndices);
+        if (context.userGuidance?.trim()) {
+          const review = await fetchImpl(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ model, messages: [
+              { role: 'system', content: '你是独立的商品图片需求核对员。只检查计划是否逐项覆盖商家本轮明确要求（数量、每张内容、风格、排除项、局部修改范围）。不得自行加上主图、模特或平台规则。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
+              { role: 'user', content: JSON.stringify({ request: context.userGuidance, requestedCount: context.requestedCount, targetIndices: context.targetIndices, existingAssets: context.existingAssets, plan: assets }) },
+            ], response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 300, stream: false }),
+            signal: controller.signal,
+          });
+          if (!review.ok) throw new Error(`图片方案核对失败（HTTP ${review.status}）`);
+          const reviewPayload = await review.json() as ChatCompletionResponse;
+          let judgment: { satisfies?: unknown; reason?: unknown };
+          try { judgment = JSON.parse(responseText(reviewPayload.choices?.[0]?.message?.content)) as typeof judgment; }
+          catch { throw new Error('图片方案核对结果无法解析'); }
+          if (judgment.satisfies !== true) throw new Error(`方案未覆盖商家要求：${typeof judgment.reason === 'string' ? judgment.reason.slice(0, 180) : '请按本轮要求重新规划'}`);
+        }
         return {
-          assets: parseAssetPlan(content, context.requestedCount, context.targetIndices, context.requiredKinds),
+          assets,
           model: payload.model || model,
           usage: normalizeUsage(payload.usage),
           requestId: payload.id || response.headers.get('x-request-id'),
         };
       } catch (error) {
         if (attempt === 1) throw error;
-        messages.push({ role: 'user', content: `上一版方案未通过商家要求校验：${error instanceof Error ? error.message : '类型或数量不符'}。请重新输出完整 JSON；不得用商品主图替代商家指定的海报图或模特图。` });
+        messages.push({ role: 'user', content: `上一版方案未通过商家要求校验：${error instanceof Error ? error.message : '方案不符'}。请重新理解商家自然语言要求，并输出符合要求的完整 JSON。不要自行添加商家没有要求的图片类型。` });
       }
     }
     throw new Error('百炼视觉策划未返回符合要求的方案');
@@ -533,16 +551,13 @@ export async function callBailianAssetPlanning(
   }
 }
 
-export async function checkGeneratedImageKind(
+export async function checkGeneratedImageAgainstIntent(
   config: BailianConfig,
-  input: { bytes: Uint8Array; contentType: string; kind: 'MODEL' | 'POSTER' },
+  input: { bytes: Uint8Array; contentType: string; acceptance: string; instruction: string },
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ matches: boolean; reason: string }> {
   if (!input.contentType.startsWith('image/') || !input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new Error('待核对图片无效或超过 8 MB');
   const baseUrl = normalizeBaseUrl(config.baseUrl);
-  const requirement = input.kind === 'MODEL'
-    ? '图片里必须有清晰可见的真人模特实际穿着这件商品。单独商品照、平铺图、衣架图均不符合。'
-    : '图片必须有明显的商品海报式设计构图或版式层次。普通白底商品照、简单场景照均不符合。';
   const response = await fetchImpl(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${config.apiKey.trim()}`, 'content-type': 'application/json' },
@@ -550,7 +565,7 @@ export async function checkGeneratedImageKind(
       model: config.model.trim(),
       messages: [{ role: 'user', content: [
         { type: 'image_url', image_url: { url: `data:${input.contentType};base64,${toBase64(input.bytes)}` } },
-        { type: 'text', text: `只检查这张生成图片是否符合以下图片类型要求：${requirement}。不要根据标题或生成指令猜测，只看图片。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
+        { type: 'text', text: `你是独立的成图核对员。只看这张图片，检查它是否真正满足本张的视觉验收标准：${input.acceptance}。原创作指令供理解目标：${input.instruction}。客观元素（人物、商品形态、背景、文字、数量）必须可见；主观风格要求可合理判断。不要因为指令声称已完成就判通过。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
       ] }],
       response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 200, stream: false,
     }),
