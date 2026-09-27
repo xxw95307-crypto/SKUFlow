@@ -915,7 +915,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         const agentTargets = Array.isArray(toolOptions.targetIndices) && toolOptions.targetIndices.every((index) => Number.isInteger(index) && index >= 1 && index <= existingImages.length)
           ? [...new Set(toolOptions.targetIndices as number[])].sort((a, b) => a - b) : [];
         const explicitTargets = imageTargetsFromRequest(requestText, existingImages.length);
-        const targetIndices = initialBrief ? [] : explicitTargets.length ? explicitTargets : agentTargets;
+        const wholeSetRequested = /(?:重新|全部|整组|整批|换一批).{0,12}(?:生成|做|换).{0,8}(?:图片|图|素材)/.test(requestText);
+        const targetIndices = initialBrief || (wholeSetRequested && !explicitTargets.length) ? [] : explicitTargets.length ? explicitTargets : agentTargets;
         const requestedCount = targetIndices.length ? null : initialBrief ? initialBrief.count : Number.isInteger(toolOptions.count) && (toolOptions.count as number) >= 1 && (toolOptions.count as number) <= 6 ? toolOptions.count as number : null;
         const requestedStyle = initialBrief ? initialBrief.style : typeof toolOptions.style === 'string' ? toolOptions.style : '';
         setProgressStep(3); setBusyLabel(targetIndices.length ? '视觉策划 Agent 正在修改指定图片…' : '视觉策划 Agent 正在规划并生成商品图片…'); setBusyHint(targetIndices.length ? '其他图片会保留，修改后可继续预览和选择' : '会生成多张候选图片，稍后由你挑选');

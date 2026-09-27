@@ -489,12 +489,14 @@ export async function callBailianAssetPlanning(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+    const messages: Array<{ role: 'system' | 'user'; content: string }> = buildAssetPlanningMessages(context);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await fetchImpl(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
-        messages: buildAssetPlanningMessages(context),
+        messages,
         response_format: { type: 'json_object' },
         enable_thinking: false,
         temperature: 0.35,
@@ -502,26 +504,65 @@ export async function callBailianAssetPlanning(
         stream: false,
       }),
       signal: controller.signal,
-    });
-    if (!response.ok) {
-      const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
-      throw new Error(`百炼视觉策划失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+      });
+      if (!response.ok) {
+        const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
+        throw new Error(`百炼视觉策划失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+      }
+      const payload = await response.json() as ChatCompletionResponse;
+      const content = responseText(payload.choices?.[0]?.message?.content);
+      if (!content) throw new Error('百炼视觉策划返回内容为空');
+      try {
+        return {
+          assets: parseAssetPlan(content, context.requestedCount, context.targetIndices, context.requiredKinds),
+          model: payload.model || model,
+          usage: normalizeUsage(payload.usage),
+          requestId: payload.id || response.headers.get('x-request-id'),
+        };
+      } catch (error) {
+        if (attempt === 1) throw error;
+        messages.push({ role: 'user', content: `上一版方案未通过商家要求校验：${error instanceof Error ? error.message : '类型或数量不符'}。请重新输出完整 JSON；不得用商品主图替代商家指定的海报图或模特图。` });
+      }
     }
-    const payload = await response.json() as ChatCompletionResponse;
-    const content = responseText(payload.choices?.[0]?.message?.content);
-    if (!content) throw new Error('百炼视觉策划返回内容为空');
-    return {
-      assets: parseAssetPlan(content, context.requestedCount, context.targetIndices),
-      model: payload.model || model,
-      usage: normalizeUsage(payload.usage),
-      requestId: payload.id || response.headers.get('x-request-id'),
-    };
+    throw new Error('百炼视觉策划未返回符合要求的方案');
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼视觉策划超时');
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function checkGeneratedImageKind(
+  config: BailianConfig,
+  input: { bytes: Uint8Array; contentType: string; kind: 'MODEL' | 'POSTER' },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ matches: boolean; reason: string }> {
+  if (!input.contentType.startsWith('image/') || !input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new Error('待核对图片无效或超过 8 MB');
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const requirement = input.kind === 'MODEL'
+    ? '图片里必须有清晰可见的真人模特实际穿着这件商品。单独商品照、平铺图、衣架图均不符合。'
+    : '图片必须有明显的商品海报式设计构图或版式层次。普通白底商品照、简单场景照均不符合。';
+  const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${config.apiKey.trim()}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: config.model.trim(),
+      messages: [{ role: 'user', content: [
+        { type: 'image_url', image_url: { url: `data:${input.contentType};base64,${toBase64(input.bytes)}` } },
+        { type: 'text', text: `只检查这张生成图片是否符合以下图片类型要求：${requirement}。不要根据标题或生成指令猜测，只看图片。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
+      ] }],
+      response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 200, stream: false,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok) throw new Error(`生成图片核对失败（HTTP ${response.status}）`);
+  const payload = await response.json() as ChatCompletionResponse;
+  const content = responseText(payload.choices?.[0]?.message?.content);
+  let result: { matches?: unknown; reason?: unknown };
+  try { result = JSON.parse(content) as typeof result; } catch { throw new Error('生成图片核对结果无法解析'); }
+  if (typeof result.matches !== 'boolean') throw new Error('生成图片核对结果缺少判断');
+  return { matches: result.matches, reason: typeof result.reason === 'string' ? result.reason.slice(0, 160) : '' };
 }
 
 export interface VisionImageInput {

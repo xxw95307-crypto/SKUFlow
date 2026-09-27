@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAssetGenerationPrompt, buildAssetPlanningMessages, imageTargetsFromRequest, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
-import { callBailianAssetPlanning, callBailianImageGeneration } from '../lib/ai/bailian-client.ts';
+import { buildAssetGenerationPrompt, buildAssetPlanningMessages, imageKindsFromRequest, imageTargetsFromRequest, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
+import { callBailianAssetPlanning, callBailianImageGeneration, checkGeneratedImageKind } from '../lib/ai/bailian-client.ts';
 import { loadBailianImageConfig, missingBailianImageConfig } from '../lib/config/bailian.ts';
 import type { ProductFact } from '../lib/domain/product-passport.ts';
 import type { GeneratedAsset } from '../lib/domain/generated-asset.ts';
@@ -153,6 +153,43 @@ test('plans a specified image revision without replacing the whole image set', (
   const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(poster, null, [3])[0], productName: context.productName, facts, listings: [], previousAsset: context.existingAssets[2] });
   assert.match(prompt, /输入图片是本轮要修改的旧图/);
   assert.match(prompt, /海报式构图/);
+});
+
+test('honors an explicit poster and model pair without inserting a main image', async () => {
+  const guidance = '重新帮我生成图片，一张是海报风格，一张是模特图';
+  const kinds = imageKindsFromRequest(guidance);
+  assert.deepEqual(kinds, ['POSTER', 'MODEL']);
+  const context = { productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon' as const], markets: ['美国'], sourceImageCount: 1, userGuidance: guidance, requestedCount: 2, requiredKinds: kinds };
+  const messages = buildAssetPlanningMessages(context);
+  assert.match(messages[0].content, /不额外插入 HERO/);
+  const wrong = JSON.stringify({ assets: [
+    { kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '海报式构图。' },
+    { kind: 'HERO', title: '白底主图', note: '商品主图', size: '1024*1024', instruction: '白底商品图。' },
+  ] });
+  const correct = JSON.stringify({ assets: [
+    { kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '海报式构图。' },
+    { kind: 'MODEL', title: '模特展示', note: '真人穿着', size: '1024*1280', instruction: '真人模特穿着参考商品。' },
+  ] });
+  assert.throws(() => parseAssetPlan(wrong, 2, [], kinds), /MODEL/);
+  assert.deepEqual(parseAssetPlan(correct, 2, [], kinds).map((asset) => asset.kind), kinds);
+  let calls = 0;
+  const fetchMock: typeof fetch = async () => Response.json({ choices: [{ message: { content: calls++ === 0 ? wrong : correct } }] });
+  const result = await callBailianAssetPlanning({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'test-model' }, context, fetchMock);
+  assert.equal(calls, 2);
+  assert.deepEqual(result.assets.map((asset) => asset.kind), kinds);
+  const modelPrompt = buildAssetGenerationPrompt({ spec: result.assets[1], productName: context.productName, facts, listings: [] });
+  assert.match(modelPrompt, /真人模特实际穿着/);
+  assert.match(modelPrompt, /不得输出平铺/);
+});
+
+test('checks generated model imagery from pixels before accepting it', async () => {
+  const fetchMock: typeof fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
+    assert.match(body.messages[0].content.find((part) => part.type === 'text')?.text ?? '', /真人模特实际穿着/);
+    return Response.json({ choices: [{ message: { content: '{"matches":false,"reason":"只有平铺的T恤，没有模特"}' } }] });
+  };
+  const result = await checkGeneratedImageKind({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', kind: 'MODEL' }, fetchMock);
+  assert.deepEqual(result, { matches: false, reason: '只有平铺的T恤，没有模特' });
 });
 
 test('video accepts only confirmed images from the latest generated batch',()=>{
