@@ -1133,6 +1133,23 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     try {const data=await responseJson<{passport:ProductPassport;results:Array<{market:string;verification:Array<{field:string;status:string}>}>}>(await fetch(`/api/tasks/${task.id}/verify-shopify`,{method:'POST'}),'Shopify 回读失败');setPassport(data.passport);for(const r of data.results)append('agent',`${r.market}草稿核对：${r.verification.map(v=>`${v.field}：${v.status==='MATCH'?'一致':v.status==='PENDING'?'处理中':'需要检查'}`).join('；')}`,'回读核对');await persistConversation(task.id,'COMPLETED');}catch(e){append('agent',`核对失败：${(e as Error).message}。已创建的商品不受影响。`);}
   };
   const resumeTask = async () => {
+    const failed = failedTurnRef.current;
+    if (failed) {
+      await runAgentTurn(failed.task, failed.userText, {
+        appendUser: false,
+        pendingFiles: failed.pendingFiles,
+        publishApproved: failed.publishApproved,
+        resumeHistory: failed.history,
+      });
+      return;
+    }
+    if (task && phase === 'error') {
+      const lastRequest = [...messagesRef.current].reverse().find((message) => message.role === 'user');
+      if (lastRequest) {
+        await runAgentTurn(task, lastRequest.text, { appendUser: false, resumeHistory: modelHistory.current });
+        return;
+      }
+    }
     if (task && (phase === 'error' || phase === 'resume') && imageBriefConfirmedFromMessages(messagesRef.current) && !imagesConfirmedFromMessages(messagesRef.current)) {
       try {
         const available = await fetchGeneratedAssets(task.id);
@@ -1145,16 +1162,6 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           return;
         }
       } catch { /* If saved images cannot be read, retry the failed step below. */ }
-    }
-    const failed = failedTurnRef.current;
-    if (failed) {
-      await runAgentTurn(failed.task, failed.userText, {
-        appendUser: false,
-        pendingFiles: failed.pendingFiles,
-        publishApproved: failed.publishApproved,
-        resumeHistory: failed.history,
-      });
-      return;
     }
     if (!task) return;
     await runAgentTurn(task, `继续处理当前商品任务：${task.productName}。请根据真实任务状态自主选择下一步工具。`);
