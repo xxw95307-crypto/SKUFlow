@@ -5,7 +5,7 @@ import { callBailianAssetPlanning, callBailianImageGeneration, callBailianVisual
 import { loadBailianConfig, loadBailianImageConfig, missingBailianConfig, missingBailianImageConfig } from '@/lib/config/bailian';
 import type { GeneratedAsset, GeneratedAssetSummary } from '@/lib/domain/generated-asset';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
-import { listLatestGeneratedAssets, prepareGeneratedAssetInsert } from '@/lib/server/generated-asset-store';
+import { listGeneratedAssetHistory, listLatestGeneratedAssets, prepareGeneratedAssetInsert } from '@/lib/server/generated-asset-store';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 
@@ -71,12 +71,15 @@ async function requestOptions(request: Request): Promise<{ force: boolean; guida
   }
 }
 
-async function handleGET(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
     await ensureSchema();
     const { taskId } = await context.params;
     const task = await getTaskSnapshot(getBindings().DB, taskId);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
+    if (new URL(request.url).searchParams.get('history') === '1') {
+      return Response.json({ batches: await listGeneratedAssetHistory(getBindings().DB, taskId) });
+    }
     const assets = await listLatestGeneratedAssets(getBindings().DB, taskId);
     return Response.json({ assets, summary: summarize(assets) });
   } catch (error) {

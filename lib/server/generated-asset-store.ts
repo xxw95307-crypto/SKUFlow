@@ -53,6 +53,21 @@ export async function listLatestGeneratedAssets(DB: D1Database, taskId: string):
   return result.results.map(mapAsset);
 }
 
+export async function listGeneratedAssetHistory(DB: D1Database, taskId: string): Promise<GeneratedAsset[][]> {
+  const result = await DB.prepare(
+    `SELECT ${columns} FROM generated_assets
+     WHERE task_id = ? AND asset_kind != 'VIDEO' AND status = 'COMPLETED'
+     ORDER BY created_at ASC LIMIT 180`,
+  ).bind(taskId).all<GeneratedAssetRow>();
+  const batches = new Map<string, GeneratedAsset[]>();
+  for (const row of result.results) {
+    const batch = batches.get(row.batch_id) ?? [];
+    batch.push(mapAsset(row));
+    batches.set(row.batch_id, batch);
+  }
+  return [...batches.values()];
+}
+
 export async function countGeneratedAssets(DB: D1Database, taskId: string): Promise<number> {
   const latest = await DB.prepare(
     `SELECT batch_id FROM generated_assets

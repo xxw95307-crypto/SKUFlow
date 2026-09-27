@@ -13,6 +13,7 @@ import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
+import { restoreConversationAssetSnapshots, snapshotGeneratedImages } from '@/lib/agents/asset-history';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
@@ -42,13 +43,6 @@ interface ImageBrief { count: number | null; style: string; notes: string }
 type ChatMessage = ConversationMessage;
 
 type DisplayAsset = Pick<GeneratedAsset, 'id' | 'kind' | 'title' | 'status' | 'width' | 'height' | 'error' | 'imageUrl'>;
-
-function snapshotAssets(assets: readonly GeneratedAsset[]): ConversationAssetSnapshot[] {
-  return assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED').map((asset) => ({
-    id: asset.id, taskId: asset.taskId, kind: asset.kind, title: asset.title,
-    width: asset.width, height: asset.height, error: asset.error,
-  }));
-}
 
 function displaySnapshots(assets: readonly ConversationAssetSnapshot[]): DisplayAsset[] {
   return assets.map((asset) => ({
@@ -479,6 +473,13 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     return [...payload.assets,...videos.jobs.filter(j=>j.status==='SUCCEEDED').map(j=>({id:j.id,taskId,sourceFileId:j.plan.sourceFileId,batchId:'video',kind:'VIDEO' as const,title:j.plan.title,note:j.plan.shots.join('；'),model:'wan2.7-i2v',status:'COMPLETED' as const,width:null,height:null,error:null,createdAt:'',completedAt:null,imageUrl:j.videoUrl}))];
   };
 
+  const fetchGeneratedAssetHistory = async (taskId: string): Promise<GeneratedAsset[][]> => {
+    const payload = await responseJson<{ batches: GeneratedAsset[][] }>(
+      await fetch(`/api/tasks/${taskId}/generated-assets?history=1`), '历史图片读取失败',
+    );
+    return payload.batches;
+  };
+
   const updateConversationList = (conversation: AgentConversationRecord | ConversationSummary) => {
     setConversations((current) => current.some((item) => item.id === conversation.id)
       ? current.map((item) => item.id === conversation.id ? conversation : item)
@@ -513,11 +514,21 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       if (removedInternalLogs) await persistConversation(null, conversation.status);
       return;
     }
-    const [loadedTask, loadedPassport, loadedAssets] = await Promise.all([
+    const needsAssetHistory = messagesRef.current.some((message) => message.kind === 'assets' && !message.assets?.length);
+    const [loadedTask, loadedPassport, loadedAssets, assetHistory] = await Promise.all([
       fetchTask(conversation.taskId), fetchPassport(conversation.taskId), fetchGeneratedAssets(conversation.taskId),
+      needsAssetHistory ? fetchGeneratedAssetHistory(conversation.taskId).catch(() => []) : Promise.resolve([]),
     ]);
     setTask(loadedTask); setPassport(loadedPassport); setGeneratedAssets(loadedAssets);
     let conversationUpgraded = removedInternalLogs;
+    if (needsAssetHistory && assetHistory.length) {
+      const recovered = restoreConversationAssetSnapshots(messagesRef.current, assetHistory);
+      if (recovered.changed) {
+        messagesRef.current = recovered.messages;
+        setMessages(recovered.messages);
+        conversationUpgraded = true;
+      }
+    }
     const validAssetIds = new Set(loadedAssets.filter((asset) => asset.status === 'COMPLETED').map((asset) => asset.id));
     const validSelections = conversation.selectedAssetIds.filter((id) => validAssetIds.has(id));
     if (validSelections.length !== conversation.selectedAssetIds.length) {
@@ -953,7 +964,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
         setPhase('assets');
         const needsReview = payload.assets.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.error);
-        append('agent', needsReview ? '图片已生成，部分画面需要你检查。点开预览，不满意可以直接告诉我改哪里。' : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotAssets(payload.assets) });
+        append('agent', needsReview ? '图片已生成，部分画面需要你检查。点开预览，不满意可以直接告诉我改哪里。' : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }
@@ -963,7 +974,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
         setGeneratedAssets(assets);
         setPhase('assets');
-        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotAssets(assets) });
+        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -1177,7 +1188,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           setGeneratedAssets(available);
           setError(''); setCanRetryFailedTurn(false); failedTurnRef.current = null;
           setPhase('assets');
-          append('agent', '已找到保存的候选图片。请检查是否符合最新要求；不满意可以直接告诉我修改。', '等待素材选择', { kind: 'assets', assets: snapshotAssets(available) });
+          append('agent', '已找到保存的候选图片。请检查是否符合最新要求；不满意可以直接告诉我修改。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(available) });
           await persistConversation(task.id);
           return;
         }
