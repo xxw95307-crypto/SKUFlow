@@ -288,7 +288,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
       {!readOnly && <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>}
       {asset.error && <span className="image-picker-review-badge">未通过验收</span>}
     </div>)}</div>
-    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>}
+    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
       <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
         <header><span>{previewIndex! + 1} / {completed.length}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
@@ -924,17 +924,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         const revising = name === 'revise_product_video';
         const selectedImageIds = selectedAssetsRef.current.filter((id) => id.startsWith('asset_'));
         if (!selectedImageIds.length) throw new Error('请先确认要用于视频的商品图片');
-        setBusyLabel(revising ? '视频 Agent 正在根据你的要求修改视频…' : '视频 Agent 正在根据已选图片生成视频…');
-        setBusyHint('视频以已选图片为首帧，完成后可预览和选择');
+        setBusyLabel('视频 Agent 正在准备可编辑的提示词…');
+        setBusyHint('确认提示词后才会调用视频生成模型');
         const payload = await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`, {
           method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText,selectedImageIds,purpose:revising?'revision':'initial'}),
         }), '视频修改规划失败');
-        const started = await fetch(`/api/tasks/${currentTask.id}/videos`, {method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id:payload.job.id,action:'start'})});
         setVideoRevision(v=>v+1);
-        await responseJson(started,'修改后的视频生成未成功启动');
         mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);
         selectedAssetsRef.current=selectedImageIds;setSelectedAssets(selectedImageIds);setPhase('video');
-        append('agent',revising ? '已按你的要求重新规划视频，图片保持不变。请在下方查看进度和结果。' : '图片已确认，现在开始生成视频。完成后可预览、选择，或只用图片继续。','视频生成中',{kind:'assets'});
+        append('agent','视频提示词已准备好，你可以修改；确认后再开始生成。','等待视频确认');
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:payload.job.id},checkpoint:true};
       }
@@ -1268,11 +1266,17 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     if (!chosen.length) throw new Error('请先选择至少一张图片');
     selectedAssetsRef.current = chosen.map((asset) => asset.id);
     setSelectedAssets(selectedAssetsRef.current);
-    append('user', skipVideo ? `已确认 ${chosen.length} 张图片，本次不生成视频` : `已确认 ${chosen.length} 张图片，开始生成视频`, skipVideo ? '视频阶段已完成' : '图片已确认', {
+    append('user', skipVideo ? `已确认 ${chosen.length} 张图片，本次不生成视频` : `已确认 ${chosen.length} 张图片，准备视频创意`, skipVideo ? '视频阶段已完成' : '图片已确认', {
       kind: 'assets',
       items: chosen.map((asset) => ({ id: asset.id, label: assetKindLabel(asset.kind), value: asset.title, detail: asset.note, status: '已选择' })),
     });
-    if (task) await runAgentTurn(task, skipVideo ? '我已确认图片，本次不需要视频，请进入最终交付确认。' : '我已确认最终图片，请根据这些图片生成视频。', { appendUser: false });
+    if (skipVideo) {
+      if (task) await runAgentTurn(task, '我已确认图片，本次不需要视频，请进入最终交付确认。', { appendUser: false });
+      return;
+    }
+    setPhase('video');
+    append('agent', '你想怎样准备视频提示词？可以交给 AI 拟稿，也可以自己填写。确认提示词后再生成视频。', '等待视频确认');
+    await persistConversation(task?.id ?? null);
   };
 
   const confirmVideo = async (skipVideo = false) => {
@@ -1378,7 +1382,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   };
 
   const toggleAsset = (id: string) => {
-    if (!generatedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error)) return;
+    if (!id.startsWith('video_') && !generatedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error)) return;
     mediaPlanRef.current=null;setMediaPlanReady(false);
     const next = selectedAssetsRef.current.includes(id)
       ? selectedAssetsRef.current.filter((item) => item !== id)
@@ -1398,8 +1402,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     && messages.at(-1)?.meta === '等待素材选择';
   const joinVideoToLastAgentReply = phase === 'video' && messages.at(-1)?.role === 'agent'
     && (messages.at(-1)?.meta === '视频生成中' || messages.at(-1)?.meta === '等待视频确认');
-  const selectedVideoSources = messages.some((message) => message.role === 'agent' && message.text.startsWith('图片已确认，现在开始生成视频'))
-    ? selectedAssets.filter((id) => id.startsWith('asset_')) : undefined;
+  const selectedVideoSources = selectedAssets.filter((id) => id.startsWith('asset_'));
 
   const intakeCard = phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>;
   const imageBriefCard = phase === 'image_brief' && <div className="image-brief-card">
@@ -1412,7 +1415,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     <footer><span>先生成并确认图片，再开始视频</span><button type="button" onClick={() => void submitImageBrief()}>{imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
   </div>;
   const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} />;
-  const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} /><footer><span>跳过后不加入交付包，已启动的视频任务不会取消</span><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认视频并继续</button></footer></div>;
+  const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} /><footer><span>确认视频前可以继续生成或调整</span><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认视频并继续</button></footer></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
 

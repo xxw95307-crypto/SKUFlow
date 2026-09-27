@@ -15,6 +15,11 @@ export function parseVideoPlan(raw:any,sourceIds:string[]):VideoPlan {
  if(!raw||typeof raw.title!=='string'||!raw.title.trim()||typeof raw.prompt!=='string'||!raw.prompt.trim()||!sourceIds.includes(raw.sourceFileId)||!Number.isInteger(raw.duration)||raw.duration<2||raw.duration>15||!['720P','1080P'].includes(raw.resolution)||!Array.isArray(raw.shots)||!raw.shots.length||!raw.shots.every((s:any)=>typeof s==='string'))throw new Error('视频策划结果无效');
  return {title:raw.title.slice(0,120),prompt:raw.prompt.slice(0,4000),duration:raw.duration,resolution:raw.resolution,sourceFileId:raw.sourceFileId,shots:raw.shots.slice(0,8).map((s:string)=>s.slice(0,300))};
 }
+export function createCustomVideoPlan(prompt: string, sourceIds: string[]): VideoPlan {
+ const trimmed=prompt.trim();
+ if(!trimmed||trimmed.length>4000||!sourceIds.length)throw new Error('请填写不超过 4000 字的视频生成提示词，并确认至少一张图片');
+ return parseVideoPlan({title:'自定义商品视频',prompt:trimmed,duration:5,resolution:'720P',sourceFileId:sourceIds[0],shots:['按商家提示词生成']},sourceIds);
+}
 async function api(c:WanVideoConfig,path:string,body:unknown|undefined,fetcher:typeof fetch) {
  requireWanConfig(c);const r=await fetcher(c.baseUrl+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${c.apiKey}`,'content-type':'application/json',...(body?{'X-DashScope-Async':'enable'}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
  const d=await r.json() as any;

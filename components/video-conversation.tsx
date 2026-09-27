@@ -1,17 +1,127 @@
- 'use client';
-import {useCallback,useEffect,useMemo,useState} from 'react';
-type Job={id:string;status:string;plan:{title:string;duration:number;resolution:string;shots:string[];sourceFileId:string;trim?:unknown};error?:string;videoUrl:string|null};
-type VideoJobsResponse={jobs:Job[];configured:boolean;error?:string};
-const labels:Record<string,string>={DRAFT:'方案待确认',SUBMITTING:'正在提交',SUBMISSION_UNKNOWN:'提交结果未确认，请核对服务记录，勿重复生成',PENDING:'排队中',RUNNING:'生成中',SUCCEEDED:'已生成',FAILED:'生成失败',CANCELED:'已取消',UNKNOWN:'任务已失效'};
-export function VideoConversation({taskId,revision,selected,onToggle,selectable,showSuggestion=false,sourceImageIds}:{taskId:string;revision:number;selected:string[];onToggle:(id:string)=>void;selectable:boolean;showSuggestion?:boolean;sourceImageIds?:string[]}) {
- const [jobs,setJobs]=useState<Job[]>([]);const [configured,setConfigured]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
- const load=useCallback(async()=>{const r=await fetch(`/api/tasks/${taskId}/videos`);const d=await r.json() as VideoJobsResponse;if(!r.ok)throw new Error(d.error);setJobs(d.jobs);setConfigured(d.configured);},[taskId]);
- useEffect(()=>{let active=true;fetch(`/api/tasks/${taskId}/videos`).then(r=>r.json() as Promise<VideoJobsResponse>).then(d=>{if(active){setJobs(d.jobs??[]);setConfigured(d.configured??false);}}).catch(()=>{});return()=>{active=false;};},[taskId,revision]);
- const action=useCallback(async(id:string,action:string)=>{setBusy(true);setError('');try{const r=await fetch(`/api/tasks/${taskId}/videos`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({id,action})});const d=await r.json() as {error?:string};if(!r.ok)throw new Error(d.error);await load();}catch(e){setError((e as Error).message);}finally{setBusy(false);}},[taskId,load]);
- const sourceKey=sourceImageIds?.join('|')??'';
- const visibleJobs=useMemo(()=>sourceKey?jobs.filter(j=>sourceKey.split('|').includes(j.plan.sourceFileId)):jobs,[jobs,sourceKey]);
- useEffect(()=>{if(!visibleJobs.some(j=>['PENDING','RUNNING'].includes(j.status)))return;const timer=setInterval(()=>{if(!busy){const j=visibleJobs.find(j=>['PENDING','RUNNING'].includes(j.status));if(j)void action(j.id,'refresh');}},15000);return()=>clearInterval(timer);},[visibleJobs,busy,action]);
- if(!visibleJobs.length&&!showSuggestion)return null;
- if(!visibleJobs.length)return <div className="asset-conversation-card"><h3>视频素材</h3><p>图片已确认，视频正在准备。若未启动，可直接在对话中要求生成视频，或只用图片继续。</p></div>;
- return <div className="asset-conversation-card"><header><span>第二步 · 商品视频</span><h3>视频方案与候选</h3><p>视频使用已确认的图片作为首帧。生成后请核对商品外观与动作，再选择是否加入交付包。</p></header>{!configured&&<p role="status">视频服务尚未配置，方案可查看。请确认账号有视频调用权限。</p>}{error&&<p role="alert">{error}</p>}{visibleJobs.filter(j=>!['TRIM_DRAFT','CANCELED'].includes(j.status)).map(j=><section key={j.id} style={{padding:16,border:'1px solid #dbe3df',borderRadius:12,marginTop:12}}><h4>{j.status==='SUCCEEDED'?`视频 ${visibleJobs.filter(s=>s.status==='SUCCEEDED').findIndex(s=>s.id===j.id)+1} · `:''}{j.plan.title}</h4><p>{j.plan.duration} 秒 · {j.plan.resolution} · {labels[j.status]??j.status}</p>{!j.plan.trim&&<><ol>{j.plan.shots.map((s,i)=><li key={i}>{s}</li>)}</ol><small>首帧图片：{j.plan.sourceFileId}</small></>}{j.error&&<p role="alert">{j.error}</p>}{j.status==='DRAFT'&&<div><p>确认后调用视频模型，可能产生单独费用；时长与清晰度以本方案为准。</p><button type="button" disabled={busy||!configured} onClick={()=>action(j.id,'start')}>确认方案并生成视频</button></div>}{['PENDING','RUNNING'].includes(j.status)&&<button disabled={busy} onClick={()=>action(j.id,'refresh')}>查询生成进度</button>}{j.videoUrl&&<div><video controls preload="metadata" src={j.videoUrl} style={{width:'100%',maxHeight:420}}/><label><input type="checkbox" disabled={!selectable} checked={selected.includes(j.id)} onChange={()=>onToggle(j.id)}/>选择此视频用于商品媒体</label><a href={j.videoUrl} download={`${j.id}.mp4`}>下载视频</a></div>}</section>)}{showSuggestion&&<p>可直接提出视频修改或裁剪要求；告诉我大致要保留或去掉的时段，完成后会直接展示结果视频。</p>}</div>;
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
+
+type Job = {
+  id: string;
+  status: string;
+  plan: { title: string; prompt: string; duration: number; resolution: string; sourceFileId: string };
+  error?: string | null;
+  videoUrl: string | null;
+};
+type VideoJobsResponse = { jobs: Job[]; configured: boolean; error?: string };
+
+const labels: Record<string, string> = {
+  SUBMITTING: '正在提交', SUBMISSION_UNKNOWN: '提交结果未确认，请核对服务记录',
+  PENDING: '排队中', RUNNING: '生成中', FAILED: '生成失败', UNKNOWN: '任务已失效',
+};
+
+function VideoDraft({ job, configured, busy, onStart }: {
+  job: Job; configured: boolean; busy: boolean; onStart: (id: string, prompt: string) => Promise<void>;
+}) {
+  const [prompt, setPrompt] = useState(job.plan.prompt);
+  return <section className="video-draft-review">
+    <div className="video-card-heading"><span>生成前确认</span><b>视频提示词</b></div>
+    <textarea aria-label="视频生成提示词" value={prompt} maxLength={4000} rows={7} onChange={(event) => setPrompt(event.target.value)} />
+    <footer><small>{job.plan.duration} 秒 · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim()} onClick={() => void onStart(job.id, prompt)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
+  </section>;
+}
+
+export function VideoConversation({ taskId, revision, selected, onToggle, selectable, showSuggestion = false, sourceImageIds }: {
+  taskId: string; revision: number; selected: string[]; onToggle: (id: string) => void;
+  selectable: boolean; showSuggestion?: boolean; sourceImageIds?: string[];
+}) {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [configured, setConfigured] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [mode, setMode] = useState<'ai' | 'custom'>('ai');
+  const [guidance, setGuidance] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [showNew, setShowNew] = useState(false);
+
+  const load = useCallback(async () => {
+    const response = await fetch(`/api/tasks/${taskId}/videos`);
+    const data = await response.json() as VideoJobsResponse;
+    if (!response.ok) throw new Error(data.error || '视频任务读取失败');
+    setJobs(data.jobs);
+    setConfigured(data.configured);
+  }, [taskId]);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/tasks/${taskId}/videos`)
+      .then(async (response) => { const data = await response.json() as VideoJobsResponse; if (!response.ok) throw new Error(data.error || '视频任务读取失败'); return data; })
+      .then((data) => { if (active) { setJobs(data.jobs); setConfigured(data.configured); } })
+      .catch((caught) => { if (active) setError((caught as Error).message); });
+    return () => { active = false; };
+  }, [taskId, revision]);
+
+  const sourceKey = sourceImageIds?.join('|') ?? '';
+  const visibleJobs = useMemo(() => sourceKey ? jobs.filter((job) => sourceImageIds?.includes(job.plan.sourceFileId)) : jobs, [jobs, sourceKey, sourceImageIds]);
+  const draft = visibleJobs.find((job) => job.status === 'DRAFT');
+  const inProgress = visibleJobs.some((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job));
+  const results = visibleJobs.filter((job) => job.status === 'SUCCEEDED' && job.videoUrl);
+  const latestFailure = visibleJobs.find((job) => ['FAILED', 'UNKNOWN'].includes(job.status) || (job.status === 'SUBMISSION_UNKNOWN' && !isReusableVideoJob(job)));
+  const showPlanner = showSuggestion && !draft && !inProgress && (showNew || results.length === 0);
+
+  const action = useCallback(async (id: string, actionName: 'start' | 'refresh', prompt?: string) => {
+    setBusy(true); setError('');
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/videos`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, action: actionName, ...(prompt === undefined ? {} : { prompt }) }),
+      });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || '视频操作失败');
+      await load();
+    } catch (caught) { setError((caught as Error).message); await load().catch(() => undefined); }
+    finally { setBusy(false); }
+  }, [taskId, load]);
+
+  const createPlan = async () => {
+    if (!sourceImageIds?.length) { setError('请先选择用于视频的图片'); return; }
+    setBusy(true); setError('');
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/videos`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode, guidance: guidance.trim(), prompt: customPrompt.trim(), selectedImageIds: sourceImageIds, purpose: 'revision' }),
+      });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || '视频提示词准备失败');
+      await load();
+      setShowNew(false);
+    } catch (caught) { setError((caught as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    const job = visibleJobs.find((item) => ['PENDING', 'RUNNING'].includes(item.status));
+    if (!job) return;
+    const timer = window.setInterval(() => { if (!busy) void action(job.id, 'refresh'); }, 15000);
+    return () => window.clearInterval(timer);
+  }, [visibleJobs, busy, action]);
+
+  if (!showSuggestion && results.length === 0) return null;
+  return <div className="asset-conversation-card video-results-card">
+    {error && <p className="video-inline-error" role="alert">{error}</p>}
+    {showPlanner && <section className="video-prompt-choice">
+      <h3>你想怎样生成视频？</h3>
+      <div className="video-prompt-options" role="group" aria-label="视频提示词方式">
+        <button type="button" className={mode === 'ai' ? 'selected' : ''} aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}><b>AI 拟稿</b><span>先生成可编辑的提示词</span></button>
+        <button type="button" className={mode === 'custom' ? 'selected' : ''} aria-pressed={mode === 'custom'} onClick={() => setMode('custom')}><b>自己填写</b><span>直接使用你的创意</span></button>
+      </div>
+      {mode === 'ai' ? <label>补充想法（可选）<textarea rows={2} maxLength={1000} value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="例如：镜头缓慢移动，突出面料质感" /></label>
+        : <label>视频生成提示词<textarea rows={5} maxLength={4000} value={customPrompt} onChange={(event) => setCustomPrompt(event.target.value)} placeholder="描述希望出现的画面、镜头和动作" /></label>}
+      <footer><small>确认提示词后才会调用视频模型</small><button type="button" disabled={busy || (mode === 'custom' && !customPrompt.trim())} onClick={() => void createPlan()}>{busy ? '正在准备…' : mode === 'ai' ? '生成可编辑提示词' : '保存提示词'}</button></footer>
+    </section>}
+    {draft && showSuggestion && <VideoDraft key={draft.id} job={draft} configured={configured} busy={busy} onStart={(id, prompt) => action(id, 'start', prompt)} />}
+    {inProgress && <div className="video-progress-row" role="status"><span className="agent-spinner" /><span>{labels[visibleJobs.find((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job))?.status ?? ''] || '视频生成中'}</span>{visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status)) && <button type="button" disabled={busy} onClick={() => void action(visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status))!.id, 'refresh')}>刷新状态</button>}</div>}
+    {results.map((job) => <section className="video-result" key={job.id}>
+      <video controls playsInline preload="metadata" src={job.videoUrl!} />
+      <div><span>视频已生成</span>{selectable && <label><input type="checkbox" checked={selected.includes(job.id)} onChange={() => onToggle(job.id)} />加入商品媒体</label>}<a href={job.videoUrl!} download={`${job.id}.mp4`}>下载视频</a></div>
+    </section>)}
+    {latestFailure && !inProgress && <p className="video-inline-error" role="status">上次生成未成功：{latestFailure.status === 'SUBMISSION_UNKNOWN' ? '视频服务账号状态异常，恢复后可重新生成' : latestFailure.error || labels[latestFailure.status]}</p>}
+    {showSuggestion && !draft && !inProgress && results.length > 0 && !showNew && <button className="video-new-button" type="button" onClick={() => setShowNew(true)}>再生成一条视频</button>}
+  </div>;
 }

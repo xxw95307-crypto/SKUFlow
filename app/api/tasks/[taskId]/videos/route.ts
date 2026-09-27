@@ -5,7 +5,7 @@ import { getProductPassport } from '@/lib/server/passport-store';
 import { listLatestGeneratedAssets } from '@/lib/server/generated-asset-store';
 import { selectConfirmedVideoImages } from '@/lib/agents/asset-generation';
 import { loadBailianConfig } from '@/lib/config/bailian';
-import { loadWanVideoConfig, parseVideoPlan } from '@/lib/ai/wan-video';
+import { createCustomVideoPlan, loadWanVideoConfig, parseVideoPlan } from '@/lib/ai/wan-video';
 import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +49,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return Response.json({ error: '请先确认商品事实与所有 Listing，再规划视频' }, { status: 409 });
     }
 
-    const body = await request.json().catch(() => ({})) as { guidance?: unknown; selectedImageIds?: unknown; purpose?: unknown };
+    const body = await request.json().catch(() => ({})) as { guidance?: unknown; selectedImageIds?: unknown; purpose?: unknown; mode?: unknown; prompt?: unknown };
     const guidance = typeof body.guidance === 'string' ? body.guidance.slice(0, 1000) : '';
     const latestAssets = await listLatestGeneratedAssets(bindings.DB, taskId);
     let images;
@@ -67,9 +67,14 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
 
     const previous = await bindings.DB.prepare('SELECT plan_json FROM video_jobs WHERE task_id=? ORDER BY created_at DESC LIMIT 1')
       .bind(taskId).first<{ plan_json: string }>();
-    const config = loadBailianConfig(bindings);
-    if (!config.apiKey || !config.baseUrl || !config.model) throw new Error('百炼视频策划模型未配置');
-    const response = await fetch(config.baseUrl.replace(/\/$/, '') + '/chat/completions', {
+    let plan;
+    if (body.mode === 'custom') {
+      try { plan = createCustomVideoPlan(typeof body.prompt === 'string' ? body.prompt : '', selectedImageIds); }
+      catch (error) { return Response.json({ error: (error as Error).message }, { status: 400 }); }
+    } else {
+      const config = loadBailianConfig(bindings);
+      if (!config.apiKey || !config.baseUrl || !config.model) throw new Error('百炼视频策划模型未配置');
+      const response = await fetch(config.baseUrl.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
       signal: AbortSignal.timeout(60_000),
@@ -87,10 +92,11 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         ],
       }),
     });
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    if (!response.ok) throw new Error(`视频策划请求失败（HTTP ${response.status}）`);
-    const raw = payload.choices?.[0]?.message?.content ?? '';
-    const plan = parseVideoPlan(JSON.parse(raw.replace(/^\`\`\`(?:json)?\s*/, '').replace(/\s*\`\`\`$/, '')), selectedImageIds);
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      if (!response.ok) throw new Error(`视频策划请求失败（HTTP ${response.status}）`);
+      const raw = payload.choices?.[0]?.message?.content ?? '';
+      plan = parseVideoPlan(JSON.parse(raw.replace(/^\`\`\`(?:json)?\s*/, '').replace(/\s*\`\`\`$/, '')), selectedImageIds);
+    }
     const id = `video_${crypto.randomUUID()}`;
     await bindings.DB.prepare("INSERT INTO video_jobs (id,task_id,source_file_id,plan_json,status,created_at) VALUES (?,?,?,?,'DRAFT',?)")
       .bind(id, taskId, plan.sourceFileId, JSON.stringify(plan), new Date().toISOString()).run();

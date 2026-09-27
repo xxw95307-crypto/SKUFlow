@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,submitWanVideo,queryWanVideo,WanVideoRequestError} from '../lib/ai/wan-video.ts';
+import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,createCustomVideoPlan,submitWanVideo,queryWanVideo,WanVideoRequestError} from '../lib/ai/wan-video.ts';
 import {isReusableVideoJob} from '../lib/domain/video-job-retry.ts';
 const c={apiKey:'test-secret',baseUrl:'https://dashscope.aliyuncs.com/api/v1',model:'wan2.7-i2v'};
 const plan={title:'商品展示',prompt:'保持商品结构一致，缓慢推进镜头',duration:5,resolution:'720P' as const,sourceFileId:'asset_cover',shots:['商品全貌','细节']};
@@ -19,6 +19,12 @@ test('submit uses async native video API and returns provider ID rather than cla
 test('polling uses existing task ID; failed task stays failed and invalid download host is rejected',async()=>{
  const failed=await queryWanVideo(c,'provider-1',async(url,init)=>{assert.match(String(url),/tasks\/provider-1$/);assert.equal(init?.method,'GET');return Response.json({output:{task_status:'FAILED',message:'quota'}});});assert.equal(failed.task_status,'FAILED');
  await assert.rejects(()=>queryWanVideo(c,'p',async()=>Response.json({output:{task_status:'SUCCEEDED',video_url:'https://example.com/movie.mp4'}})),/地址无效/);
+});
+test('a seller-authored video prompt is kept verbatim for review and submission',()=>{
+ const custom=createCustomVideoPlan('  Slow camera orbit around the exact product; no people.  ',['asset_1','asset_2']);
+ assert.equal(custom.prompt,'Slow camera orbit around the exact product; no people.');
+ assert.equal(custom.sourceFileId,'asset_1');
+ assert.throws(()=>createCustomVideoPlan('   ',['asset_1']),/请填写/);
 });
 test('a definite account denial can be retried with a fresh video job without exposing provider prose',async()=>{
  await assert.rejects(
