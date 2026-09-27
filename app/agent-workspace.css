@@ -1034,7 +1034,7 @@ body {
 }
 
 .agent-shell-v2 .image-picker-card .agent-asset-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
   gap: 12px;
   margin-top: 0;
 }
@@ -1647,6 +1647,29 @@ body {
   width: min(1040px, calc(100% - 45px));
   max-width: min(1040px, calc(100% - 45px));
   border-radius: 5px 11px 11px;
+}
+
+/* Image replies should follow the number of visible choices, including saved rounds. */
+.agent-shell-v2 .chat-message > div.joined-action-bubble:has(> .image-picker-card .image-picker-tile:only-child),
+.agent-shell-v2 .chat-message > div.rich-message-bubble:has(> .image-picker-card .image-picker-tile:only-child),
+.agent-shell-v2 .chat-message.asset-conversation > .asset-conversation-card:has(.image-picker-tile:only-child) {
+  width: min(430px, calc(100% - 45px));
+  max-width: min(430px, calc(100% - 45px));
+}
+
+.agent-shell-v2 .chat-message > div.joined-action-bubble:has(> .image-picker-card .image-picker-tile:first-child:nth-last-child(2)),
+.agent-shell-v2 .chat-message > div.rich-message-bubble:has(> .image-picker-card .image-picker-tile:first-child:nth-last-child(2)),
+.agent-shell-v2 .chat-message.asset-conversation > .asset-conversation-card:has(.image-picker-tile:first-child:nth-last-child(2)) {
+  width: min(820px, calc(100% - 45px));
+  max-width: min(820px, calc(100% - 45px));
+}
+
+.agent-shell-v2 .image-picker-card:has(.image-picker-tile:only-child) > footer {
+  flex-wrap: wrap;
+}
+
+.agent-shell-v2 .image-picker-card:has(.image-picker-tile:only-child) > footer > span {
+  flex: 0 0 100%;
 }
 
 .agent-shell-v2 .listing-conversation-head,
