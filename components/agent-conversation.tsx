@@ -233,6 +233,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   onSkipVideo: () => void;
 }) {
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
+  const needsReview = completed.some((asset) => asset.error);
   const selectedCount = completed.filter((asset) => selected.includes(asset.id)).length;
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [zoomed, setZoomed] = useState(false);
@@ -266,11 +267,13 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   const previewAsset = previewIndex === null ? null : completed[previewIndex] ?? null;
   return <div className="asset-conversation-card image-picker-card">
     <h3 className="visually-hidden">选择商品图片</h3>
+    {needsReview && <p className="image-picker-review-note" role="status">部分图片未通过自动画面核对。请点开查看；不满意可直接在对话中提出修改要求。</p>}
     <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
         <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
       </button>
       <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>
+      {asset.error && <span className="image-picker-review-badge">需检查</span>}
     </div>)}</div>
     <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
@@ -281,6 +284,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
           <div className={`asset-preview-viewport ${zoomed ? 'zoomed' : ''}`}><Image src={previewAsset.imageUrl!} alt={previewAsset.title} width={previewAsset.width ?? 1024} height={previewAsset.height ?? 1024} unoptimized onClick={() => setZoomed((value) => !value)} /></div>
           {completed.length > 1 && <button className="asset-preview-nav next" type="button" aria-label="下一张图片" onClick={() => movePreview(1)}>›</button>}
         </div>
+        {previewAsset.error && <p className="image-picker-review-detail">{previewAsset.error}</p>}
         <footer><button type="button" onClick={() => setZoomed((value) => !value)}>{zoomed ? '适应窗口' : '放大看细节'}</button><button type="button" className="primary" aria-pressed={selected.includes(previewAsset.id)} onClick={() => onToggle(previewAsset.id)}>{selected.includes(previewAsset.id) ? '✓ 已选择，点击取消' : '选择这张图片'}</button></footer>
       </section>
     </div>, document.body)}
@@ -937,7 +941,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         setSelectedAssets(selectedAssetsRef.current);
         if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
         setPhase('assets');
-        append('agent', targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
+        const needsReview = payload.assets.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.error);
+        append('agent', needsReview ? '图片已生成，部分画面需要你检查。点开预览，不满意可以直接告诉我改哪里。' : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets' });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }

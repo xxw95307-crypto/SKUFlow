@@ -519,7 +519,7 @@ export async function callBailianAssetPlanning(
             method: 'POST',
             headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
             body: JSON.stringify({ model, messages: [
-              { role: 'system', content: '你是独立的商品图片需求核对员。只检查计划是否逐项覆盖商家本轮明确要求（数量、每张内容、风格、排除项、局部修改范围）。不得自行加上主图、模特或平台规则。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
+              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。逐项核对数量、每张画面、人物、风格、排除项和局部修改范围。尤其检查计划是否把商家明确要求出现的元素（例如某张要模特）写成禁止出现；也检查是否凭空添加了本轮未要求的排除项。出现任何这种冲突就返回 satisfies=false，reason 要指出冲突的原话及计划文字。不得自行加上主图、模特或平台规则。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
               { role: 'user', content: JSON.stringify({ request: context.userGuidance, requestedCount: context.requestedCount, targetIndices: context.targetIndices, existingAssets: context.existingAssets, plan: assets }) },
             ], response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 300, stream: false }),
             signal: controller.signal,
@@ -553,10 +553,11 @@ export async function callBailianAssetPlanning(
 
 export async function checkGeneratedImageAgainstIntent(
   config: BailianConfig,
-  input: { bytes: Uint8Array; contentType: string; acceptance: string; instruction: string },
+  input: { bytes: Uint8Array; contentType: string; acceptance: string; instruction: string; userGuidance?: string | null; reference?: { bytes: Uint8Array; contentType: string } },
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ matches: boolean; reason: string }> {
   if (!input.contentType.startsWith('image/') || !input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new Error('待核对图片无效或超过 8 MB');
+  const reference = input.reference && input.reference.contentType.startsWith('image/') && input.reference.bytes.length > 0 && input.reference.bytes.length <= MAX_IMAGE_BYTES ? input.reference : null;
   const baseUrl = normalizeBaseUrl(config.baseUrl);
   const response = await fetchImpl(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -565,7 +566,8 @@ export async function checkGeneratedImageAgainstIntent(
       model: config.model.trim(),
       messages: [{ role: 'user', content: [
         { type: 'image_url', image_url: { url: `data:${input.contentType};base64,${toBase64(input.bytes)}` } },
-        { type: 'text', text: `你是独立的成图核对员。只看这张图片，检查它是否真正满足本张的视觉验收标准：${input.acceptance}。原创作指令供理解目标：${input.instruction}。客观元素（人物、商品形态、背景、文字、数量）必须可见；主观风格要求可合理判断。不要因为指令声称已完成就判通过。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
+        ...(reference ? [{ type: 'image_url', image_url: { url: `data:${reference.contentType};base64,${toBase64(reference.bytes)}` } }] : []),
+        { type: 'text', text: `你是独立的成图核对员。第一张图是生成结果，${reference ? '第二张是原始商品参考图。' : ''}商家本轮原话：${input.userGuidance?.trim() || '未补充'}。本张策划验收标准：${input.acceptance}。创作指令：${input.instruction}。以商家本轮原话为准；若策划标准与本轮原话冲突，不得按冲突标准判失败，应按本轮原话判断并在理由中指出策划冲突。核对可见的关键元素、商品身份与真实标识；参考图文字或刺绣辨认不清时不要猜测。风格允许合理判断，不要凭空要求未指定元素。只返回 JSON：{"matches":true或false,"reason":"简短中文理由"}。` },
       ] }],
       response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 200, stream: false,
     }),

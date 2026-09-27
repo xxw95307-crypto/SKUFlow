@@ -23,19 +23,27 @@ async function generateVerifiedImage(
   source: { bytes: Uint8Array; contentType: string },
   spec: AssetGenerationSpec,
   prompt: string,
+  userGuidance: string | null,
+  reference: { bytes: Uint8Array; contentType: string },
 ) {
   let feedback = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const generated = await callBailianImageGeneration(imageConfig, {
       ...source, prompt: feedback ? `${prompt}\n\n上一版未通过画面验收：${feedback}。请优先纠正，严格满足：${spec.acceptance}` : prompt, size: spec.size,
     });
-    const check = await checkGeneratedImageAgainstIntent(reviewConfig, {
-      bytes: generated.bytes, contentType: generated.contentType, acceptance: spec.acceptance, instruction: spec.instruction,
-    });
-    if (check.matches) return generated;
-    feedback = check.reason || '画面没有满足本张图片的验收标准';
+    try {
+      const check = await checkGeneratedImageAgainstIntent(reviewConfig, {
+        bytes: generated.bytes, contentType: generated.contentType, acceptance: spec.acceptance, instruction: spec.instruction,
+        userGuidance, reference,
+      });
+      if (check.matches) return { generated, reviewWarning: null };
+      feedback = check.reason || '画面没有满足本张图片的验收标准';
+    } catch {
+      return { generated, reviewWarning: '自动画面核对暂不可用，请预览后自行确认' };
+    }
+    if (attempt === 1) return { generated, reviewWarning: `自动核对未通过：${feedback}` };
   }
-  throw new Error(`生成图片两次未达到要求：${feedback}；本轮未保存不符合要求的图片`);
+  throw new Error('图片生成未完成');
 }
 
 function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
@@ -137,7 +145,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const createdAt = new Date().toISOString();
 
     if (options.targetIndices.length) {
-      const replacements = new Map<number, { id: string; spec: typeof plan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string }>();
+      const replacements = new Map<number, { id: string; spec: typeof plan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string; reviewWarning: string | null }>();
       for (const [position, targetIndex] of options.targetIndices.entries()) {
         const oldAsset = priorImages[targetIndex - 1];
         const spec = plan.assets[position];
@@ -146,17 +154,17 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         if (!oldRow?.object_key) throw new Error(`第 ${targetIndex} 张旧图不可用，请重新生成整组图片`);
         const oldImage = await bindings.UPLOADS.get(oldRow.object_key);
         if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
-        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset });
-        const generated = await generateVerifiedImage(config, planningConfig, {
+        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset, userGuidance: options.guidance });
+        const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, {
           bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type,
-        }, spec, prompt);
+        }, spec, prompt, options.guidance, { bytes, contentType: image.content_type });
         const id = `asset_${crypto.randomUUID()}`;
         const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
         await bindings.UPLOADS.put(objectKey, generated.bytes, {
           httpMetadata: { contentType: generated.contentType },
           customMetadata: { taskId, sourceFileId: oldAsset.sourceFileId, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
         });
-        replacements.set(targetIndex, { id, spec, prompt, objectKey, contentType: generated.contentType, model: generated.model, width: generated.width, height: generated.height, sourceFileId: oldAsset.sourceFileId });
+        replacements.set(targetIndex, { id, spec, prompt, objectKey, contentType: generated.contentType, model: generated.model, width: generated.width, height: generated.height, sourceFileId: oldAsset.sourceFileId, reviewWarning });
       }
       const retainedAssetIds: Record<string, string> = {};
       const writes = priorImages.map((oldAsset, position) => {
@@ -168,7 +176,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           kind: replacement.spec.kind, title: replacement.spec.title, note: replacement.spec.note,
           prompt: replacement.prompt, objectKey: replacement.objectKey, contentType: replacement.contentType,
           model: replacement.model, status: 'COMPLETED', width: replacement.width, height: replacement.height,
-          error: null, createdAt: timestamp, completedAt: timestamp,
+          error: replacement.reviewWarning, createdAt: timestamp, completedAt: timestamp,
         });
         retainedAssetIds[oldAsset.id] = oldAsset.id;
         return bindings.DB.prepare("UPDATE generated_assets SET batch_id=?, created_at=? WHERE task_id=? AND id=? AND status='COMPLETED'")
@@ -180,11 +188,11 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }
 
     const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
-      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
-      const generated = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt);
-      return { spec, prompt, generated, id: `asset_${crypto.randomUUID()}`, position };
+      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, userGuidance: options.guidance });
+      const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type });
+      return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
     }));
-    const writes = await Promise.all(prepared.map(async ({ spec, prompt, generated, id, position }) => {
+    const writes = await Promise.all(prepared.map(async ({ spec, prompt, generated, reviewWarning, id, position }) => {
       const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
       await bindings.UPLOADS.put(objectKey, generated.bytes, {
         httpMetadata: { contentType: generated.contentType },
@@ -194,7 +202,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return prepareGeneratedAssetInsert(bindings.DB, {
         id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
         prompt, objectKey, contentType: generated.contentType, model: generated.model, status: 'COMPLETED',
-        width: generated.width, height: generated.height, error: null, createdAt: timestamp, completedAt: timestamp,
+        width: generated.width, height: generated.height, error: reviewWarning, createdAt: timestamp, completedAt: timestamp,
       });
     }));
     await bindings.DB.batch(writes);

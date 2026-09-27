@@ -184,6 +184,27 @@ test('semantic plan review rejects a missed seller requirement without fixed ima
   assert.match(modelPrompt, /真人模特穿着这件T恤/);
 });
 
+test('the latest seller request overrides exclusions inherited from older image briefs', async () => {
+  const guidance = '重新生成两张图片，一张海报风格，一张真人模特穿着展示';
+  const context = { productName: '浅粉色圆领短袖T恤', facts, listings: [], platforms: ['amazon' as const], markets: ['美国'], sourceImageCount: 1, userGuidance: guidance,
+    existingAssets: [{ kind: 'CUSTOM' as const, title: '旧图', note: '上一轮不含人物的场景图' }] };
+  const plan = JSON.stringify({ assets: [
+    { kind: 'POSTER', title: '海报', note: '海报风格', size: '1024*1280', instruction: '商品海报设计。', acceptance: '海报式构图' },
+    { kind: 'MODEL', title: '穿着展示', note: '真人模特', size: '1024*1280', instruction: '真人模特穿着商品。', acceptance: '真人模特穿着商品' },
+  ] });
+  const sent: string[] = [];
+  const fetchMock: typeof fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+    sent.push(JSON.stringify(body.messages));
+    return Response.json({ choices: [{ message: { content: sent.length === 1 ? plan : '{"satisfies":true,"reason":"符合本轮要求"}' } }] });
+  };
+  await callBailianAssetPlanning({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'test-model' }, context, fetchMock);
+  assert.match(sent[0], /本轮明确提出的要求覆盖旧图/);
+  assert.match(sent[1], /不可把旧图或以前的偏好当成本轮限制/);
+  const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(plan)[1], productName: context.productName, facts, listings: [], userGuidance: guidance });
+  assert.match(prompt, /商家本轮原话：重新生成两张图片/);
+});
+
 test('checks any generated image against its own visual acceptance criteria', async () => {
   const fetchMock: typeof fetch = async (_input, init) => {
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
@@ -192,6 +213,20 @@ test('checks any generated image against its own visual acceptance criteria', as
   };
   const result = await checkGeneratedImageAgainstIntent({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', instruction: '为商品做植物主题图片', acceptance: '画面有手绘植物边框' }, fetchMock);
   assert.deepEqual(result, { matches: false, reason: '没有植物边框' });
+});
+
+test('image review sees the latest request and original product image', async () => {
+  const fetchMock: typeof fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
+    assert.equal(body.messages[0].content.filter((part) => part.type === 'image_url').length, 2);
+    assert.match(body.messages[0].content.find((part) => part.type === 'text')?.text ?? '', /一张海报，一张模特图/);
+    return Response.json({ choices: [{ message: { content: '{"matches":true,"reason":"符合本轮要求"}' } }] });
+  };
+  const result = await checkGeneratedImageAgainstIntent({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' }, {
+    bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png', instruction: '模特穿着商品', acceptance: '真人模特穿着商品', userGuidance: '一张海报，一张模特图',
+    reference: { bytes: new Uint8Array([4, 5, 6]), contentType: 'image/png' },
+  }, fetchMock);
+  assert.equal(result.matches, true);
 });
 
 test('video accepts only confirmed images from the latest generated batch',()=>{

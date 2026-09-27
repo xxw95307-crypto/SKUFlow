@@ -1039,6 +1039,32 @@ body {
   margin-top: 0;
 }
 
+.agent-shell-v2 .image-picker-review-note {
+  margin: 0 0 12px;
+  color: #965521;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agent-shell-v2 .image-picker-review-badge {
+  position: absolute;
+  bottom: 9px;
+  left: 9px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(255, 247, 230, .94);
+  color: #895018;
+  font-size: 12px;
+}
+
+.image-picker-review-detail {
+  margin: 0;
+  padding: 8px 16px 12px;
+  color: #ffddab;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .agent-shell-v2 .image-picker-tile {
   position: relative;
   min-width: 0;
