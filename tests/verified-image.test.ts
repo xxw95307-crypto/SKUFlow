@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AssetGenerationSpec } from '../lib/agents/asset-generation.ts';
-import type { callBailianImageGeneration, checkGeneratedImageAgainstIntent } from '../lib/ai/bailian-client.ts';
+import type { callBailianImageGeneration, checkGeneratedImageAgainstIntent, reviseBailianImagePrompt } from '../lib/ai/bailian-client.ts';
 import { generateVerifiedImage } from '../lib/server/verified-image.ts';
 
 const spec: AssetGenerationSpec = {
@@ -23,11 +23,25 @@ test('rejected images are never returned as selectable results', async () => {
   const review = (async () => ({ matches: false, reason: '画面仍有模特' })) as typeof checkGeneratedImageAgainstIntent;
   await assert.rejects(
     generateVerifiedImage(imageConfig, reviewConfig, source, spec, '商品海报', '只展示衣服，不要模特', source, [], { generate, review }),
-    /连续三次未通过画面验收/,
+    /没有生成符合要求/,
   );
   assert.equal(requests.length, 3);
   assert.equal(requests[0].negativePrompt, '模特、人物、真人');
   assert.match(requests[1].prompt, /画面仍有模特/);
+});
+
+test('failed visual review causes a model-rewritten composition on the next attempt', async () => {
+  const prompts: string[] = [];
+  const generate = (async (_config: unknown, input: { prompt: string }) => {
+    prompts.push(input.prompt);
+    return { bytes: new Uint8Array([prompts.length]), contentType: 'image/png', model: 'test', requestId: null, width: 1024, height: 1280 };
+  }) as typeof callBailianImageGeneration;
+  const review = (async () => ({ matches: prompts.length === 2, reason: '仍是普通模特场景照' })) as typeof checkGeneratedImageAgainstIntent;
+  const revise = (async () => ({ prompt: '把原商品平铺在设计感背景中央，四周留出标题和说明的排版区域，画面具有明确的海报层次。', negativePrompt: '场景抓拍' })) as typeof reviseBailianImagePrompt;
+  const result = await generateVerifiedImage(imageConfig, reviewConfig, source, spec, '商品海报', '只展示衣服，不要模特', source, [], { generate, review, revise });
+  assert.equal(result.generated.bytes[0], 2);
+  assert.match(prompts[1], /平铺在设计感背景中央/);
+  assert.doesNotMatch(prompts[1], /上一版未通过画面验收/);
 });
 
 test('a corrected image is returned only after review passes', async () => {

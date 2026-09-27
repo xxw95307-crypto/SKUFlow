@@ -487,7 +487,7 @@ export async function callBailianVisualIntent(
   const messages: Array<{ role: 'system' | 'user'; content: string }> = [{
     role: 'system',
     content: `你是商品图片需求分析 Agent。只分析商家本轮原话，不生成图片。返回 JSON：{"scope":"FULL_SET 或 SELECTED","count":数字或null,"style":字符串或null,"targetIndices":数组}。
-FULL_SET 表示首次生成、重新生成整组、改变图片总数，或列出要生成的几种新图片；targetIndices 必须为空。SELECTED 只用于商家明确指向当前已有的一张或数张图片进行修改；targetIndices 填当前图片从 1 开始的序号，count 必须为 null。“一张海报、一张模特图”是在列出新图类型，不是在指已有图片序号。不要把前一轮偏好当成本轮要求。若没有现有图片，只能 FULL_SET。若本轮原话只要求重新生成图片且没有指向已有图片，选择 FULL_SET。count 只有商家明确指定总数时才填写，范围 1–6；style 仅填商家提出的风格或视觉要求。必须明确填写 scope。`,
+FULL_SET 表示首次生成、重新生成整组、改变图片总数，或列出要生成的几种新图片；targetIndices 必须为空。SELECTED 只用于商家明确指向当前已有的一张或数张图片进行修改；targetIndices 填当前图片从 1 开始的序号，count 必须为 null。“一张海报、一张模特图”是在列出新图类型，不是在指已有图片序号。“生成一张海报图就可以了”也是新的一张图，选择 FULL_SET、count=1；只有“把第一张改成海报”才选择 SELECTED。不要把前一轮偏好当成本轮要求。若没有现有图片，只能 FULL_SET。若本轮原话只要求重新生成图片且没有指向已有图片，选择 FULL_SET。count 只有商家明确指定总数时才填写，范围 1–6；style 仅填商家提出的风格或视觉要求。必须明确填写 scope。`,
   }, { role: 'user', content: JSON.stringify(input) }];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await fetchImpl(`${normalizeBaseUrl(config.baseUrl)}/chat/completions`, {
@@ -554,7 +554,7 @@ export async function callBailianAssetPlanning(
             method: 'POST',
             headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
             body: JSON.stringify({ model, messages: [
-              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。先把原话拆成每张独立目标，再核对计划的每一张是否有相应且不同的画面任务及可检验的验收标准。只有标题写“海报”而 instruction 只是普通人物场景照，不算完成海报；不同目标不能都规划成同一类场景图。逐项核对数量、人物、风格、排除项和局部修改范围。商家明确要求某图不得出现的元素，必须同时写入该图的 instruction、acceptance 和 negativePrompt；缺失任一项必须拒绝。计划把商家明确要求出现的元素写成禁止出现、或凭空添加排除项时必须拒绝。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
+              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。先把原话拆成每张独立目标，再核对计划的每一张是否有相应且不同的画面任务及可检验的验收标准。只有标题写“海报”而 instruction 只是普通人物场景照，不算完成海报；不同目标不能都规划成同一类场景图。逐项核对数量、人物、风格、排除项、参考图来源和局部修改范围。商家明确要求某图不得出现的元素，必须同时写入该图的 instruction、acceptance 和 negativePrompt；缺失任一项必须拒绝。旧图含有待去除的元素或需要彻底改变画面形式时，sourceMode 必须是 ORIGINAL。计划把商家明确要求出现的元素写成禁止出现、或凭空添加排除项时必须拒绝。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
               { role: 'user', content: JSON.stringify({ request: context.userGuidance, requestedCount: context.requestedCount, targetIndices: context.targetIndices, existingAssets: context.existingAssets, plan: assets }) },
             ], response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 300, stream: false }),
             signal: controller.signal,
@@ -615,6 +615,35 @@ export async function checkGeneratedImageAgainstIntent(
   try { result = JSON.parse(content) as typeof result; } catch { throw new Error('生成图片核对结果无法解析'); }
   if (typeof result.matches !== 'boolean') throw new Error('生成图片核对结果缺少判断');
   return { matches: result.matches, reason: typeof result.reason === 'string' ? result.reason.slice(0, 160) : '' };
+}
+
+export async function reviseBailianImagePrompt(
+  config: BailianConfig,
+  input: { userGuidance: string | null; instruction: string; acceptance: string; previousPrompt: string; negativePrompt?: string; failure: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ prompt: string; negativePrompt: string }> {
+  const response = await fetchImpl(`${normalizeBaseUrl(config.baseUrl)}/chat/completions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${config.apiKey.trim()}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: config.model.trim(),
+      messages: [
+        { role: 'system', content: '你是商品视觉生成修正 Agent。上一张成图没有通过验收。请把反馈转成新的、具体可执行的画面方案，而不是重复原提示词或简单追加“不要出现”。商家本轮要求与单张验收标准优先；只改变构图、主体呈现和场景策略，保留真实商品身份。不得从旧图或历史偏好添加本轮未要求的禁令。仅返回 JSON：{"prompt":"完整中文生成指令","negativePrompt":"本张图必须排除的画面元素，没有则为空字符串"}。' },
+        { role: 'user', content: JSON.stringify(input) },
+      ],
+      response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.3, max_completion_tokens: 1300, stream: false,
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!response.ok) throw new Error(`图片方案修正失败（HTTP ${response.status}）`);
+  const payload = await response.json() as ChatCompletionResponse;
+  let revised: { prompt?: unknown; negativePrompt?: unknown };
+  try { revised = JSON.parse(responseText(payload.choices?.[0]?.message?.content)) as typeof revised; }
+  catch { throw new Error('图片方案修正结果无法解析'); }
+  if (typeof revised.prompt !== 'string' || revised.prompt.trim().length < 30 || revised.prompt.length > 4000 || typeof revised.negativePrompt !== 'string') {
+    throw new Error('图片方案修正内容不完整');
+  }
+  return { prompt: revised.prompt.trim(), negativePrompt: revised.negativePrompt.trim().slice(0, 300) };
 }
 
 export interface VisionImageInput {

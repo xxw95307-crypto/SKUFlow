@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildAssetGenerationPrompt, buildAssetPlanningMessages, parseVisualToolDecision, parseAssetPlan, selectConfirmedVideoImages } from '../lib/agents/asset-generation.ts';
-import { callBailianAssetPlanning, callBailianImageGeneration, callBailianVisualIntent, checkGeneratedImageAgainstIntent } from '../lib/ai/bailian-client.ts';
+import { callBailianAssetPlanning, callBailianImageGeneration, callBailianVisualIntent, checkGeneratedImageAgainstIntent, reviseBailianImagePrompt } from '../lib/ai/bailian-client.ts';
+
+test('image intent treats a newly requested single poster as a full new set', async () => {
+  const fetchMock: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+    assert.match(body.messages[0].content, /生成一张海报图就可以了/);
+    return Response.json({ choices: [{ message: { content: '{"scope":"FULL_SET","count":1,"style":"海报","targetIndices":[]}' } }] });
+  };
+  const result = await callBailianVisualIntent({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'test-model' }, {
+    request: '生成一张海报图就可以了', existingAssets: [{ kind: 'MODEL', title: '旧模特图', note: '上一轮要求' }],
+  }, fetchMock);
+  assert.equal(result.scope, 'FULL_SET');
+  assert.equal(result.count, 1);
+});
+
+test('review feedback produces a fresh image prompt', async () => {
+  const fetchMock: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+    assert.match(body.messages[1].content, /普通模特场景照/);
+    return Response.json({ choices: [{ message: { content: '{"prompt":"把衣服平铺在中间，用形状和留白设计商品海报，不要沿用旧模特场景。","negativePrompt":"模特、人物"}' } }] });
+  };
+  const result = await reviseBailianImagePrompt({ apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'test-model' }, {
+    userGuidance: '只要海报', instruction: '设计商品海报', acceptance: '有清晰的海报层次', previousPrompt: '商品摄影', failure: '普通模特场景照',
+  }, fetchMock);
+  assert.match(result.prompt, /平铺在中间/);
+  assert.equal(result.negativePrompt, '模特、人物');
+});
 
 test('visual intent Agent retries incomplete output and recognizes a full two-image redo', async () => {
   let calls = 0;
@@ -180,6 +206,7 @@ test('plans a specified image revision without replacing the whole image set', (
   assert.match(messages[1].content, /咖啡馆/);
   const poster = JSON.stringify({ assets: [{ kind: 'POSTER', title: '穿搭海报', note: '海报视觉', size: '1024*1280', instruction: '以原商品为主体，海报式构图。', acceptance: '明显海报式构图' }] });
   assert.equal(parseAssetPlan(poster, null, [3])[0].kind, 'POSTER');
+  assert.equal(parseAssetPlan(poster, null, [3])[0].sourceMode, 'ORIGINAL');
   assert.equal(parseAssetPlan(poster, null, [1])[0].kind, 'POSTER');
   assert.equal(parseAssetPlan(poster).length, 1);
   const prompt = buildAssetGenerationPrompt({ spec: parseAssetPlan(poster, null, [3])[0], productName: context.productName, facts, listings: [], previousAsset: context.existingAssets[2] });

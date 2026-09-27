@@ -1136,7 +1136,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       };
       setCanRetryFailedTurn(true);
       setError(message); setPhase('error');
-      append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
+      if (!message.startsWith('这次没有生成符合要求的')) append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
       await persistConversation(activeTask?.id ?? null).catch(() => undefined);
     }
   };
@@ -1185,7 +1185,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     if (task && (phase === 'error' || phase === 'resume') && imageBriefConfirmedFromMessages(messagesRef.current) && !imagesConfirmedFromMessages(messagesRef.current)) {
       try {
         const available = await fetchGeneratedAssets(task.id);
-        if (available.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED')) {
+        if (available.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error)) {
           setGeneratedAssets(available);
           setError(''); setCanRetryFailedTurn(false); failedTurnRef.current = null;
           setPhase('assets');

@@ -121,16 +121,20 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (decision.targetIndices.length) {
       const replacements = new Map<number, { id: string; spec: typeof plan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string; reviewWarning: string | null }>();
       for (const [position, targetIndex] of decision.targetIndices.entries()) {
-        const oldAsset = priorImages[targetIndex - 1];
         const spec = plan.assets[position];
-        const oldRow = await bindings.DB.prepare("SELECT object_key, content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'")
-          .bind(taskId, oldAsset.id).first<{ object_key: string; content_type: string }>();
-        if (!oldRow?.object_key) throw new Error(`第 ${targetIndex} 张旧图不可用，请重新生成整组图片`);
-        const oldImage = await bindings.UPLOADS.get(oldRow.object_key);
-        if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
-        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: oldAsset });
+        const oldAsset = priorImages[targetIndex - 1];
+        let reference = { bytes, contentType: image.content_type, sourceFileId: image.id };
+        if (spec.sourceMode === 'CURRENT') {
+          const oldRow = await bindings.DB.prepare("SELECT object_key, content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED'")
+            .bind(taskId, oldAsset.id).first<{ object_key: string; content_type: string }>();
+          if (!oldRow?.object_key) throw new Error(`第 ${targetIndex} 张旧图不可用，请改用原始商品图重做`);
+          const oldImage = await bindings.UPLOADS.get(oldRow.object_key);
+          if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
+          reference = { bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type, sourceFileId: oldAsset.sourceFileId };
+        }
+        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: spec.sourceMode === 'CURRENT' ? oldAsset : null });
         const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, {
-          bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type,
+          bytes: reference.bytes, contentType: reference.contentType,
         }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
         const id = `asset_${crypto.randomUUID()}`;
         const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
@@ -138,7 +142,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           httpMetadata: { contentType: generated.contentType },
           customMetadata: { taskId, sourceFileId: oldAsset.sourceFileId, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
         });
-        replacements.set(targetIndex, { id, spec, prompt, objectKey, contentType: generated.contentType, model: generated.model, width: generated.width, height: generated.height, sourceFileId: oldAsset.sourceFileId, reviewWarning });
+        replacements.set(targetIndex, { id, spec, prompt, objectKey, contentType: generated.contentType, model: generated.model, width: generated.width, height: generated.height, sourceFileId: reference.sourceFileId, reviewWarning });
       }
       const retainedAssetIds: Record<string, string> = {};
       const writes = priorImages.map((oldAsset, position) => {
