@@ -1,13 +1,14 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt, type AssetGenerationSpec } from '@/lib/agents/asset-generation';
-import { callBailianAssetPlanning, callBailianImageGeneration, callBailianVisualIntent, checkGeneratedImageAgainstIntent } from '@/lib/ai/bailian-client';
+import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
+import { callBailianAssetPlanning, callBailianVisualIntent } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, loadBailianImageConfig, missingBailianConfig, missingBailianImageConfig } from '@/lib/config/bailian';
 import type { GeneratedAsset, GeneratedAssetSummary } from '@/lib/domain/generated-asset';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { listGeneratedAssetHistory, listLatestGeneratedAssets, prepareGeneratedAssetInsert } from '@/lib/server/generated-asset-store';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
+import { generateVerifiedImage } from '@/lib/server/verified-image';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,36 +16,6 @@ interface ImageFileRow {
   id: string;
   object_key: string;
   content_type: string;
-}
-
-async function generateVerifiedImage(
-  imageConfig: Parameters<typeof callBailianImageGeneration>[0],
-  reviewConfig: Parameters<typeof checkGeneratedImageAgainstIntent>[0],
-  source: { bytes: Uint8Array; contentType: string },
-  spec: AssetGenerationSpec,
-  prompt: string,
-  userGuidance: string | null,
-  reference: { bytes: Uint8Array; contentType: string },
-  otherRoles: string[],
-) {
-  let feedback = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const generated = await callBailianImageGeneration(imageConfig, {
-      ...source, prompt: feedback ? `${prompt}\n\n上一版未通过画面验收：${feedback}。请优先纠正，严格满足：${spec.acceptance}` : prompt, size: spec.size,
-    });
-    try {
-      const check = await checkGeneratedImageAgainstIntent(reviewConfig, {
-        bytes: generated.bytes, contentType: generated.contentType, acceptance: spec.acceptance, instruction: spec.instruction,
-        userGuidance, reference, imageRole: `${spec.kind}｜${spec.title}｜${spec.note}`, otherRoles,
-      });
-      if (check.matches) return { generated, reviewWarning: null };
-      feedback = check.reason || '画面没有满足本张图片的验收标准';
-    } catch {
-      return { generated, reviewWarning: '自动画面核对暂不可用，请预览后自行确认' };
-    }
-    if (attempt === 1) return { generated, reviewWarning: `自动核对未通过：${feedback}` };
-  }
-  throw new Error('图片生成未完成');
 }
 
 function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
@@ -141,7 +112,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       userGuidance: options.guidance,
       requestedCount,
       styleGuidance: decision.style,
-      existingAssets: priorImages,
+      existingAssets: decision.targetIndices.length ? priorImages : [],
       targetIndices: decision.targetIndices,
     });
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;

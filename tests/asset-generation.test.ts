@@ -145,14 +145,15 @@ test('calls the Token Plan native image endpoint with a private reference image 
   const result = await callBailianImageGeneration({
     apiKey: 'test-key', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', model: 'qwen-image-2.0',
   }, {
-    bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), contentType: 'image/jpeg', prompt: '生成商品主图', size: '1024*1024',
+    bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), contentType: 'image/jpeg', prompt: '生成商品主图', size: '1024*1024', negativePrompt: '模特、人物',
   }, fetchMock);
   assert.equal(calls[0].url, 'https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation');
-  const body = JSON.parse(String(calls[0].init?.body)) as { model: string; input: { messages: Array<{ content: Array<{ image?: string }> }> }; parameters: { watermark: boolean; prompt_extend: boolean } };
+  const body = JSON.parse(String(calls[0].init?.body)) as { model: string; input: { messages: Array<{ content: Array<{ image?: string }> }> }; parameters: { watermark: boolean; prompt_extend: boolean; negative_prompt: string } };
   assert.equal(body.model, 'qwen-image-2.0');
   assert.match(body.input.messages[0].content[0].image ?? '', /^data:image\/jpeg;base64,/);
   assert.equal(body.parameters.watermark, false);
   assert.equal(body.parameters.prompt_extend, false);
+  assert.match(body.parameters.negative_prompt, /模特、人物/);
   assert.deepEqual([...result.bytes], [137, 80, 78, 71]);
   assert.equal(result.width, 1024);
 });
@@ -270,10 +271,11 @@ test('image review sees the latest request and original product image', async ()
 
 test('video accepts only confirmed images from the latest generated batch',()=>{
  const image=(id:string,status:'COMPLETED'|'FAILED'='COMPLETED'):GeneratedAsset=>({id,taskId:'task_demo',sourceFileId:'file_original',batchId:'latest',kind:'HERO',title:'主图',note:'正面',model:'image',status,width:1024,height:1024,error:null,createdAt:'',completedAt:null,imageUrl:'/image'});
- const latest=[image('asset_cover'),image('asset_scene'),image('asset_failed','FAILED')];
+ const latest=[image('asset_cover'),image('asset_scene'),image('asset_failed','FAILED'),{...image('asset_rejected'),error:'画面出现模特，违背用户要求'}];
  assert.deepEqual(selectConfirmedVideoImages(latest,['asset_scene','asset_cover']).map(v=>v.id),['asset_scene','asset_cover']);
  assert.throws(()=>selectConfirmedVideoImages(latest,['asset_old']),/当前可用素材/);
  assert.throws(()=>selectConfirmedVideoImages(latest,['asset_failed']),/当前可用素材/);
+ assert.throws(()=>selectConfirmedVideoImages(latest,['asset_rejected']),/当前可用素材/);
  assert.throws(()=>selectConfirmedVideoImages(latest,['asset_cover','asset_cover']),/不能重复/);
  assert.throws(()=>selectConfirmedVideoImages(latest,[]),/先确认最终图片/);
 });

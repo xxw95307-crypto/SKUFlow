@@ -256,7 +256,7 @@ export interface BailianGeneratedImage {
 
 export async function callBailianImageGeneration(
   config: BailianImageConfig,
-  input: { bytes: Uint8Array; contentType: string; prompt: string; size: string },
+  input: { bytes: Uint8Array; contentType: string; prompt: string; size: string; negativePrompt?: string },
   fetchImpl: typeof fetch = fetch,
 ): Promise<BailianGeneratedImage> {
   const apiKey = config.apiKey.trim();
@@ -282,7 +282,7 @@ export async function callBailianImageGeneration(
           size: input.size,
           prompt_extend: false,
           watermark: false,
-          negative_prompt: '改变商品本体、错误文字、错误商标、额外商品、低清晰度、畸变、比例错误、虚假配件',
+          negative_prompt: ['改变商品本体、错误文字、错误商标、额外商品、低清晰度、畸变、比例错误、虚假配件', input.negativePrompt?.trim()].filter(Boolean).join('、'),
         },
       }),
       signal: controller.signal,
@@ -554,7 +554,7 @@ export async function callBailianAssetPlanning(
             method: 'POST',
             headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
             body: JSON.stringify({ model, messages: [
-              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。先把原话拆成每张独立目标，再核对计划的每一张是否有相应且不同的画面任务及可检验的验收标准。只有标题写“海报”而 instruction 只是普通人物场景照，不算完成海报；不同目标不能都规划成同一类场景图。逐项核对数量、人物、风格、排除项和局部修改范围。计划把商家明确要求出现的元素写成禁止出现、或凭空添加排除项时必须拒绝。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
+              { role: 'system', content: '你是独立的商品图片需求核对员。商家本轮原话是唯一的创作要求，旧图仅供定位，不可把旧图或以前的偏好当成本轮限制。先把原话拆成每张独立目标，再核对计划的每一张是否有相应且不同的画面任务及可检验的验收标准。只有标题写“海报”而 instruction 只是普通人物场景照，不算完成海报；不同目标不能都规划成同一类场景图。逐项核对数量、人物、风格、排除项和局部修改范围。商家明确要求某图不得出现的元素，必须同时写入该图的 instruction、acceptance 和 negativePrompt；缺失任一项必须拒绝。计划把商家明确要求出现的元素写成禁止出现、或凭空添加排除项时必须拒绝。只返回 JSON：{"satisfies":true或false,"reason":"具体遗漏或冲突"}。' },
               { role: 'user', content: JSON.stringify({ request: context.userGuidance, requestedCount: context.requestedCount, targetIndices: context.targetIndices, existingAssets: context.existingAssets, plan: assets }) },
             ], response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.1, max_completion_tokens: 300, stream: false }),
             signal: controller.signal,

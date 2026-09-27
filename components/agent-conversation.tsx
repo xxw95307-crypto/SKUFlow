@@ -245,8 +245,8 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   onSkipVideo: () => void;
   readOnly?: boolean;
 }) {
-  const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl);
-  const needsReview = completed.some((asset) => asset.error);
+  const rejectedCount = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl && asset.error).length;
+  const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl && (readOnly || !asset.error));
   const selectedCount = completed.filter((asset) => selected.includes(asset.id)).length;
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [zoomed, setZoomed] = useState(false);
@@ -280,13 +280,13 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   const previewAsset = previewIndex === null ? null : completed[previewIndex] ?? null;
   return <div className="asset-conversation-card image-picker-card">
     <h3 className="visually-hidden">选择商品图片</h3>
-    {needsReview && <p className="image-picker-review-note" role="status">部分图片未通过自动画面核对。请点开查看；不满意可直接在对话中提出修改要求。</p>}
+    {!readOnly && rejectedCount > 0 && <p className="image-picker-review-note" role="status">{rejectedCount} 张旧图未通过画面验收，已从可选结果中移除。</p>}
     <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
         <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
       </button>
       {!readOnly && <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>}
-      {asset.error && <span className="image-picker-review-badge">需检查</span>}
+      {asset.error && <span className="image-picker-review-badge">未通过验收</span>}
     </div>)}</div>
     {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认并生成视频</button></footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
@@ -529,7 +529,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         conversationUpgraded = true;
       }
     }
-    const validAssetIds = new Set(loadedAssets.filter((asset) => asset.status === 'COMPLETED').map((asset) => asset.id));
+    const validAssetIds = new Set(loadedAssets.filter((asset) => asset.status === 'COMPLETED' && (asset.kind === 'VIDEO' || !asset.error)).map((asset) => asset.id));
     const validSelections = conversation.selectedAssetIds.filter((id) => validAssetIds.has(id));
     if (validSelections.length !== conversation.selectedAssetIds.length) {
       selectedAssetsRef.current = validSelections;
@@ -960,18 +960,19 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         selectedAssetsRef.current = targetIndices.length
           ? selectedAssetsRef.current.filter((id) => id.startsWith('asset_')).flatMap((id) => payload.retainedAssetIds?.[id] ? [payload.retainedAssetIds[id]] : [])
           : [];
+        const selectableIds = new Set(payload.assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error).map((asset) => asset.id));
+        selectedAssetsRef.current = selectedAssetsRef.current.filter((id) => selectableIds.has(id));
         setSelectedAssets(selectedAssetsRef.current);
-        if (payload.summary.completed === 0) throw new Error('图像模型没有生成可用素材');
+        if (selectableIds.size === 0) throw new Error('图像模型没有生成通过验收的图片');
         setPhase('assets');
-        const needsReview = payload.assets.some((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.error);
-        append('agent', needsReview ? '图片已生成，部分画面需要你检查。点开预览，不满意可以直接告诉我改哪里。' : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
+        append('agent', targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }
       if (name === 'open_asset_selection') {
         const assets = await fetchGeneratedAssets(currentTask.id);
-        const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED');
-        if (completed.length === 0) throw new Error('没有可供选择的已生成素材');
+        const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error);
+        if (completed.length === 0) throw new Error('没有通过验收的图片，请重新生成');
         setGeneratedAssets(assets);
         setPhase('assets');
         append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(assets) });
@@ -1263,7 +1264,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const confirmAssets = async (skipVideo = false) => {
     const available=task?await fetchGeneratedAssets(task.id):generatedAssets;
     setGeneratedAssets(available);
-    const chosen = available.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && selectedAssetsRef.current.includes(asset.id));
+    const chosen = available.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error && selectedAssetsRef.current.includes(asset.id));
     if (!chosen.length) throw new Error('请先选择至少一张图片');
     selectedAssetsRef.current = chosen.map((asset) => asset.id);
     setSelectedAssets(selectedAssetsRef.current);
@@ -1377,6 +1378,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   };
 
   const toggleAsset = (id: string) => {
+    if (!generatedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error)) return;
     mediaPlanRef.current=null;setMediaPlanReady(false);
     const next = selectedAssetsRef.current.includes(id)
       ? selectedAssetsRef.current.filter((item) => item !== id)
