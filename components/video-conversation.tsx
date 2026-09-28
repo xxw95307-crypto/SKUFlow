@@ -115,9 +115,9 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
     </section>}
     {draft && showSuggestion && <VideoDraft key={draft.id} job={draft} configured={configured} busy={busy} onStart={(id, prompt) => action(id, 'start', prompt)} />}
     {inProgress && <div className="video-progress-row" role="status"><span className="agent-spinner" /><span>{labels[visibleJobs.find((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job))?.status ?? ''] || '视频生成中'}</span>{visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status)) && <button type="button" disabled={busy} onClick={() => void action(visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status))!.id, 'refresh')}>刷新状态</button>}</div>}
-    {results.map((job) => <section className="video-result" key={job.id}>
+    {results.map((job) => <section className={`video-result${selected.includes(job.id) ? ' selected' : ''}`} key={job.id}>
       <video controls playsInline preload="metadata" src={job.videoUrl!} />
-      <div>{selectable && <label><input type="checkbox" checked={selected.includes(job.id)} onChange={() => onToggle(job.id)} />选择视频</label>}<a href={job.videoUrl!} download={`${job.id}.mp4`}>下载</a></div>
+      <div>{selectable && <button className="video-select-button" type="button" aria-pressed={selected.includes(job.id)} onClick={() => onToggle(job.id)}><span aria-hidden="true">{selected.includes(job.id) ? '✓' : '+'}</span>{selected.includes(job.id) ? '已加入上新素材包' : '加入上新素材包'}</button>}<a href={job.videoUrl!} download={`${job.id}.mp4`}>下载视频</a></div>
     </section>)}
     {latestFailure && !inProgress && results.length === 0 && <p className="video-inline-error" role="status">上次生成未成功：{latestFailure.status === 'SUBMISSION_UNKNOWN' ? '视频服务账号状态异常，恢复后可重新生成' : latestFailure.error || labels[latestFailure.status]}</p>}
   </div>;

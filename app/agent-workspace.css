@@ -1483,10 +1483,16 @@ body {
 .agent-shell-v2 .video-progress-row { display: flex; align-items: center; gap: 10px; padding: 16px; border-radius: 10px; background: #f3f7f4; color: #365046; }
 .agent-shell-v2 .video-progress-row button { margin-left: auto; }
 .agent-shell-v2 .video-result { width: fit-content; max-width: 100%; overflow: hidden; border-radius: 10px; background: #f7faf8; }
+.agent-shell-v2 .video-result.selected { outline: 2px solid #367d54; outline-offset: 2px; }
 .agent-shell-v2 .video-result video { display: block; width: auto; height: auto; max-width: min(100%, 760px); max-height: 480px; border-radius: 10px; background: #101713; }
 .agent-shell-v2 .video-result > div { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 14px; padding: 9px 2px 0; color: #365046; font-size: 13px; }
-.agent-shell-v2 .video-result label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.agent-shell-v2 .video-result a { color: #286346; }
+.agent-shell-v2 .video-select-button { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 3px 10px 3px 4px; border: 1px solid #d6e2d9; border-radius: 18px; background: #fff; color: #286346; font: inherit; font-weight: 650; cursor: pointer; }
+.agent-shell-v2 .video-select-button > span { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #e9f3ed; font-size: 15px; font-weight: 750; }
+.agent-shell-v2 .video-select-button[aria-pressed="true"] { border-color: #367d54; background: #e9f3ed; }
+.agent-shell-v2 .video-select-button[aria-pressed="true"] > span { background: #367d54; color: #fff; }
+.agent-shell-v2 .video-select-button:focus-visible { outline: 3px solid #b9dcc8; outline-offset: 2px; }
+.agent-shell-v2 .video-result a { color: #286346; text-decoration: none; }
+.agent-shell-v2 .video-result a:hover { text-decoration: underline; }
 .agent-shell-v2 .video-inline-error { margin: 0; color: #a34430; font-size: 13px; }
 @media (max-width: 650px) { .agent-shell-v2 .video-prompt-options { grid-template-columns: 1fr; } }
 
