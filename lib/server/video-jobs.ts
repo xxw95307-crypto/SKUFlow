@@ -1,10 +1,10 @@
 import {ensureSchema,getBindings} from '@/db/client';
 import {getProductPassport} from '@/lib/server/passport-store';
-import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo,WanVideoRequestError} from '@/lib/ai/wan-video';
+import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo,synthesizeNarration,WanVideoRequestError,VideoAudioMode} from '@/lib/ai/wan-video';
 interface VideoJobRow { id:string; task_id:string; source_file_id:string; plan_json:string; status:string; provider_task_id:string|null; error:string|null; }
 const publicJob=(r:VideoJobRow)=>({id:r.id,status:r.status,plan:JSON.parse(r.plan_json),error:r.error,videoUrl:r.status==='SUCCEEDED'?`/api/tasks/${r.task_id}/videos/${r.id}/file`:null});
 export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:string}>}) {
- try {await ensureSchema();const {taskId}=await ctx.params;const {id,action,prompt}=await req.json() as {id:string;action:string;prompt?:unknown};if(!['start','refresh'].includes(action))return Response.json({error:'无效操作'},{status:400});const b=getBindings();let job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first<VideoJobRow>();if(!job)return Response.json({error:'视频任务不存在'},{status:404});const c=loadWanVideoConfig(b);
+ try {await ensureSchema();const {taskId}=await ctx.params;const {id,action,prompt,audioMode,narrationText}=await req.json() as {id:string;action:string;prompt?:unknown;audioMode?:unknown;narrationText?:unknown};if(!['start','refresh'].includes(action))return Response.json({error:'无效操作'},{status:400});const b=getBindings();let job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first<VideoJobRow>();if(!job)return Response.json({error:'视频任务不存在'},{status:404});const c=loadWanVideoConfig(b);
  if(action==='start'&&job.status==='DRAFT') {
  requireWanConfig(c);const p=await getProductPassport(b.DB,taskId);if(!p||p.conflicts.some(v=>v.status==='OPEN')||p.platformDrafts.some(d=>!['APPROVED','DRAFT_CREATED'].includes(d.status)))throw new Error('请先完成 Listing 确认');
  const source=await b.DB.prepare("SELECT object_key,content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED' AND object_key IS NOT NULL").bind(taskId,job.source_file_id).first<{object_key:string;content_type:string}>()
@@ -12,9 +12,13 @@ export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:str
  if(!source)throw new Error('已选首帧图片不存在');const image=await b.UPLOADS.get(source.object_key);if(!image)throw new Error('首帧图片内容不存在');const bytes=new Uint8Array(await image.arrayBuffer());if(bytes.length>20*1024*1024)throw new Error('首帧图片超过20MB');
  const editedPrompt=typeof prompt==='string'?prompt.trim():JSON.parse(job.plan_json).prompt;
  if(!editedPrompt||editedPrompt.length>4000)return Response.json({error:'请填写不超过 4000 字的视频生成提示词'},{status:400});
- const plan={...JSON.parse(job.plan_json),prompt:editedPrompt};
+ const chosenMode:VideoAudioMode=audioMode===undefined?'ambient':audioMode as VideoAudioMode;
+ if(!['ambient','music','narration'].includes(chosenMode))return Response.json({error:'请选择声音方式'},{status:400});
+ const script=typeof narrationText==='string'?narrationText.trim():'';
+ if(chosenMode==='narration'&&(!script||script.length>60))return Response.json({error:'解说文案需要在 1–60 字之间，以适配短视频时长'},{status:400});
+ const plan={...JSON.parse(job.plan_json),prompt:editedPrompt,audioMode:chosenMode,narrationText:chosenMode==='narration'?script:undefined,duration:chosenMode==='narration'?15:JSON.parse(job.plan_json).duration};
  const lock=await b.DB.prepare("UPDATE video_jobs SET status='SUBMITTING',plan_json=? WHERE id=? AND task_id=? AND status='DRAFT'").bind(JSON.stringify(plan),id,taskId).run();if(!lock.meta.changes)return Response.json({job:publicJob(job)});
- try {let text='';for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));const providerId=await submitWanVideo(c,plan,`data:${source.content_type};base64,${btoa(text)}`);await b.DB.prepare("UPDATE video_jobs SET status='PENDING',provider_task_id=? WHERE id=?").bind(providerId,id).run();}
+ try {let audioUrl:string|undefined;if(chosenMode==='narration'){try{audioUrl=await synthesizeNarration(c,script);}catch(e){throw new WanVideoRequestError((e as Error).message);}}let text='';for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));const providerId=await submitWanVideo(c,plan,`data:${source.content_type};base64,${btoa(text)}`,fetch,audioUrl);await b.DB.prepare("UPDATE video_jobs SET status='PENDING',provider_task_id=? WHERE id=?").bind(providerId,id).run();}
  catch(e){
   const rejected=e instanceof WanVideoRequestError;
   await b.DB.prepare('UPDATE video_jobs SET status=?,error=? WHERE id=?')

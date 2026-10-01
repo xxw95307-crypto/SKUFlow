@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,createCustomVideoPlan,submitWanVideo,queryWanVideo,WanVideoRequestError} from '../lib/ai/wan-video.ts';
+import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,createCustomVideoPlan,submitWanVideo,queryWanVideo,synthesizeNarration,WanVideoRequestError} from '../lib/ai/wan-video.ts';
 import {isReusableVideoJob} from '../lib/domain/video-job-retry.ts';
 const c={apiKey:'test-secret',baseUrl:'https://dashscope.aliyuncs.com/api/v1',model:'wan2.7-i2v'};
 const plan={title:'商品展示',prompt:'保持商品结构一致，缓慢推进镜头',duration:5,resolution:'720P' as const,sourceFileId:'asset_cover',shots:['商品全貌','细节']};
@@ -19,6 +19,24 @@ test('submit uses async native video API and returns provider ID rather than cla
 test('polling uses existing task ID; failed task stays failed and invalid download host is rejected',async()=>{
  const failed=await queryWanVideo(c,'provider-1',async(url,init)=>{assert.match(String(url),/tasks\/provider-1$/);assert.equal(init?.method,'GET');return Response.json({output:{task_status:'FAILED',message:'quota'}});});assert.equal(failed.task_status,'FAILED');
  await assert.rejects(()=>queryWanVideo(c,'p',async()=>Response.json({output:{task_status:'SUCCEEDED',video_url:'https://example.com/movie.mp4'}})),/地址无效/);
+});
+test('sound modes are carried into the actual video request, with narration audio as a driving source',async()=>{
+ const requests:any[]=[];
+ const fetcher=async(_url:RequestInfo|URL,init?:RequestInit)=>{requests.push(JSON.parse(String(init?.body)));return Response.json({output:{task_id:'provider-2',task_status:'PENDING'}});};
+ await submitWanVideo(c,{...plan,audioMode:'music'},'data:image/png;base64,AAA',fetcher as typeof fetch);
+ assert.match(requests[0].input.prompt,/纯音乐/);assert.equal(requests[0].input.media.length,1);
+ await submitWanVideo(c,{...plan,audioMode:'narration',narrationText:'柔软透气，轻松出行。'},'data:image/png;base64,AAA',fetcher as typeof fetch,'https://example.aliyuncs.com/voice.mp3');
+ assert.equal(requests[1].input.media[1].type,'driving_audio');assert.match(requests[1].input.prompt,/画外解说/);
+ await assert.rejects(()=>submitWanVideo(c,{...plan,audioMode:'narration',narrationText:'解说'},'data:image/png;base64,AAA',fetcher as typeof fetch),/生成配音/);
+});
+test('narration synthesis sends the approved script to Qwen TTS and returns its temporary audio URL',async()=>{
+ let body:any;
+ const url=await synthesizeNarration(c,'这是一件浅粉色圆领短袖。',async(endpoint,init)=>{
+  assert.match(String(endpoint),/SpeechSynthesizer$/);body=JSON.parse(String(init?.body));
+  return Response.json({output:{audio:{url:'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/voice.mp3?signature=demo'}}});
+ });
+ assert.equal(body.input.text,'这是一件浅粉色圆领短袖。');assert.equal(body.input.format,'mp3');assert.match(url,/voice\.mp3/);
+ await assert.rejects(()=>synthesizeNarration(c,'解说',async()=>Response.json({output:{audio:{url:'https://example.com/voice.mp3'}}})),/无效音频地址/);
 });
 test('a seller-authored video prompt is kept verbatim for review and submission',()=>{
  const custom=createCustomVideoPlan('  Slow camera orbit around the exact product; no people.  ',['asset_1','asset_2']);

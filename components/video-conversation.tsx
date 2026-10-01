@@ -6,7 +6,7 @@ import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
 type Job = {
   id: string;
   status: string;
-  plan: { title: string; prompt: string; duration: number; resolution: string; sourceFileId: string };
+  plan: { title: string; prompt: string; duration: number; resolution: string; sourceFileId: string; narrationSuggestion?: string; audioMode?: 'ambient' | 'music' | 'narration'; narrationText?: string };
   error?: string | null;
   videoUrl: string | null;
 };
@@ -17,14 +17,23 @@ const labels: Record<string, string> = {
   PENDING: '排队中', RUNNING: '生成中', FAILED: '生成失败', UNKNOWN: '任务已失效',
 };
 
+type AudioMode = 'ambient' | 'music' | 'narration';
 function VideoDraft({ job, configured, busy, onStart }: {
-  job: Job; configured: boolean; busy: boolean; onStart: (id: string, prompt: string) => Promise<void>;
+  job: Job; configured: boolean; busy: boolean; onStart: (id: string, prompt: string, audioMode: AudioMode, narrationText: string) => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState(job.plan.prompt);
+  const [audioMode, setAudioMode] = useState<AudioMode>(job.plan.audioMode ?? 'ambient');
+  const [narrationText, setNarrationText] = useState(job.plan.narrationText ?? job.plan.narrationSuggestion ?? '');
   return <section className="video-draft-review">
     <div className="video-card-heading"><span>生成前确认</span><b>视频提示词</b></div>
     <textarea aria-label="视频生成提示词" value={prompt} maxLength={4000} rows={7} onChange={(event) => setPrompt(event.target.value)} />
-    <footer><small>{job.plan.duration} 秒 · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim()} onClick={() => void onStart(job.id, prompt)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
+    <fieldset className="video-audio-choice"><legend>声音</legend><div className="video-audio-options">
+      <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'ambient'} onChange={() => setAudioMode('ambient')} />自然音效</label>
+      <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'music'} onChange={() => setAudioMode('music')} />背景音乐</label>
+      <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'narration'} onChange={() => setAudioMode('narration')} />解说配音</label>
+    </div></fieldset>
+    {audioMode === 'narration' && <label className="video-narration-label">解说文案（生成前可修改）<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="用一句话介绍商品已确认的卖点" /><small>最多 60 字；配音会作为视频音轨，视频最长 15 秒。</small></label>}
+    <footer><small>{audioMode === 'narration' ? 15 : job.plan.duration} 秒 · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim() || (audioMode === 'narration' && !narrationText.trim())} onClick={() => void onStart(job.id, prompt, audioMode, narrationText)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
   </section>;
 }
 
@@ -64,12 +73,12 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
   const latestFailure = visibleJobs.find((job) => ['FAILED', 'UNKNOWN'].includes(job.status) || (job.status === 'SUBMISSION_UNKNOWN' && !isReusableVideoJob(job)));
   const showPlanner = showSuggestion && !draft && !inProgress && results.length === 0;
 
-  const action = useCallback(async (id: string, actionName: 'start' | 'refresh', prompt?: string) => {
+  const action = useCallback(async (id: string, actionName: 'start' | 'refresh', prompt?: string, audioMode?: AudioMode, narrationText?: string) => {
     setBusy(true); setError('');
     try {
       const response = await fetch(`/api/tasks/${taskId}/videos`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id, action: actionName, ...(prompt === undefined ? {} : { prompt }) }),
+        body: JSON.stringify({ id, action: actionName, ...(prompt === undefined ? {} : { prompt, audioMode, narrationText }) }),
       });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || '视频操作失败');
@@ -113,7 +122,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
         : <label>视频生成提示词<textarea rows={5} maxLength={4000} value={customPrompt} onChange={(event) => setCustomPrompt(event.target.value)} placeholder="描述希望出现的画面、镜头和动作" /></label>}
       <footer><small>确认提示词后才会调用视频模型</small><button type="button" disabled={busy || (mode === 'custom' && !customPrompt.trim())} onClick={() => void createPlan()}>{busy ? '正在准备…' : mode === 'ai' ? '生成可编辑提示词' : '保存提示词'}</button></footer>
     </section>}
-    {draft && showSuggestion && <VideoDraft key={draft.id} job={draft} configured={configured} busy={busy} onStart={(id, prompt) => action(id, 'start', prompt)} />}
+    {draft && showSuggestion && <VideoDraft key={draft.id} job={draft} configured={configured} busy={busy} onStart={(id, prompt, audioMode, narrationText) => action(id, 'start', prompt, audioMode, narrationText)} />}
     {inProgress && <div className="video-progress-row" role="status"><span className="agent-spinner" /><span>{labels[visibleJobs.find((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job))?.status ?? ''] || '视频生成中'}</span>{visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status)) && <button type="button" disabled={busy} onClick={() => void action(visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status))!.id, 'refresh')}>刷新状态</button>}</div>}
     {results.map((job) => <section className={`video-result${selected.includes(job.id) ? ' selected' : ''}`} key={job.id}>
       <video controls playsInline preload="metadata" src={job.videoUrl!} />

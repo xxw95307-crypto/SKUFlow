@@ -1,5 +1,6 @@
 export interface WanVideoConfig { apiKey:string; baseUrl:string; model:string }
-export interface VideoPlan {title:string;prompt:string;duration:number;resolution:'720P'|'1080P';sourceFileId:string;shots:string[]}
+export type VideoAudioMode = 'ambient' | 'music' | 'narration';
+export interface VideoPlan {title:string;prompt:string;duration:number;resolution:'720P'|'1080P';sourceFileId:string;shots:string[];narrationSuggestion?:string;audioMode?:VideoAudioMode;narrationText?:string}
 export class WanVideoRequestError extends Error {
  constructor(message:string) {super(message);this.name='WanVideoRequestError';}
 }
@@ -13,7 +14,7 @@ export function requireWanConfig(c:WanVideoConfig) {
 }
 export function parseVideoPlan(raw:any,sourceIds:string[]):VideoPlan {
  if(!raw||typeof raw.title!=='string'||!raw.title.trim()||typeof raw.prompt!=='string'||!raw.prompt.trim()||!sourceIds.includes(raw.sourceFileId)||!Number.isInteger(raw.duration)||raw.duration<2||raw.duration>15||!['720P','1080P'].includes(raw.resolution)||!Array.isArray(raw.shots)||!raw.shots.length||!raw.shots.every((s:any)=>typeof s==='string'))throw new Error('视频策划结果无效');
- return {title:raw.title.slice(0,120),prompt:raw.prompt.slice(0,4000),duration:raw.duration,resolution:raw.resolution,sourceFileId:raw.sourceFileId,shots:raw.shots.slice(0,8).map((s:string)=>s.slice(0,300))};
+ return {title:raw.title.slice(0,120),prompt:raw.prompt.slice(0,4000),duration:raw.duration,resolution:raw.resolution,sourceFileId:raw.sourceFileId,shots:raw.shots.slice(0,8).map((s:string)=>s.slice(0,300)),...(typeof raw.narrationSuggestion==='string'?{narrationSuggestion:raw.narrationSuggestion.slice(0,60)}:{}),...(raw.audioMode?{audioMode:raw.audioMode}:{}),...(raw.narrationText?{narrationText:raw.narrationText}:{})};
 }
 export function createCustomVideoPlan(prompt: string, sourceIds: string[]): VideoPlan {
  const trimmed=prompt.trim();
@@ -34,9 +35,28 @@ async function api(c:WanVideoConfig,path:string,body:unknown|undefined,fetcher:t
  }
  return d.output;
 }
-export async function submitWanVideo(c:WanVideoConfig,plan:VideoPlan,image:string,fetcher:typeof fetch=fetch):Promise<string> {
+export function prepareVideoAudio(plan:VideoPlan,audioUrl?:string) {
+ const mode=plan.audioMode??'ambient';
+ if(!['ambient','music','narration'].includes(mode))throw new Error('声音方式无效');
+ const narration=plan.narrationText?.trim()??'';
+ if(mode==='narration'&&(!narration||narration.length>60||!audioUrl))throw new Error('请填写不超过 60 字的解说文案，并生成配音');
+ const suffix=mode==='music'?'配轻柔、自然的纯音乐，节奏贴合镜头；不要人声、歌词或口播。':mode==='narration'?'使用提供的配音作为画外解说，镜头只展示商品；不要让画面人物对口型，不要额外生成对白或背景音乐。':'只保留与画面相符的自然环境音效；不要背景音乐、口播或对白。';
+ return {prompt:`${plan.prompt.trim()}\n声音要求：${suffix}`,media:audioUrl?[{type:'driving_audio',url:audioUrl}]:[]};
+}
+export async function synthesizeNarration(c:WanVideoConfig,text:string,fetcher:typeof fetch=fetch):Promise<string> {
+ requireWanConfig(c);
+ const script=text.trim();if(!script||script.length>60)throw new Error('请填写不超过 60 字的解说文案');
+ const response=await fetcher(c.baseUrl+'/services/audio/tts/SpeechSynthesizer',{method:'POST',headers:{Authorization:`Bearer ${c.apiKey}`,'content-type':'application/json'},body:JSON.stringify({model:'qwen-audio-3.0-tts-flash',input:{text:script,voice:'longanhuan_v3.6',format:'mp3',sample_rate:24000}}),signal:AbortSignal.timeout(60_000)});
+ const payload=await response.json() as {code?:string;message?:string;output?:{audio?:{url?:string}}};
+ if(!response.ok||payload.code||!payload.output?.audio?.url)throw new Error(`配音生成失败：${String(payload.message??payload.code??response.status).slice(0,180)}`);
+ const url=new URL(payload.output.audio.url);
+ if(!['http:','https:'].includes(url.protocol)||!url.hostname.endsWith('.aliyuncs.com')||url.username||url.password)throw new Error('配音服务返回了无效音频地址');
+ return url.toString();
+}
+export async function submitWanVideo(c:WanVideoConfig,plan:VideoPlan,image:string,fetcher:typeof fetch=fetch,audioUrl?:string):Promise<string> {
  parseVideoPlan(plan,[plan.sourceFileId]);if(!/^data:image\/(png|jpeg|webp|bmp);base64,/.test(image))throw new Error('视频首帧图片格式不支持');
- const out=await api(c,'/services/aigc/video-generation/video-synthesis',{model:c.model,input:{prompt:plan.prompt,negative_prompt:'商品变形、颜色变化、虚构功能、错误文字',media:[{type:'first_frame',url:image}]},parameters:{duration:plan.duration,resolution:plan.resolution,prompt_extend:false,watermark:true}},fetcher);
+ const audio=prepareVideoAudio(plan,audioUrl);
+ const out=await api(c,'/services/aigc/video-generation/video-synthesis',{model:c.model,input:{prompt:audio.prompt,negative_prompt:'商品变形、颜色变化、虚构功能、错误文字',media:[{type:'first_frame',url:image},...audio.media]},parameters:{duration:plan.duration,resolution:plan.resolution,prompt_extend:false,watermark:true}},fetcher);
  if(typeof out.task_id!=='string'||!out.task_id)throw new Error('视频服务未返回任务 ID');return out.task_id;
 }
 export async function queryWanVideo(c:WanVideoConfig,id:string,fetcher:typeof fetch=fetch) {
