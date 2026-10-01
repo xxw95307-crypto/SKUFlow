@@ -46,6 +46,10 @@ test('narration synthesis measures its real WAV length before video submission',
 });
 test('narration duration rejects clipped speech and avoids long silent tails',()=>{
  assert.equal(matchedVideoDuration(wavDurationSeconds(sampleWav(3.25))),4);
+ const streaming=sampleWav(3.25);streaming.writeUInt32LE(2147483583,4);streaming.writeUInt32LE(2147483547,40);
+ assert.equal(wavDurationSeconds(streaming),3.25);
+ const truncated=sampleWav(3.25).subarray(0,-100);
+ assert.throws(()=>wavDurationSeconds(truncated),/配音文件不完整/);
  assert.throws(()=>matchedVideoDuration(1.5),/不足 2 秒/);
  assert.throws(()=>matchedVideoDuration(15.2),/超过 15 秒/);
  assert.throws(()=>wavDurationSeconds(new Uint8Array([1,2,3])),/有效的 WAV/);

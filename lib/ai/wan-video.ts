@@ -46,11 +46,15 @@ export function prepareVideoAudio(plan:VideoPlan,audioUrl?:string) {
 export function wavDurationSeconds(bytes:Uint8Array):number {
  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
  if(bytes.length<44||view.getUint32(0,false)!==0x52494646||view.getUint32(8,false)!==0x57415645)throw new Error('配音文件不是有效的 WAV 音频');
+ const riffSize=view.getUint32(4,true);
  let offset=12,byteRate=0,dataSize=0;
  while(offset+8<=bytes.length){
   const size=view.getUint32(offset+4,true),end=offset+8+size;
-  if(end>bytes.length)throw new Error('配音文件不完整');
   const id=view.getUint32(offset,false);
+  // Qwen TTS writes a streaming WAV with a near-2GB placeholder for both
+  // RIFF and data sizes. The HTTP response body still contains the full audio.
+  if(id===0x64617461&&end>bytes.length&&size>=0x7fff0000&&riffSize>=0x7fff0000){dataSize=bytes.length-(offset+8);break;}
+  if(end>bytes.length)throw new Error('配音文件不完整');
   if(id===0x666d7420){if(size<16)throw new Error('配音格式无效');byteRate=view.getUint32(offset+16,true);}
   if(id===0x64617461)dataSize=size;
   offset=end+(size%2);
@@ -74,9 +78,11 @@ export async function synthesizeNarration(c:WanVideoConfig,text:string,fetcher:t
  if(!['http:','https:'].includes(url.protocol)||!url.hostname.endsWith('.aliyuncs.com')||url.username||url.password)throw new Error('配音服务返回了无效音频地址');
  const audio=await fetcher(url.toString(),{signal:AbortSignal.timeout(30_000)});
  if(!audio.ok)throw new Error('配音文件下载失败，请重试');
- if(Number(audio.headers.get('content-length'))>15*1024*1024)throw new Error('配音文件超过 15 MB');
+ const contentLength=Number(audio.headers.get('content-length'));
+ if(contentLength>15*1024*1024)throw new Error('配音文件超过 15 MB');
  const bytes=new Uint8Array(await audio.arrayBuffer());
  if(bytes.length>15*1024*1024)throw new Error('配音文件超过 15 MB');
+ if(contentLength>0&&bytes.length!==contentLength)throw new Error('配音下载不完整，请重试');
  const duration=wavDurationSeconds(bytes);
  matchedVideoDuration(duration);
  return {url:url.toString(),duration};
