@@ -1,6 +1,6 @@
 import {ensureSchema,getBindings} from '@/db/client';
 import {getProductPassport} from '@/lib/server/passport-store';
-import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo,synthesizeNarration,WanVideoRequestError,VideoAudioMode} from '@/lib/ai/wan-video';
+import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo,synthesizeNarration,matchedVideoDuration,WanVideoRequestError,VideoAudioMode} from '@/lib/ai/wan-video';
 interface VideoJobRow { id:string; task_id:string; source_file_id:string; plan_json:string; status:string; provider_task_id:string|null; error:string|null; }
 const publicJob=(r:VideoJobRow)=>({id:r.id,status:r.status,plan:JSON.parse(r.plan_json),error:r.error,videoUrl:r.status==='SUCCEEDED'?`/api/tasks/${r.task_id}/videos/${r.id}/file`:null});
 export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:string}>}) {
@@ -16,9 +16,9 @@ export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:str
  if(!['ambient','music','narration'].includes(chosenMode))return Response.json({error:'请选择声音方式'},{status:400});
  const script=typeof narrationText==='string'?narrationText.trim():'';
  if(chosenMode==='narration'&&(!script||script.length>60))return Response.json({error:'解说文案需要在 1–60 字之间，以适配短视频时长'},{status:400});
- const plan={...JSON.parse(job.plan_json),prompt:editedPrompt,audioMode:chosenMode,narrationText:chosenMode==='narration'?script:undefined,duration:chosenMode==='narration'?15:JSON.parse(job.plan_json).duration};
+ const plan={...JSON.parse(job.plan_json),prompt:editedPrompt,audioMode:chosenMode,narrationText:chosenMode==='narration'?script:undefined};
  const lock=await b.DB.prepare("UPDATE video_jobs SET status='SUBMITTING',plan_json=? WHERE id=? AND task_id=? AND status='DRAFT'").bind(JSON.stringify(plan),id,taskId).run();if(!lock.meta.changes)return Response.json({job:publicJob(job)});
- try {let audioUrl:string|undefined;if(chosenMode==='narration'){try{audioUrl=await synthesizeNarration(c,script);}catch(e){throw new WanVideoRequestError((e as Error).message);}}let text='';for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));const providerId=await submitWanVideo(c,plan,`data:${source.content_type};base64,${btoa(text)}`,fetch,audioUrl);await b.DB.prepare("UPDATE video_jobs SET status='PENDING',provider_task_id=? WHERE id=?").bind(providerId,id).run();}
+ try {let audioUrl:string|undefined;if(chosenMode==='narration'){try{const audio=await synthesizeNarration(c,script);audioUrl=audio.url;plan.duration=matchedVideoDuration(audio.duration);await b.DB.prepare("UPDATE video_jobs SET plan_json=? WHERE id=? AND task_id=? AND status='SUBMITTING'").bind(JSON.stringify(plan),id,taskId).run();}catch(e){throw new WanVideoRequestError((e as Error).message);}}let text='';for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));const providerId=await submitWanVideo(c,plan,`data:${source.content_type};base64,${btoa(text)}`,fetch,audioUrl);await b.DB.prepare("UPDATE video_jobs SET status='PENDING',provider_task_id=? WHERE id=?").bind(providerId,id).run();}
  catch(e){
   const rejected=e instanceof WanVideoRequestError;
   await b.DB.prepare('UPDATE video_jobs SET status=?,error=? WHERE id=?')

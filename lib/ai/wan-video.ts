@@ -43,15 +43,43 @@ export function prepareVideoAudio(plan:VideoPlan,audioUrl?:string) {
  const suffix=mode==='music'?'配轻柔、自然的纯音乐，节奏贴合镜头；不要人声、歌词或口播。':mode==='narration'?'使用提供的配音作为画外解说，镜头只展示商品；不要让画面人物对口型，不要额外生成对白或背景音乐。':'只保留与画面相符的自然环境音效；不要背景音乐、口播或对白。';
  return {prompt:`${plan.prompt.trim()}\n声音要求：${suffix}`,media:audioUrl?[{type:'driving_audio',url:audioUrl}]:[]};
 }
-export async function synthesizeNarration(c:WanVideoConfig,text:string,fetcher:typeof fetch=fetch):Promise<string> {
+export function wavDurationSeconds(bytes:Uint8Array):number {
+ const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+ if(bytes.length<44||view.getUint32(0,false)!==0x52494646||view.getUint32(8,false)!==0x57415645)throw new Error('配音文件不是有效的 WAV 音频');
+ let offset=12,byteRate=0,dataSize=0;
+ while(offset+8<=bytes.length){
+  const size=view.getUint32(offset+4,true),end=offset+8+size;
+  if(end>bytes.length)throw new Error('配音文件不完整');
+  const id=view.getUint32(offset,false);
+  if(id===0x666d7420){if(size<16)throw new Error('配音格式无效');byteRate=view.getUint32(offset+16,true);}
+  if(id===0x64617461)dataSize=size;
+  offset=end+(size%2);
+ }
+ const duration=dataSize/byteRate;
+ if(!Number.isFinite(duration)||duration<=0)throw new Error('无法读取配音时长');
+ return duration;
+}
+export function matchedVideoDuration(audioSeconds:number):number {
+ if(!Number.isFinite(audioSeconds)||audioSeconds<2)throw new Error('解说不足 2 秒，请补充文案后再生成');
+ if(audioSeconds>15)throw new Error('解说超过 15 秒，请缩短文案后再生成');
+ return Math.ceil(audioSeconds);
+}
+export async function synthesizeNarration(c:WanVideoConfig,text:string,fetcher:typeof fetch=fetch):Promise<{url:string;duration:number}> {
  requireWanConfig(c);
  const script=text.trim();if(!script||script.length>60)throw new Error('请填写不超过 60 字的解说文案');
- const response=await fetcher(c.baseUrl+'/services/audio/tts/SpeechSynthesizer',{method:'POST',headers:{Authorization:`Bearer ${c.apiKey}`,'content-type':'application/json'},body:JSON.stringify({model:'qwen-audio-3.0-tts-flash',input:{text:script,voice:'longanhuan_v3.6',format:'mp3',sample_rate:24000}}),signal:AbortSignal.timeout(60_000)});
+ const response=await fetcher(c.baseUrl+'/services/audio/tts/SpeechSynthesizer',{method:'POST',headers:{Authorization:`Bearer ${c.apiKey}`,'content-type':'application/json'},body:JSON.stringify({model:'qwen-audio-3.0-tts-flash',input:{text:script,voice:'longanhuan_v3.6',format:'wav',sample_rate:24000}}),signal:AbortSignal.timeout(60_000)});
  const payload=await response.json() as {code?:string;message?:string;output?:{audio?:{url?:string}}};
  if(!response.ok||payload.code||!payload.output?.audio?.url)throw new Error(`配音生成失败：${String(payload.message??payload.code??response.status).slice(0,180)}`);
  const url=new URL(payload.output.audio.url);
  if(!['http:','https:'].includes(url.protocol)||!url.hostname.endsWith('.aliyuncs.com')||url.username||url.password)throw new Error('配音服务返回了无效音频地址');
- return url.toString();
+ const audio=await fetcher(url.toString(),{signal:AbortSignal.timeout(30_000)});
+ if(!audio.ok)throw new Error('配音文件下载失败，请重试');
+ if(Number(audio.headers.get('content-length'))>15*1024*1024)throw new Error('配音文件超过 15 MB');
+ const bytes=new Uint8Array(await audio.arrayBuffer());
+ if(bytes.length>15*1024*1024)throw new Error('配音文件超过 15 MB');
+ const duration=wavDurationSeconds(bytes);
+ matchedVideoDuration(duration);
+ return {url:url.toString(),duration};
 }
 export async function submitWanVideo(c:WanVideoConfig,plan:VideoPlan,image:string,fetcher:typeof fetch=fetch,audioUrl?:string):Promise<string> {
  parseVideoPlan(plan,[plan.sourceFileId]);if(!/^data:image\/(png|jpeg|webp|bmp);base64,/.test(image))throw new Error('视频首帧图片格式不支持');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,createCustomVideoPlan,submitWanVideo,queryWanVideo,synthesizeNarration,WanVideoRequestError} from '../lib/ai/wan-video.ts';
+import {loadWanVideoConfig,requireWanConfig,parseVideoPlan,createCustomVideoPlan,submitWanVideo,queryWanVideo,synthesizeNarration,wavDurationSeconds,matchedVideoDuration,WanVideoRequestError} from '../lib/ai/wan-video.ts';
 import {isReusableVideoJob} from '../lib/domain/video-job-retry.ts';
 const c={apiKey:'test-secret',baseUrl:'https://dashscope.aliyuncs.com/api/v1',model:'wan2.7-i2v'};
 const plan={title:'商品展示',prompt:'保持商品结构一致，缓慢推进镜头',duration:5,resolution:'720P' as const,sourceFileId:'asset_cover',shots:['商品全貌','细节']};
@@ -29,14 +29,26 @@ test('sound modes are carried into the actual video request, with narration audi
  assert.equal(requests[1].input.media[1].type,'driving_audio');assert.match(requests[1].input.prompt,/画外解说/);
  await assert.rejects(()=>submitWanVideo(c,{...plan,audioMode:'narration',narrationText:'解说'},'data:image/png;base64,AAA',fetcher as typeof fetch),/生成配音/);
 });
-test('narration synthesis sends the approved script to Qwen TTS and returns its temporary audio URL',async()=>{
+function sampleWav(seconds:number){
+ const dataSize=seconds*24000*2,buffer=Buffer.alloc(44+dataSize);
+ buffer.write('RIFF',0);buffer.writeUInt32LE(36+dataSize,4);buffer.write('WAVEfmt ',8);buffer.writeUInt32LE(16,16);buffer.writeUInt16LE(1,20);buffer.writeUInt16LE(1,22);buffer.writeUInt32LE(24000,24);buffer.writeUInt32LE(48000,28);buffer.writeUInt16LE(2,32);buffer.writeUInt16LE(16,34);buffer.write('data',36);buffer.writeUInt32LE(dataSize,40);
+ return buffer;
+}
+test('narration synthesis measures its real WAV length before video submission',async()=>{
  let body:any;
  const url=await synthesizeNarration(c,'这是一件浅粉色圆领短袖。',async(endpoint,init)=>{
+  if(String(endpoint).includes('/voice.wav'))return new Response(sampleWav(4.5));
   assert.match(String(endpoint),/SpeechSynthesizer$/);body=JSON.parse(String(init?.body));
-  return Response.json({output:{audio:{url:'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/voice.mp3?signature=demo'}}});
+  return Response.json({output:{audio:{url:'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/voice.wav?signature=demo'}}});
  });
- assert.equal(body.input.text,'这是一件浅粉色圆领短袖。');assert.equal(body.input.format,'mp3');assert.match(url,/voice\.mp3/);
+ assert.equal(body.input.text,'这是一件浅粉色圆领短袖。');assert.equal(body.input.format,'wav');assert.match(url.url,/voice\.wav/);assert.equal(url.duration,4.5);assert.equal(matchedVideoDuration(url.duration),5);
  await assert.rejects(()=>synthesizeNarration(c,'解说',async()=>Response.json({output:{audio:{url:'https://example.com/voice.mp3'}}})),/无效音频地址/);
+});
+test('narration duration rejects clipped speech and avoids long silent tails',()=>{
+ assert.equal(matchedVideoDuration(wavDurationSeconds(sampleWav(3.25))),4);
+ assert.throws(()=>matchedVideoDuration(1.5),/不足 2 秒/);
+ assert.throws(()=>matchedVideoDuration(15.2),/超过 15 秒/);
+ assert.throws(()=>wavDurationSeconds(new Uint8Array([1,2,3])),/有效的 WAV/);
 });
 test('a seller-authored video prompt is kept verbatim for review and submission',()=>{
  const custom=createCustomVideoPlan('  Slow camera orbit around the exact product; no people.  ',['asset_1','asset_2']);

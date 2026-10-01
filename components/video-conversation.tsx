@@ -32,8 +32,8 @@ function VideoDraft({ job, configured, busy, onStart }: {
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'music'} onChange={() => setAudioMode('music')} />背景音乐</label>
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'narration'} onChange={() => setAudioMode('narration')} />解说配音</label>
     </div></fieldset>
-    {audioMode === 'narration' && <label className="video-narration-label">解说文案（生成前可修改）<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="用一句话介绍商品已确认的卖点" /><small>最多 60 字；配音会作为视频音轨，视频最长 15 秒。</small></label>}
-    <footer><small>{audioMode === 'narration' ? 15 : job.plan.duration} 秒 · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim() || (audioMode === 'narration' && !narrationText.trim())} onClick={() => void onStart(job.id, prompt, audioMode, narrationText)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
+    {audioMode === 'narration' && <label className="video-narration-label">解说文案（生成前可修改）<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="用一句话介绍商品已确认的卖点" /><small>视频会按配音实际时长自动匹配为 2–15 秒；太短或太长时请修改文案。</small></label>}
+    <footer><small>{audioMode === 'narration' ? '按配音时长生成' : `${job.plan.duration} 秒`} · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim() || (audioMode === 'narration' && !narrationText.trim())} onClick={() => void onStart(job.id, prompt, audioMode, narrationText)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
   </section>;
 }
 
