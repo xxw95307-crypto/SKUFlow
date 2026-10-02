@@ -1,5 +1,4 @@
 import type { AccountIdentity } from '@/lib/domain/identity';
-import type { AppBindings } from '@/db/client';
 
 const encoder = new TextEncoder();
 const SESSION_DAYS = 30;
@@ -47,16 +46,6 @@ export async function verifyPassword(password: string, stored: string | null): P
   return secureEqual(bytesToHex(new Uint8Array(bits)), expected);
 }
 
-export async function challengeHash(secret: string, phone: string, code: string): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return bytesToHex(new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(`${phone}:${code}`))));
-}
-
-export function authSecret(bindings: AppBindings): string | null {
-  const value = bindings.AUTH_SECRET?.trim();
-  return value && value.length >= 32 ? value : null;
-}
-
 export function requestAllowed(request: Request): boolean {
   const origin = request.headers.get('origin');
   return !((origin && origin !== new URL(request.url).origin) || request.headers.get('sec-fetch-site') === 'cross-site');
@@ -76,14 +65,17 @@ export function clientIp(request: Request): string {
   return request.headers.get('cf-connecting-ip') || 'unknown';
 }
 
-export async function consumeSmsCode(DB: D1Database, secret: string, phone: string, code: string): Promise<boolean> {
-  if (!/^\d{6}$/.test(code)) return false;
+// The provider owns the code. This local challenge only limits attempts and prevents reuse.
+export async function beginSmsVerification(DB: D1Database, phone: string): Promise<string | null> {
   const now = new Date().toISOString();
-  const hash = await challengeHash(secret, phone, code);
   const row = await DB.prepare('UPDATE sms_challenges SET attempts=attempts+1 WHERE phone=? AND attempts<5 AND expires_at>? RETURNING code_hash')
     .bind(phone, now).first<{ code_hash: string }>();
-  if (!row || !secureEqual(row.code_hash, hash)) return false;
-  const consumed = await DB.prepare('DELETE FROM sms_challenges WHERE phone=? AND code_hash=? RETURNING phone').bind(phone, hash).first();
+  return row?.code_hash || null;
+}
+
+export async function finishSmsVerification(DB: D1Database, phone: string, challengeId: string): Promise<boolean> {
+  const consumed = await DB.prepare('DELETE FROM sms_challenges WHERE phone=? AND code_hash=? AND expires_at>? RETURNING phone')
+    .bind(phone, challengeId, new Date().toISOString()).first();
   return Boolean(consumed);
 }
 

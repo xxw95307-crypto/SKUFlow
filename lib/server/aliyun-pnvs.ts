@@ -1,7 +1,7 @@
 import type { AppBindings } from '@/db/client';
 
 const encoder = new TextEncoder();
-const host = 'dysmsapi.aliyuncs.com';
+const host = 'dypnsapi.aliyuncs.com';
 const algorithm = 'ACS3-HMAC-SHA256';
 
 function hex(bytes: Uint8Array): string {
@@ -29,38 +29,55 @@ export async function signAliyunRequest(accessKeyId: string, accessKeySecret: st
   const key = await crypto.subtle.importKey('raw', encoder.encode(accessKeySecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const signature = hex(new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(stringToSign))));
   return {
-    url: `https://${host}/?${canonicalQuery}`,
+    url: `https://${headers.host}/?${canonicalQuery}`,
     authorization: `${algorithm} Credential=${accessKeyId},SignedHeaders=${signedHeaders},Signature=${signature}`,
   };
 }
 
-export function smsConfigured(bindings: AppBindings): boolean {
-  return Boolean(bindings.ALIYUN_SMS_ACCESS_KEY_ID?.trim() && bindings.ALIYUN_SMS_ACCESS_KEY_SECRET?.trim()
-    && bindings.ALIYUN_SMS_SIGN_NAME?.trim() && bindings.ALIYUN_SMS_TEMPLATE_CODE?.trim());
+export function pnvsConfigured(bindings: AppBindings): boolean {
+  return Boolean(bindings.ALIYUN_PNVS_ACCESS_KEY_ID?.trim() && bindings.ALIYUN_PNVS_ACCESS_KEY_SECRET?.trim()
+    && bindings.ALIYUN_PNVS_SIGN_NAME?.trim() && bindings.ALIYUN_PNVS_TEMPLATE_CODE?.trim());
 }
 
-export async function sendAliyunCode(bindings: AppBindings, phone: string, code: string, fetchImpl: typeof fetch = fetch): Promise<void> {
-  if (!smsConfigured(bindings)) throw new Error('短信服务尚未配置');
+type PnvsResult = { Code?: string; Success?: boolean; Model?: { VerifyResult?: string } };
+
+async function requestPnvs(bindings: AppBindings, action: 'SendSmsVerifyCode' | 'CheckSmsVerifyCode', query: Record<string, string>, fetchImpl: typeof fetch): Promise<PnvsResult> {
+  if (!pnvsConfigured(bindings)) throw new Error('短信认证服务尚未配置');
   const headers = {
     host,
-    'x-acs-action': 'SendSms',
+    'x-acs-action': action,
     'x-acs-content-sha256': await sha256(''),
     'x-acs-date': new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
     'x-acs-signature-nonce': crypto.randomUUID(),
     'x-acs-version': '2017-05-25',
   };
-  const query = {
-    PhoneNumbers: phone,
-    SignName: bindings.ALIYUN_SMS_SIGN_NAME!.trim(),
-    TemplateCode: bindings.ALIYUN_SMS_TEMPLATE_CODE!.trim(),
-    TemplateParam: JSON.stringify({ code }),
-  };
-  const signed = await signAliyunRequest(bindings.ALIYUN_SMS_ACCESS_KEY_ID!.trim(), bindings.ALIYUN_SMS_ACCESS_KEY_SECRET!.trim(), 'POST', query, headers);
+  const signed = await signAliyunRequest(bindings.ALIYUN_PNVS_ACCESS_KEY_ID!.trim(), bindings.ALIYUN_PNVS_ACCESS_KEY_SECRET!.trim(), 'POST', query, headers);
   const response = await fetchImpl(signed.url, {
     method: 'POST',
     headers: { ...headers, authorization: signed.authorization, accept: 'application/json' },
     signal: AbortSignal.timeout(10_000),
   });
-  const result = await response.json().catch(() => ({})) as { Code?: string };
-  if (!response.ok || result.Code !== 'OK') throw new Error('验证码发送失败，请稍后再试');
+  const result = await response.json().catch(() => ({})) as PnvsResult;
+  if (!response.ok || result.Code !== 'OK' || result.Success !== true) throw new Error('短信认证服务请求失败');
+  return result;
+}
+
+export async function sendPnvsCode(bindings: AppBindings, phone: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  await requestPnvs(bindings, 'SendSmsVerifyCode', {
+    PhoneNumber: phone,
+    SignName: bindings.ALIYUN_PNVS_SIGN_NAME!.trim(),
+    TemplateCode: bindings.ALIYUN_PNVS_TEMPLATE_CODE!.trim(),
+    TemplateParam: JSON.stringify({ code: '##code##', min: '5' }),
+    CodeLength: '6',
+    CodeType: '1',
+    ValidTime: '300',
+    Interval: '60',
+    DuplicatePolicy: '1',
+    ReturnVerifyCode: 'false',
+  }, fetchImpl);
+}
+
+export async function checkPnvsCode(bindings: AppBindings, phone: string, code: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  const result = await requestPnvs(bindings, 'CheckSmsVerifyCode', { PhoneNumber: phone, VerifyCode: code }, fetchImpl);
+  return result.Model?.VerifyResult === 'PASS';
 }
