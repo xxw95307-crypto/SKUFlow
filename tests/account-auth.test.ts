@@ -44,6 +44,7 @@ test('API boundary rejects anonymous and other users before executing handler', 
 test('every API route exports only authenticated handlers', () => {
   const walk=(directory:URL):URL[]=>readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?walk(new URL(entry.name+'/',directory)):entry.name==='route.ts'?[new URL(entry.name,directory)]:[]);
   for(const file of walk(new URL('../app/api/',import.meta.url))) {
+    if (file.pathname.includes('/app/api/auth/')) continue;
     const source=readFileSync(file,'utf8');
     assert.doesNotMatch(source,/export async function (GET|POST|PATCH|PUT|DELETE)/,file.pathname);
     assert.match(source,/export const (GET|POST|PATCH|PUT|DELETE) = withAuthentication\(/,file.pathname);

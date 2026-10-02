@@ -1,4 +1,4 @@
-export interface AccountIdentity { id: string; email: string; name: string }
+export interface AccountIdentity { id: string; email: string; name: string; username?: string; phone?: string; provider?: 'local' | 'chatgpt' }
 
 // Only the Sites dispatcher (and its development plugin) supplies these headers.
 export function identityFromHeaders(headers: Headers): AccountIdentity | null {
@@ -9,7 +9,7 @@ export function identityFromHeaders(headers: Headers): AccountIdentity | null {
   if (headers.get('oai-authenticated-user-full-name-encoding') === 'percent-encoded-utf-8') {
     try { name = decodeURIComponent(name); } catch { name = ''; }
   }
-  return { id, email, name: name || email };
+  return { id, email, name: name || email, provider: 'chatgpt' };
 }
 
 export function resourceReferences(url: string, body: unknown): Array<{ kind: string; id: string }> {

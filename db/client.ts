@@ -23,6 +23,13 @@ export interface AppBindings {
   AMAZON_SP_API_SANDBOX_CLIENT_SECRET?: string;
   AMAZON_SP_API_SANDBOX_REFRESH_TOKEN?: string;
   LEGACY_DATA_OWNER_EMAIL?: string;
+  AUTH_SECRET?: string;
+  ALIYUN_SMS_ACCESS_KEY_ID?: string;
+  ALIYUN_SMS_ACCESS_KEY_SECRET?: string;
+  ALIYUN_SMS_SIGN_NAME?: string;
+  ALIYUN_SMS_TEMPLATE_CODE?: string;
+  WECHAT_APP_ID?: string;
+  WECHAT_APP_SECRET?: string;
 }
 
 let schemaPromise: Promise<void> | null = null;

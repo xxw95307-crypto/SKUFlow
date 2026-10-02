@@ -1337,6 +1337,11 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     }
   };
 
+  const signOutLocal = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.assign('/login');
+  };
+
   const removeConversation = async () => {
     if (!deleteCandidate) return;
     const target = deleteCandidate;
@@ -1482,7 +1487,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         <button type="button" title="偏好设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.7c.2-.2.3-.5.1-.7l-2-3.5c-.1-.2-.4-.3-.7-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1L14.2 2c0-.3-.3-.5-.5-.5h-4c-.2 0-.5.2-.5.5l-.4 2.7c-.6.2-1.2.5-1.7 1l-2.5-1c-.2-.1-.5 0-.7.2l-2 3.5c-.1.2-.1.5.1.7L4.1 11c0 .3-.1.7-.1 1s0 .7.1 1l-2.1 1.7c-.2.2-.3.5-.1.7l2 3.5c.1.2.4.3.7.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.7c0 .3.3.5.5.5h4c.2 0 .5-.2.5-.5l.4-2.7c.6-.2 1.2-.5 1.7-1l2.5 1c.2.1.5 0 .7-.2l2-3.5c.1-.2.1-.5-.1-.7L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg><span>偏好设置</span></button>
         <button type="button" className="agent-rail-upgrade" title="升级计划"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.8 5.7L19.5 9l-4.6 3.4 1.7 5.6L12 14.7l-4.6 3.3 1.7-5.6L4.5 9l5.7-1.3L12 2Z"/></svg><span>升级计划</span></button>
       </div>
-      <div className="agent-user"><span>{avatar}</span><div><a href="/login" title="查看账号"><b>{account.name}</b></a><small title={account.email}>{account.email}</small></div><a className="agent-user-signout" href="/signout-with-chatgpt?return_to=/login" target="_top" title="退出登录" aria-label="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm4 4-1.4 1.4L15.2 11H8v2h7.2l-2.6 2.6L14 17l5-5-5-5Z"/></svg></a></div>
+      <div className="agent-user"><span>{avatar}</span><div><a href="/login" title="查看账号"><b>{account.name}</b></a><small title={account.phone || account.username || account.email}>{account.phone || account.username || account.email}</small></div>{account.provider === 'local' ? <button className="agent-user-signout" type="button" onClick={() => void signOutLocal()} title="退出登录" aria-label="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm4 4-1.4 1.4L15.2 11H8v2h7.2l-2.6 2.6L14 17l5-5-5-5Z"/></svg></button> : <a className="agent-user-signout" href="/signout-with-chatgpt?return_to=/login" target="_top" title="退出登录" aria-label="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm4 4-1.4 1.4L15.2 11H8v2h7.2l-2.6 2.6L14 17l5-5-5-5Z"/></svg></a>}</div>
       <button
         className="agent-rail-resizer"
         type="button"

@@ -1,16 +1,26 @@
 import { headers } from 'next/headers';
 import { ensureSchema, getBindings } from '@/db/client';
 import { identityFromHeaders, resourceReferences } from '@/lib/domain/identity';
+import { accountFromSession, SESSION_COOKIE } from '@/lib/server/account-auth';
+
+async function accountForHeaders(requestHeaders: Headers) {
+  if (requestHeaders.get('cookie')?.includes(`${SESSION_COOKIE}=`)) {
+    await ensureSchema();
+    const account = await accountFromSession(requestHeaders, getBindings().DB);
+    if (account) return account;
+  }
+  return identityFromHeaders(requestHeaders);
+}
 
 export async function currentAccount() {
-  return identityFromHeaders(new Headers(await headers()));
+  return accountForHeaders(new Headers(await headers()));
 }
 
 export function withAuthentication<T extends (...args: any[]) => Promise<Response>>(handler: T) {
   return async (...args: Parameters<T>): Promise<Response> => {
     const request = args[0] as Request;
-    const user = identityFromHeaders(request.headers);
-    if (!user) return Response.json({ error: '请先登录 SKUFlow', signInUrl: '/signin-with-chatgpt?return_to=/' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+    const user = await accountForHeaders(request.headers);
+    if (!user) return Response.json({ error: '请先登录 SKUFlow', signInUrl: '/login' }, { status: 401, headers: { 'cache-control': 'no-store' } });
     const origin = request.headers.get('origin');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && ((origin && origin !== new URL(request.url).origin) || request.headers.get('sec-fetch-site') === 'cross-site')) {
       return Response.json({ error: '不允许跨站操作' }, { status: 403 });
