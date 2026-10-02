@@ -14,6 +14,7 @@ import { TaskIntake } from '@/components/task-intake';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
 import { restoreConversationAssetSnapshots, snapshotGeneratedImages } from '@/lib/agents/asset-history';
+import { restoreConversationVideoRounds } from '@/lib/agents/video-history';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type {
@@ -98,7 +99,7 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
     {message.items && message.items.length > 0 && <div className={`rich-item-list ${message.kind ?? 'text'}`}>
       {message.items.map((item) => <article key={item.id}><div><span>{item.label}</span>{item.status && <em>{item.status}</em>}</div><b>{item.value}</b>{item.detail && <small>{item.detail}</small>}</article>)}
     </div>}
-    {message.meta && <small>{message.meta}</small>}
+    {message.meta && !(message.kind === 'video' && message.videoJobIds?.length) && <small>{message.meta}</small>}
   </>;
 }
 
@@ -450,11 +451,24 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     role: ChatMessage['role'],
     text: string,
     meta?: string,
-    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items' | 'assets'>> = {},
+    rich: Partial<Pick<ChatMessage, 'kind' | 'attachments' | 'items' | 'assets' | 'videoJobIds'>> = {},
   ) => {
     const next = [...messagesRef.current, { id: messageId(), role, text, ...(meta ? { meta } : {}), ...rich }].slice(-200);
     messagesRef.current = next;
     setMessages(next);
+  };
+
+  const recordVideoJob = (jobId: string) => {
+    const current = messagesRef.current;
+    const last = current.at(-1);
+    if (last?.role === 'agent' && last.meta === '等待视频确认' && !last.videoJobIds?.length) {
+      const next = [...current.slice(0, -1), { ...last, kind: 'video' as const, videoJobIds: [jobId] }];
+      messagesRef.current = next;
+      setMessages(next);
+    } else {
+      append('agent', '', '等待视频确认', { kind: 'video', videoJobIds: [jobId] });
+    }
+    void persistConversation(task?.id ?? null).catch((caught) => setError(caught instanceof Error ? caught.message : '视频轮次保存失败'));
   };
 
   const fetchPassport = async (taskId: string): Promise<ProductPassport> => {
@@ -515,9 +529,12 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       return;
     }
     const needsAssetHistory = messagesRef.current.some((message) => message.kind === 'assets' && !message.assets?.length);
-    const [loadedTask, loadedPassport, loadedAssets, assetHistory] = await Promise.all([
+    const [loadedTask, loadedPassport, loadedAssets, assetHistory, videoHistory] = await Promise.all([
       fetchTask(conversation.taskId), fetchPassport(conversation.taskId), fetchGeneratedAssets(conversation.taskId),
       needsAssetHistory ? fetchGeneratedAssetHistory(conversation.taskId).catch(() => []) : Promise.resolve([]),
+      fetch(`/api/tasks/${conversation.taskId}/videos`)
+        .then((response) => responseJson<{ jobs: Array<{ id: string; status: string }> }>(response, '历史视频读取失败'))
+        .catch(() => ({ jobs: [] })),
     ]);
     setTask(loadedTask); setPassport(loadedPassport); setGeneratedAssets(loadedAssets);
     let conversationUpgraded = removedInternalLogs;
@@ -528,6 +545,12 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         setMessages(recovered.messages);
         conversationUpgraded = true;
       }
+    }
+    const restoredVideos = restoreConversationVideoRounds(messagesRef.current, videoHistory.jobs);
+    if (restoredVideos.changed) {
+      messagesRef.current = restoredVideos.messages;
+      setMessages(restoredVideos.messages);
+      conversationUpgraded = true;
     }
     const validAssetIds = new Set(loadedAssets.filter((asset) => asset.status === 'COMPLETED' && (asset.kind === 'VIDEO' || !asset.error)).map((asset) => asset.id));
     const validSelections = conversation.selectedAssetIds.filter((id) => validAssetIds.has(id));
@@ -915,7 +938,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         selectedAssetsRef.current=next;setSelectedAssets(next);
         mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('video');setVideoRevision(v=>v+1);
         setGeneratedAssets(await fetchGeneratedAssets(currentTask.id));
-        append('agent','已按你的要求处理好视频，请在下方预览结果。需要再调整，直接告诉我。','等待视频确认',{kind:'assets'});
+        append('agent','','等待视频确认',{kind:'video',videoJobIds:[saved.id]});
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:saved.id},checkpoint:true};
       }
@@ -932,7 +955,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         setVideoRevision(v=>v+1);
         mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);
         selectedAssetsRef.current=selectedImageIds;setSelectedAssets(selectedImageIds);setPhase('video');
-        append('agent','视频提示词已准备好，你可以修改；确认后再开始生成。','等待视频确认');
+        append('agent','视频提示词已准备好，你可以修改；确认后再开始生成。','等待视频确认',{kind:'video',videoJobIds:[payload.job.id]});
         markToolRun(call,'COMPLETED');
         return {result:{ok:true,videoId:payload.job.id},checkpoint:true};
       }
@@ -1415,7 +1438,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     <footer><span>先生成并确认图片，再开始视频</span><button type="button" onClick={() => void submitImageBrief()}>{imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
   </div>;
   const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} />;
-  const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} /><footer><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认并继续</button></footer></div>;
+  const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} jobIds={messages.at(-1)?.videoJobIds} onJobCreated={recordVideoJob} /><footer><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认并继续</button></footer></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
 
@@ -1518,7 +1541,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             const joinsAction = joinsIntake || joinsImageBrief || joinsAssets || joinsVideo;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
             const displayedMessage = currentListingMessage(message, passport);
-            return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}`} key={message.id}>
+            return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}${message.kind === 'video' ? ' video-round-message' : ''}`} key={message.id}>
               <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
               <div className={`${richClass}${joinsAction ? ' joined-action-bubble' : ''}`}>
                 {joinsAssets ? null : joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
@@ -1526,6 +1549,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
                 {joinsImageBrief && imageBriefCard}
                 {joinsAssets && assetCard}
                 {!joinsAssets && message.kind === 'assets' && message.assets && message.assets.length > 0 && <AssetConversationCard assets={displaySnapshots(message.assets)} selected={[]} onToggle={() => {}} onConfirm={() => {}} onSkipVideo={() => {}} readOnly />}
+                {!joinsVideo && task && message.kind === 'video' && Boolean(message.videoJobIds?.length) && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable jobIds={message.videoJobIds} />}
                 {joinsVideo && videoCard}
               </div>
             </article>;
@@ -1568,7 +1592,6 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'image_brief' && !joinImageBriefToLastAgentReply && <article className="chat-message agent image-brief-conversation"><span className="chat-avatar">AI</span>{imageBriefCard}</article>}
 
-          {task && ['publish','complete'].includes(phase) && <article className="chat-message agent video-conversation"><span className="chat-avatar">AI</span><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable={phase === 'assets'} showSuggestion={phase === 'assets'}/></article>}
           {phase === 'assets' && !joinAssetsToLastAgentReply && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span>{assetCard}</article>}
           {phase === 'video' && !joinVideoToLastAgentReply && <article className="chat-message agent video-stage-conversation"><span className="chat-avatar">AI</span>{videoCard}</article>}
 

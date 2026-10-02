@@ -37,9 +37,9 @@ function VideoDraft({ job, configured, busy, onStart }: {
   </section>;
 }
 
-export function VideoConversation({ taskId, revision, selected, onToggle, selectable, showSuggestion = false, sourceImageIds }: {
+export function VideoConversation({ taskId, revision, selected, onToggle, selectable, showSuggestion = false, sourceImageIds, jobIds, onJobCreated }: {
   taskId: string; revision: number; selected: string[]; onToggle: (id: string) => void;
-  selectable: boolean; showSuggestion?: boolean; sourceImageIds?: string[];
+  selectable: boolean; showSuggestion?: boolean; sourceImageIds?: string[]; jobIds?: string[]; onJobCreated?: (id: string) => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [configured, setConfigured] = useState(false);
@@ -66,7 +66,13 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
   }, [taskId, revision]);
 
   const sourceKey = sourceImageIds?.join('|') ?? '';
-  const visibleJobs = useMemo(() => sourceKey ? jobs.filter((job) => sourceImageIds?.includes(job.plan.sourceFileId)) : jobs, [jobs, sourceKey, sourceImageIds]);
+  const jobKey = jobIds?.join('|') ?? '';
+  const visibleJobs = useMemo(() => jobIds
+    ? jobs.filter((job) => jobIds.includes(job.id))
+    : (sourceKey ? jobs.filter((job) => sourceImageIds?.includes(job.plan.sourceFileId)) : jobs).slice(0, 1),
+  // The keys keep the memo tied to the chosen round even when the caller creates a new array on render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [jobs, sourceKey, jobKey]);
   const draft = visibleJobs.find((job) => job.status === 'DRAFT');
   const inProgress = visibleJobs.some((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job));
   const results = visibleJobs.filter((job) => job.status === 'SUCCEEDED' && job.videoUrl);
@@ -95,9 +101,10 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode, guidance: guidance.trim(), prompt: customPrompt.trim(), selectedImageIds: sourceImageIds, purpose: 'revision' }),
       });
-      const data = await response.json() as { error?: string };
+      const data = await response.json() as { error?: string; job?: Job };
       if (!response.ok) throw new Error(data.error || '视频提示词准备失败');
       await load();
+      if (data.job?.id) onJobCreated?.(data.job.id);
     } catch (caught) { setError((caught as Error).message); }
     finally { setBusy(false); }
   };
@@ -109,7 +116,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
     return () => window.clearInterval(timer);
   }, [visibleJobs, busy, action]);
 
-  if (!showSuggestion && results.length === 0) return null;
+  if (!showSuggestion && results.length === 0 && !inProgress && !latestFailure) return null;
   return <div className="asset-conversation-card video-results-card">
     {error && <p className="video-inline-error" role="alert">{error}</p>}
     {showPlanner && <section className="video-prompt-choice">

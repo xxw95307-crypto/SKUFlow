@@ -1,7 +1,7 @@
 import type { AgentModelMessage, AgentToolName } from './agent-orchestrator.ts';
 import type { GeneratedAssetKind } from './generated-asset.ts';
 
-export const CONVERSATION_MESSAGE_KINDS = ['text', 'files', 'tool', 'decision', 'listing', 'assets', 'publish'] as const;
+export const CONVERSATION_MESSAGE_KINDS = ['text', 'files', 'tool', 'decision', 'listing', 'assets', 'video', 'publish'] as const;
 export type ConversationMessageKind = (typeof CONVERSATION_MESSAGE_KINDS)[number];
 
 export interface ConversationAttachment {
@@ -39,6 +39,7 @@ export interface ConversationMessage {
   attachments?: ConversationAttachment[];
   items?: ConversationRichItem[];
   assets?: ConversationAssetSnapshot[];
+  videoJobIds?: string[];
   tool?: {
     name: AgentToolName;
     status: 'RUNNING' | 'COMPLETED' | 'FAILED';

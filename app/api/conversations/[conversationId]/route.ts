@@ -66,6 +66,10 @@ function parseMessages(value: unknown): ConversationMessage[] {
         error: typeof asset.error === 'string' ? asset.error.slice(0, 500) : null,
       };
     }) : undefined;
+    const videoJobIds = Array.isArray(row.videoJobIds) ? row.videoJobIds.slice(0, 20).map((id) => {
+      if (typeof id !== 'string' || !/^video_[\w-]+$/.test(id)) throw new Error('视频结果格式无效');
+      return id.slice(0, 100);
+    }) : undefined;
     let tool: ConversationMessage['tool'];
     if (row.tool && typeof row.tool === 'object') {
       const rawTool = row.tool as Record<string, unknown>;
@@ -83,6 +87,7 @@ function parseMessages(value: unknown): ConversationMessage[] {
       ...(attachments?.length ? { attachments } : {}),
       ...(items?.length ? { items } : {}),
       ...(assets?.length ? { assets } : {}),
+      ...(videoJobIds?.length ? { videoJobIds } : {}),
       ...(tool ? { tool } : {}),
     };
   });

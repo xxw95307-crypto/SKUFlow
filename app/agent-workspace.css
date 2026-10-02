@@ -1458,6 +1458,28 @@ body {
 .agent-shell-v2 .joined-action-bubble:has(.video-result) > .video-stage-card { border-top: 0; }
 
 .agent-shell-v2 .video-results-card { display: grid; gap: 16px; }
+.agent-shell-v2 .chat-message.video-round-message:not(.joined-action) > div.rich-message-bubble {
+  width: max-content;
+  max-width: min(820px, calc(100% - 45px));
+}
+.agent-shell-v2 .chat-message.video-round-message:not(.joined-action) .video-results-card {
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.agent-shell-v2 .chat-message.video-round-message:has(.video-result) > div > p {
+  display: none;
+}
+@media (max-width: 700px) {
+  .agent-shell-v2 .chat-message.video-round-message:not(.joined-action) > div.rich-message-bubble {
+    width: calc(100% - 42px);
+    max-width: calc(100% - 42px);
+  }
+}
 .agent-shell-v2 .video-prompt-choice h3 { margin: 0 0 15px; font-size: 18px; color: #233b32; }
 .agent-shell-v2 .video-prompt-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .agent-shell-v2 .video-prompt-options button { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 12px 14px; border: 1px solid #d9e4df; border-radius: 10px; background: #fff; color: #365046; text-align: left; cursor: pointer; }
