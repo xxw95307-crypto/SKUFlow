@@ -689,9 +689,12 @@ body {
 .account-page {
   min-height: 100dvh;
   display: grid;
-  place-items: center;
-  padding: 28px;
-  background: #f5f7f5;
+  place-items: center start;
+  padding: 32px clamp(24px, 8vw, 150px);
+  background-color: #071934;
+  background-image: linear-gradient(90deg, rgba(3, 14, 35, .48), rgba(3, 14, 35, .12) 58%, rgba(3, 14, 35, .02)), url('/login-background.png');
+  background-position: center;
+  background-size: cover;
   color: #252b27;
 }
 
@@ -700,8 +703,18 @@ body {
   padding: 36px;
   border: 1px solid #e2e8e3;
   border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 12px 40px rgba(25,42,31,.05);
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 24px 70px rgba(1, 10, 29, .35);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 700px) {
+  .account-page {
+    place-items: center;
+    padding: 24px 16px;
+    background-position: 64% center;
+  }
+  .account-panel { padding: 28px 24px; }
 }
 
 .account-mark { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 20px; border-radius: 10px; background: #e4f1e9; color: #367c57; font-weight: 800; }
