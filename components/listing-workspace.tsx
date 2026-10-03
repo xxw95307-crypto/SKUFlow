@@ -264,6 +264,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
       <div className="listing-review-actions"><span>整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
     </>}
 
+    {conversation && allApproved && <div className="listing-review-actions"><span>Listing 已确认，可继续选择图片。</span><button className="primary" type="button" onClick={onAssets}>继续到图片选择 →</button></div>}
     {!conversation && <div className="footer-actions"><span>{generatedCount}/{passport?.platformDrafts.length ?? 0} 已生成 · {approvedCount} 已确认</span><button className="primary" type="button" onClick={onAssets} disabled={!allApproved}>全部确认后进入视觉素材 →</button></div>}
   </section>;
 }

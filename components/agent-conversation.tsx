@@ -11,6 +11,7 @@ import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { TaskIntake } from '@/components/task-intake';
+import { TaskTargetEditor } from '@/components/task-target-editor';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
 import { compactAgentModelHistory } from '@/lib/agents/commerce-orchestrator';
 import { restoreConversationAssetSnapshots, snapshotGeneratedImages } from '@/lib/agents/asset-history';
@@ -123,12 +124,12 @@ function currentListingMessage(message: ChatMessage, passport: ProductPassport |
 }
 
 function mediaCheckpoint(messages: ChatMessage[]): string | undefined {
-  return messages.findLast((message) => ['等待素材选择', '图片已确认', '视频生成中', '等待视频确认', '视频阶段已完成', '素材选择已记录'].includes(message.meta ?? ''))?.meta;
+  return messages.findLast((message) => ['等待素材选择', '图片已确认', '视频生成中', '等待视频确认', '视频阶段已完成', '素材选择已记录', '目标已更新'].includes(message.meta ?? ''))?.meta;
 }
 
 function imagesConfirmedFromMessages(messages: ChatMessage[]): boolean {
   const checkpoint = mediaCheckpoint(messages);
-  return Boolean(checkpoint && checkpoint !== '等待素材选择');
+  return Boolean(checkpoint && checkpoint !== '等待素材选择' && checkpoint !== '目标已更新');
 }
 
 function videoStageCompleteFromMessages(messages: ChatMessage[]): boolean {
@@ -136,7 +137,7 @@ function videoStageCompleteFromMessages(messages: ChatMessage[]): boolean {
 }
 
 function imageBriefConfirmedFromMessages(messages: ChatMessage[]): boolean {
-  const latestQuestion = messages.findLastIndex((message) => message.meta === '等待图片需求');
+  const latestQuestion = messages.findLastIndex((message) => message.meta === '等待图片需求' || message.meta === '目标已更新');
   const latestAnswer = messages.findLastIndex((message) => message.meta === '图片需求已确认');
   return latestAnswer >= 0 && latestAnswer > latestQuestion;
 }
@@ -411,6 +412,8 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [targetEditorOpen, setTargetEditorOpen] = useState(false);
+  const targetReturnPhase = useRef<AgentPhase>('resume');
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerFileInput = useRef<HTMLInputElement>(null);
   const modelHistory = useRef<AgentModelMessage[]>([]);
@@ -502,6 +505,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
   const applyConversation = async (conversation: AgentConversationRecord) => {
     setContextOpen(false);
+    setTargetEditorOpen(false);
     failedTurnRef.current = null;
     setCanRetryFailedTurn(false);
     conversationIdRef.current = conversation.id;
@@ -726,6 +730,15 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     const name = call.function.name;
     markToolRun(call, 'RUNNING');
     try {
+      if (name === 'open_target_selection') {
+        if (!currentTask) throw new Error('当前还没有创建商品任务');
+        targetReturnPhase.current = 'resume';
+        setTargetEditorOpen(true);
+        setError(''); setCanRetryFailedTurn(false); failedTurnRef.current = null;
+        setPhase('resume');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, awaitingSelection: true }, checkpoint: true };
+      }
       if (name === 'inspect_chat_attachments') {
         if (attachmentFiles.length === 0) throw new Error('本轮没有可读取的聊天附件');
         setBusyLabel('Agent 正在读取本轮附件…'); setBusyHint('附件会先安全存入你的空间，再交给 Agent 阅读');
@@ -1409,6 +1422,31 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     await runAgentTurn(task, text, { pendingFiles: filesForTurn, allowConversation: phase === 'image_brief' || phase === 'assets' || phase === 'publish' });
   };
 
+  const openTargetEditor = () => {
+    if (!task || publishedCount > 0 || phase === 'processing') return;
+    targetReturnPhase.current = phase === 'error' ? 'resume' : phase;
+    failedTurnRef.current = null;
+    setCanRetryFailedTurn(false);
+    setError('');
+    setContextOpen(false);
+    setPublishOpen(false);
+    setTargetEditorOpen(true);
+    setPhase('resume');
+  };
+
+  const targetEditorSaved = async () => {
+    if (!task) return;
+    const refreshed = await refreshTaskState(task.id);
+    mediaPlanRef.current = null; setMediaPlanReady(false);
+    selectedAssetsRef.current = []; setSelectedAssets([]);
+    imageBriefRef.current = null;
+    setImageBriefCount(null); setImageBriefStyle(''); setImageBriefNotes('');
+    setTargetEditorOpen(false);
+    setPhase('resume');
+    append('agent', `已更新为 ${refreshed.passport.platformDrafts.map((draft) => `${platformNames.get(draft.platformId) ?? draft.platformId} ${draft.market}`).join('、')}。请继续生成新平台的 Listing。`, '目标已更新');
+    await persistConversation(task.id);
+  };
+
   const toggleAsset = (id: string) => {
     if (!id.startsWith('video_') && !generatedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error)) return;
     mediaPlanRef.current=null;setMediaPlanReady(false);
@@ -1530,6 +1568,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         <div><span className="agent-online"><i /> SKUFlow Agent</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? 'AI 上新工作台' : '创建商品上新任务'}</h1></div>
         <div className="agent-topbar-actions">
           {phase !== 'idle' && <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>}
+          {task && publishedCount === 0 && <button className="context-toggle" type="button" disabled={phase === 'processing'} onClick={openTargetEditor}>修改平台/站点</button>}
           {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
           <button className="topbar-new-chat" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span> 新建对话</button>
         </div>
@@ -1585,7 +1624,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'intake' && !joinIntakeToLastAgentReply && intakeCard}
 
-          {phase === 'resume' && task && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
+          {phase === 'resume' && task && !targetEditorOpen && <div className="chat-action-card resume"><div className="resume-symbol">↻</div><div><span>可继续的任务</span><h3>{task.productName}</h3><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join('、')} · {task.markets.join('、')}</p></div><div className="resume-actions"><button className="ghost" type="button" onClick={() => void newConversation()}>新建任务</button><button className="primary" type="button" onClick={resumeTask}>继续处理 →</button></div></div>}
+
+          {targetEditorOpen && task && passport && <TaskTargetEditor key={task.id} taskId={task.id} drafts={passport.platformDrafts} onSaved={targetEditorSaved} onCancel={() => { setTargetEditorOpen(false); setPhase(targetReturnPhase.current); }} />}
 
           {phase === 'processing' && <div className="agent-running-card"><span className="agent-spinner" /><div><b>{busyLabel}</b><small>{busyHint || '正在处理你的要求，完成后会自动展示结果。'}</small></div>{pauseRequested
             ? <em>正在等待当前步骤完成…</em>
@@ -1605,7 +1646,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
           {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>测试交付已完成</small><h3>{publishedCount} 个平台结果已保存</h3><p>任务、商品事实、人工决策和测试结果均已保留追溯信息。</p></div>{task?.platforms.includes('shopify') && <button type="button" onClick={recheckShopify}>重新核对 Shopify</button>}<button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 
-          {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{(canRetryFailedTurn || task) && <button type="button" onClick={resumeTask}>重试当前步骤</button>}</div>}
+          {error && <div className="chat-error" role="alert"><b>任务暂停</b><span>{error}</span>{(canRetryFailedTurn || task) && <button type="button" onClick={resumeTask}>重试当前步骤</button>}{task && publishedCount === 0 && <button type="button" onClick={openTargetEditor}>重新选择平台/站点</button>}</div>}
           <div ref={threadEnd} />
         </section>
 
@@ -1615,6 +1656,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           <div className="context-head"><div><span>任务进度</span><b>{phase === 'complete' ? '已完成' : '进行中'}</b></div><button type="button" aria-label="关闭任务进度" onClick={() => setContextOpen(false)}>×</button></div>
           <ol className="agent-progress">{['接收资料', '商品理解', 'Listing 审核', '视觉选择', '发布交付'].map((label, index) => <li className={index < currentStep || phase === 'complete' ? 'done' : index === currentStep ? 'current' : ''} key={label}><span>{index < currentStep || phase === 'complete' ? '✓' : index + 1}</span><div><b>{label}</b><small>{index < currentStep || phase === 'complete' ? '已完成' : index === currentStep ? '当前阶段' : '由 Agent 继续'}</small></div></li>)}</ol>
           {task && <div className="context-summary"><span>当前商品</span><h3>{task.productName}</h3><div><b>{visibleFacts.length}</b><small>属性</small><b>{openConflictCount}</b><small>冲突</small><b>{approvedCount}</b><small>已审核</small></div><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join(' · ')}</p></div>}
+          {task && publishedCount === 0 && <div className="context-backtrack"><b>返回修改</b><button type="button" disabled={phase === 'processing'} onClick={openTargetEditor}>平台与站点</button>{passport?.platformDrafts.some((draft) => isListingDraftPayload(draft.payload)) && <button type="button" disabled={phase === 'processing'} onClick={() => { setContextOpen(false); setError(''); setPhase('listing'); }}>Listing 审核</button>}{approvedCount === passport?.platformDrafts.length && generatedAssets.some((asset) => asset.kind !== 'VIDEO') && <button type="button" disabled={phase === 'processing'} onClick={() => { setContextOpen(false); setError(''); setPhase('assets'); }}>图片选择</button>}{selectedAssets.some((id) => id.startsWith('asset_')) && <button type="button" disabled={phase === 'processing'} onClick={() => { setContextOpen(false); setError(''); setPhase('video'); }}>视频选择</button>}</div>}
           {passport && <details className="agent-evidence"><summary>查看商品事实与证据</summary><div>{visibleFacts.slice(0, 12).map((fact) => <p key={fact.id}><b>{fact.label}</b><span>{displayValue(fact.value, fact.unit)}</span></p>)}{visibleFacts.length > 12 && <small>还有 {visibleFacts.length - 12} 项属性已收起</small>}</div></details>}
           <div className="context-safety"><span>◈</span><div><b>人工门禁已开启</b><small>冲突与发布永远需要你确认</small></div></div>
           </aside>

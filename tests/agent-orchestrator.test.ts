@@ -146,10 +146,10 @@ test('backtrack tools are injected only when the user expresses the matching int
   const conflicted = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, openConflictCount: 1, resolvedConflictCount: 2 });
   const messages = (text: string) => [{ role: 'user' as const, content: text }];
   // 无回退意图时不注入
-  assert.deepEqual(withBacktrackTools(availableAgentTools(conflicted), messages('型号的真实值是哪一个？X-200 还是 X-300？'), conflicted).map((t) => t.function.name).filter((n) => n.startsWith('re') || n === 'update_task_targets'), []);
-  // 改目标意图注入 update_task_targets
+  assert.deepEqual(withBacktrackTools(availableAgentTools(conflicted), messages('型号的真实值是哪一个？X-200 还是 X-300？'), conflicted).map((t) => t.function.name).filter((n) => n.startsWith('re') || n === 'open_target_selection'), []);
+  // 改目标意图打开选择卡，由商家确认完整的站点配对。
   const targets = withBacktrackTools(availableAgentTools(conflicted), messages('我想重新进行站点以及平台的选择，改成只上 Amazon 和 TikTok Shop'), conflicted);
-  assert.ok(targets.some((t) => t.function.name === 'update_task_targets'));
+  assert.ok(targets.some((t) => t.function.name === 'open_target_selection'));
   // 重新解析意图注入 reparse_sources
   const reparse = withBacktrackTools(availableAgentTools(conflicted), messages('说明文档内容更新了，帮我重新解析一下资料'), conflicted);
   assert.ok(reparse.some((t) => t.function.name === 'reparse_sources'));

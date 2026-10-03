@@ -1,6 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, requiredMediaToolAfterUser } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, requiredMediaToolAfterUser, shouldOpenTargetSelection } from '@/lib/agents/commerce-orchestrator';
 import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
@@ -153,6 +153,16 @@ async function handlePOST(request: Request) {
     const body = await request.json() as RequestBody;
     const messages = parseMessages(body.messages);
     const state = await loadWorkflowState(body);
+    const latestUser = [...messages].reverse().find((message) => message.role === 'user');
+    if (latestUser?.role === 'user' && shouldOpenTargetSelection(latestUser.content, state.taskId, state.publishedDraftCount)) {
+      return Response.json({
+        message: { role: 'assistant', content: null, toolCalls: [{
+          id: `call_target_selection_${crypto.randomUUID()}`, type: 'function',
+          function: { name: 'open_target_selection', arguments: '{}' },
+        }] },
+        model: 'workflow', usage: null, requestId: null, state,
+      });
+    }
     const bindings = getBindings();
     const config = loadBailianConfig(bindings);
     const missing = missingBailianConfig(config);
