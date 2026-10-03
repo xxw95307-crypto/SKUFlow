@@ -6,7 +6,7 @@ export function missingAmazonUsConnection(bindings: Partial<AppBindings>): strin
     AMAZON_SP_API_CLIENT_ID: bindings.AMAZON_SP_API_CLIENT_ID,
     AMAZON_SP_API_CLIENT_SECRET: bindings.AMAZON_SP_API_CLIENT_SECRET,
     AMAZON_SP_API_REFRESH_TOKEN: bindings.AMAZON_SP_API_REFRESH_TOKEN,
-    AMAZON_US_SELLER_ID: bindings.AMAZON_US_SELLER_ID,
+    AMAZON_SELLER_ID: bindings.AMAZON_SELLER_ID || bindings.AMAZON_US_SELLER_ID,
   };
   return Object.entries(required).filter(([, value]) => !value?.trim()).map(([name]) => name);
 }
@@ -14,11 +14,11 @@ export function missingAmazonUsConnection(bindings: Partial<AppBindings>): strin
 /** Single authorized seller for the first live integration; never return this from an API route. */
 export function loadAmazonUsConnection(bindings: Partial<AppBindings>): AmazonUsSellerConnection {
   const missing = missingAmazonUsConnection(bindings);
-  if (missing.length) throw new Error(`尚未连接 Amazon 美国站卖家：缺少 ${missing.join('、')}`);
+  if (missing.length) throw new Error(`尚未连接 Amazon 卖家：缺少 ${missing.join('、')}`);
   return {
     clientId: bindings.AMAZON_SP_API_CLIENT_ID!.trim(),
     clientSecret: bindings.AMAZON_SP_API_CLIENT_SECRET!.trim(),
     refreshToken: bindings.AMAZON_SP_API_REFRESH_TOKEN!.trim(),
-    sellerId: bindings.AMAZON_US_SELLER_ID!.trim(),
+    sellerId: (bindings.AMAZON_SELLER_ID || bindings.AMAZON_US_SELLER_ID)!.trim(),
   };
 }

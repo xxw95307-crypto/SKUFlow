@@ -47,7 +47,7 @@ Amazon 演示审核稿中有一个 **“单独测试此站点沙箱连通性”*
 
 1. 完成美国站专业卖家账户注册，并用主账号在 Seller Central 的 **Apps and Services → Develop Apps** 申请私有 SP-API 开发者身份。
 2. 在开发者资料和应用中申请 **Product Listing** 角色，按 Amazon 审核要求提交真实用途和安全控制信息。
-3. 创建私有应用并自授权，取得 LWA client ID、client secret、refresh token，以及 seller ID。将这些值分别保存在服务端加密环境变量 `AMAZON_SP_API_CLIENT_ID`、`AMAZON_SP_API_CLIENT_SECRET`、`AMAZON_SP_API_REFRESH_TOKEN`、`AMAZON_US_SELLER_ID`，不可写入前端、源码或对话。
+3. 创建私有应用并自授权，取得 LWA client ID、client secret、refresh token，以及 seller ID。将这些值分别保存在服务端加密环境变量 `AMAZON_SP_API_CLIENT_ID`、`AMAZON_SP_API_CLIENT_SECRET`、`AMAZON_SP_API_REFRESH_TOKEN`、`AMAZON_SELLER_ID`，不可写入前端、源码或对话。旧的 `AMAZON_US_SELLER_ID` 仍可兼容使用。
 4. 接通后先读取目标商品类型 Schema，再完成真实字段映射和 `VALIDATION_PREVIEW`；经卖家确认后才提交，并通过 `getListingsItem` 回读状态与问题。
 
 目前本地与已发布网站都只有沙箱凭据，没有第 1–3 步所需的正式卖家授权。第 4 步中的正式字段读取与不落库预校验入口已接入交付页，但在授权前不能真实调用；平台审核界面仍为 Mock，不能触发真实提交。

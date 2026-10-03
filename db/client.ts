@@ -18,6 +18,7 @@ export interface AppBindings {
   AMAZON_SP_API_CLIENT_ID?: string;
   AMAZON_SP_API_CLIENT_SECRET?: string;
   AMAZON_SP_API_REFRESH_TOKEN?: string;
+  AMAZON_SELLER_ID?: string;
   AMAZON_US_SELLER_ID?: string;
   AMAZON_SP_API_SANDBOX_CLIENT_ID?: string;
   AMAZON_SP_API_SANDBOX_CLIENT_SECRET?: string;
