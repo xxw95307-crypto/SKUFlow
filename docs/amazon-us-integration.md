@@ -30,7 +30,9 @@ Amazon 演示审核稿中有一个 **“单独测试此站点沙箱连通性”*
 
 `lib/platforms/amazon-us-product-types.ts` 提供服务端商品类型定义读取器。获得卖家授权、Product Listing 权限和 LWA access token 后，可按商品类型、卖家及变体层级调用 `getDefinitionsProductType`，再下载短期有效的 JSON Schema 文档。读取失败时必须保持 Mock 状态，不得把演示字段当作官方要求。
 
-`lib/platforms/amazon-us-listings.ts` 已封装 LWA refresh token 换取访问令牌、`putListingsItem` 的 `VALIDATION_PREVIEW` 与正式提交，以及 `getListingsItem` 回读。它是服务端传输层，尚未连接到当前 Mock 审核稿或发布按钮：两者之间必须先有官方 Schema 驱动的字段映射、完整校验与卖家确认。没有授权时，不能调用真实预校验或提交。
+`lib/platforms/amazon-us-listings.ts` 已封装 LWA refresh token 换取访问令牌、`putListingsItem` 的 `VALIDATION_PREVIEW` 与正式提交，以及 `getListingsItem` 回读。正式提交和回读仍未连接到发布按钮。
+
+发布交付页新增了独立的 **“读取官方字段并预校验”** 入口。卖家授权齐备后，服务端根据已确认的商品类型和所选站点向正式环境读取卖家专属 Product Type Definitions，下载短期有效的 Schema，列出当前映射中缺少的顶层必填属性和未被官方 Schema 支持的属性，再使用 `mode=VALIDATION_PREVIEW` 检查已确认、已本地化的 Listing。预校验结果只在当前页面展示，不会创建商品，也不会把 Mock 审核稿改标为正式通过。顶层必填字段检查不能覆盖条件规则和嵌套约束；以正式接口返回的问题为准。未接入的官方字段仍需要后续按 Schema 动态填写与映射，不能把这条预校验链路当成完整的真实上架闭环。
 
 ## 后续真实闭环
 
@@ -48,6 +50,6 @@ Amazon 演示审核稿中有一个 **“单独测试此站点沙箱连通性”*
 3. 创建私有应用并自授权，取得 LWA client ID、client secret、refresh token，以及 seller ID。将这些值分别保存在服务端加密环境变量 `AMAZON_SP_API_CLIENT_ID`、`AMAZON_SP_API_CLIENT_SECRET`、`AMAZON_SP_API_REFRESH_TOKEN`、`AMAZON_US_SELLER_ID`，不可写入前端、源码或对话。
 4. 接通后先读取目标商品类型 Schema，再完成真实字段映射和 `VALIDATION_PREVIEW`；经卖家确认后才提交，并通过 `getListingsItem` 回读状态与问题。
 
-目前第 1–3 步尚待账户开通；第 4 步所需的 API 客户端已经实现，但平台审核界面仍为 Mock，不能触发真实提交。
+目前本地与已发布网站都只有沙箱凭据，没有第 1–3 步所需的正式卖家授权。第 4 步中的正式字段读取与不落库预校验入口已接入交付页，但在授权前不能真实调用；平台审核界面仍为 Mock，不能触发真实提交。
 
 资料来源：[SP-API 注册](https://developer-docs.amazon.com/sp-api/lang-en_EN/docs/sp-api-registration-overview)、[Product Type Definitions](https://developer-docs.amazon.com/sp-api/lang-en_EN/docs/retrieve-a-product-type-definition)、[Listing 生命周期](https://developer-docs.amazon.com/sp-api/lang-en_EN/docs/manage-product-listings-guide)。
