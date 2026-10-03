@@ -64,7 +64,6 @@ export function AuthForm({ wechatError = false }: { wechatError?: boolean }) {
 
   return <>
     <h1>{mode === 'register' ? '创建账号' : '欢迎回来'}</h1>
-    <p>登录后，你的上新任务、图片和视频会保存在自己的账号下。</p>
     <div className="auth-tabs" role="tablist" aria-label="登录方式">
       <button type="button" role="tab" aria-selected={mode === 'password'} className={mode === 'password' ? 'active' : ''} onClick={() => { setMode('password'); setError(''); }}>密码登录</button>
       <button type="button" role="tab" aria-selected={mode === 'sms'} className={mode === 'sms' ? 'active' : ''} onClick={() => { setMode('sms'); setError(''); }}>短信登录</button>
@@ -72,26 +71,24 @@ export function AuthForm({ wechatError = false }: { wechatError?: boolean }) {
     </div>
     <form className="auth-form" onSubmit={(event) => void submit(event)}>
       {mode === 'password' && <>
-        <label>用户名或已绑定手机号<input autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} required placeholder="输入用户名或手机号" /></label>
+        <label>用户名或手机号<input autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} required placeholder="输入用户名或手机号" /></label>
         <label>密码<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="输入密码" /></label>
       </>}
       {mode === 'register' && <>
         <label>用户名<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} pattern="[A-Za-z][A-Za-z0-9_]{3,29}" required placeholder="4–30 位字母、数字或下划线" /></label>
         <label>密码<input autoComplete="new-password" type="password" minLength={10} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="至少 10 个字符" /></label>
-        <small className="auth-helper">注册后可在账号页验证并绑定手机号。</small>
       </>}
       {mode === 'sms' && <>
         <label>中国大陆手机号<input autoComplete="tel" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} required placeholder="输入手机号" /></label>
         <label>短信验证码<div className="auth-code-row"><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value)} required placeholder="6 位验证码" /><button type="button" disabled={busy || seconds > 0 || !status.sms} onClick={() => void sendCode()}>{seconds ? `${seconds} 秒` : '获取验证码'}</button></div></label>
-        <small className="auth-helper">首次短信登录会自动创建账号。{!status.sms && '短信服务尚未配置。'}</small>
+        {!status.sms && <small className="auth-helper">短信服务暂不可用</small>}
       </>}
       {wechatError && <p className="auth-error" role="alert">微信授权未完成，请重新尝试。</p>}
       {error && <p className="auth-error" role="alert">{error}</p>}
       {notice && <p className="auth-notice" role="status">{notice}</p>}
-      <button className="account-primary" disabled={busy || (mode === 'sms' && !status.sms)}>{busy ? '请稍候…' : mode === 'register' ? '注册并登录' : '登录 SKUFlow'}</button>
+      <button className="account-primary" disabled={busy || (mode === 'sms' && !status.sms)}>{busy ? '请稍候…' : mode === 'register' ? '注册并登录' : '登录'}</button>
     </form>
-    <div className="auth-divider"><span>其他登录方式</span></div>
-    {status.wechat ? <a className="account-secondary" href="/api/auth/wechat/start">微信扫码登录</a> : <span className="account-secondary auth-disabled">微信扫码登录 · 待配置</span>}
+    {status.wechat && <a className="account-secondary" href="/api/auth/wechat/start">微信扫码登录</a>}
     <a className="account-secondary" href="/signin-with-chatgpt?return_to=/" target="_top">使用 ChatGPT 登录</a>
   </>;
 }

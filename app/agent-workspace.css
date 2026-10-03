@@ -711,6 +711,9 @@ body {
 }
 
 .account-panel-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   padding: clamp(32px, 4vw, 52px);
   background: rgba(255, 255, 255, .96);
   backdrop-filter: blur(14px);
