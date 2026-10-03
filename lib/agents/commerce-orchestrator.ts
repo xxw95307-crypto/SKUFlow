@@ -98,10 +98,10 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   if (parsingReady && !visionReady) names.push('analyze_product_images');
   if (parsingReady && visionReady && state.publishedDraftCount === 0) names.push('merge_product_facts');
   if (state.openConflictCount > 0) names.push('open_conflict_review');
-  if (state.factCount > 0 && state.openConflictCount === 0 && state.generatedDraftCount === 0 && state.publishedDraftCount === 0) {
+  if (state.factCount > 0 && state.openConflictCount === 0 && state.draftCount > 0 && state.generatedDraftCount < state.draftCount && state.publishedDraftCount === 0) {
     names.push('generate_platform_listings');
   }
-  if (state.generatedDraftCount > 0 && !allDraftsApproved) names.push('open_listing_review');
+  if (state.draftCount > 0 && state.generatedDraftCount === state.draftCount && !allDraftsApproved) names.push('open_listing_review');
   if (allDraftsApproved && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_visual_assets');
   if (allDraftsApproved && state.imagesConfirmed && selectedImageCount > 0 && videoJobCount === 0 && !state.videoStageComplete && state.publishedDraftCount === 0 && !state.publishApproved) names.push('generate_product_video');
   if (allDraftsApproved && state.imagesConfirmed && selectedImageCount > 0 && videoJobCount > 0 && state.publishedDraftCount === 0 && !state.publishApproved) names.push('revise_product_video');
@@ -178,6 +178,13 @@ const BACKTRACK_INTENT_PATTERNS: Array<{ pattern: RegExp; tool: AgentToolName }>
 export function shouldOpenTargetSelection(text: string, taskId: string | null, publishedDraftCount: number): boolean {
   return Boolean(taskId) && publishedDraftCount === 0
     && /(?:重新|再|返回|回去|修改|更改|重选|换).{0,12}(?:平台|站点|市场)|(?:平台|站点|市场).{0,12}(?:重新|重选|选错|换|修改)/.test(text);
+}
+
+export function requiredListingStageTool(state: AgentWorkflowState): AgentToolName | null {
+  if (!state.taskId || state.publishedDraftCount > 0 || state.factCount === 0 || state.openConflictCount > 0 || state.draftCount === 0) return null;
+  if (state.generatedDraftCount < state.draftCount) return 'generate_platform_listings';
+  if (state.approvedDraftCount < state.draftCount) return 'open_listing_review';
+  return null;
 }
 
 // 回退能力按用户意图动态注入：平时不占工具列表（保住唯一工具恢复机制），

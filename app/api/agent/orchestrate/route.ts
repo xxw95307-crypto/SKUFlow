@@ -1,6 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, requiredMediaToolAfterUser, shouldOpenTargetSelection } from '@/lib/agents/commerce-orchestrator';
+import { availableAgentTools, withBacktrackTools, withRegenerationTool, buildCommerceOrchestratorPrompt, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, requiredMediaToolAfterUser, shouldOpenTargetSelection, requiredListingStageTool } from '@/lib/agents/commerce-orchestrator';
 import { isReusableVideoJob } from '@/lib/domain/video-job-retry';
 import { callBailianOrchestrator } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
@@ -176,8 +176,12 @@ async function handlePOST(request: Request) {
       : stateTools;
     const candidateTools = withBacktrackTools(withRegenerationTool(targetAwareTools, messages, state), messages, state);
     const requiredNext = requiredMediaToolAfterUser(messages);
+    const listingStage = requiredListingStageTool(state);
+    const hasBacktrack = candidateTools.some((item) => ['reparse_sources', 'reanalyze_images', 'reopen_resolved_conflicts'].includes(item.function.name));
     const tools = requiredNext && candidateTools.some((item) => item.function.name === requiredNext)
       ? candidateTools.filter((item) => item.function.name === requiredNext)
+      : listingStage && !hasBacktrack && candidateTools.some((item) => item.function.name === listingStage)
+        ? candidateTools.filter((item) => item.function.name === listingStage)
       : candidateTools;
     const requireTool = (body.requireAction === true || listingStartRequested) && tools.length > 0;
     const soleTool = soleRequiredAgentTool(tools, requireTool);
@@ -217,7 +221,14 @@ async function handlePOST(request: Request) {
       }];
     }
     if (result.message.toolCalls.length > 0 && toolCalls.length === 0) {
-      return Response.json({ error: 'Agent 请求了当前状态不允许使用的工具' }, { status: 409 });
+      // Model tool names are untrusted output. Ignore an out-of-stage call and
+      // return to the current checkpoint instead of turning a recoverable turn
+      // into a task-wide error.
+      return Response.json({
+        ...result,
+        message: { role: 'assistant', content: '请先完成当前阶段的审核或选择，再继续下一步。', toolCalls: [] },
+        state,
+      });
     }
     return Response.json({ ...result, message: { ...result.message, toolCalls }, state });
   } catch (error) {

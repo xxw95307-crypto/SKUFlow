@@ -118,15 +118,28 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
     if (!task) return;
     setBusy(true); setError(''); setMessage(prefillOnly ? '正在从资料和对话补全缺失信息…' : '正在获取各平台字段，并由 Listing Agent 生成内容…');
     try {
-      const response = await fetch(`/api/tasks/${task.id}/compile-drafts`, { method: 'POST', headers:{'content-type':'application/json'},body:JSON.stringify({prefillOnly}) });
-      const payload = await response.json() as { passport?: ProductPassport; error?: string };
-      if (!response.ok || !payload.passport) throw new Error(payload.error || '多平台 Listing 生成失败');
-      setPassport(payload.passport);
-      onPassportChange?.(payload.passport);
-      setSelectedDraftId(payload.passport.platformDrafts[0]?.id ?? '');
+      let currentPassport = passport;
+      if (!currentPassport) {
+        const response = await fetch(`/api/tasks/${task.id}/passport`);
+        const payload = await response.json() as { passport?: ProductPassport; error?: string };
+        if (!response.ok || !payload.passport) throw new Error(payload.error || '商品档案读取失败');
+        currentPassport = payload.passport;
+      }
+      const ids = currentPassport.platformDrafts.filter((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED').map((draft) => draft.id);
+      let latest = currentPassport;
+      for (let offset = 0; offset < ids.length; offset += 1) {
+        setMessage(`正在生成 Listing：${offset + 1}/${ids.length}`);
+        const response = await fetch(`/api/tasks/${task.id}/compile-drafts`, { method: 'POST', headers:{'content-type':'application/json'},body:JSON.stringify({prefillOnly,draftIds:[ids[offset]]}) });
+        const payload = await response.json() as { passport?: ProductPassport; error?: string };
+        if (!response.ok || !payload.passport) throw new Error(payload.error || '多平台 Listing 生成失败');
+        latest = payload.passport;
+        setPassport(latest);
+        onPassportChange?.(latest);
+      }
+      setSelectedDraftId(latest.platformDrafts[0]?.id ?? '');
       setDraftEdits({});
       setDraftConfirmations({});
-      setMessage(prefillOnly ? '已重新核对资料与对话。有明确依据的缺失项已补全，请核对来源；其余按提示处理。' : `已生成 ${payload.passport.platformDrafts.length} 个平台的中文审校稿，请逐个确认。`);
+      setMessage(prefillOnly ? '已重新核对资料与对话。有明确依据的缺失项已补全，请核对来源；其余按提示处理。' : `已生成 ${latest.platformDrafts.length} 个平台的中文审校稿，请逐个确认。`);
     } catch (caught) {
       setMessage('');
       setError(caught instanceof Error ? caught.message : '多平台 Listing 生成失败');

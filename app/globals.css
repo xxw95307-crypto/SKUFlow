@@ -443,6 +443,7 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .target-editor .platform-choice-grid button { padding:11px; font-size:13px; font-weight:700; }
 .target-editor .choice-row { display:flex; flex-wrap:wrap; gap:7px; }
 .target-editor .choice-row button { padding:8px 11px; border-radius:8px; font-size:12px; }
+.target-editor-clear { margin:0 0 9px; padding:0; border:0; background:none; color:#62816b; font-size:12px; text-decoration:underline; cursor:pointer; }
 .target-editor footer { display:flex; justify-content:flex-end; gap:9px; margin-top:18px; }
 .target-editor footer button { padding:10px 14px; border:1px solid #d8e4dc; border-radius:8px; background:#fff; color:#426454; cursor:pointer; }
 .target-editor footer button.primary { border-color:#4b8969; background:#4b8969; color:#fff; }

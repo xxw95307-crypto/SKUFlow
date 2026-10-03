@@ -55,7 +55,7 @@ export function TaskTargetEditor({ taskId, drafts, onSaved, onCancel }: {
 
   return <section className="target-editor chat-action-card" aria-label="重新选择平台和站点">
     <div className="target-editor-heading"><div><span>返回选择</span><h3>重新选择平台和站点</h3></div><button type="button" onClick={onCancel} disabled={busy} aria-label="关闭选择卡">×</button></div>
-    <p>商品资料和已确认的属性会保留。保存后，原平台的 Listing 审校稿需要重新生成。</p>
+    <p>已选 {selected.filter((target) => target.market).length} 个站点；每个站点会生成一份 Listing。商品资料和已确认的属性会保留，旧审校稿会作废。</p>
     <fieldset><legend>目标平台</legend><div className="platform-choice-grid">{platformRegistry.map((platform) =>
       <button key={platform.id} type="button" className={platforms.includes(platform.id) ? 'selected' : ''} aria-pressed={platforms.includes(platform.id)} disabled={busy} onClick={() => togglePlatform(platform.id)}>{platform.shortName}</button>)}</div></fieldset>
     {platforms.map((platformId) => {
@@ -63,7 +63,8 @@ export function TaskTargetEditor({ taskId, drafts, onSaved, onCancel }: {
       const chosen = selected.filter((target) => target.platformId === platformId && target.market).map((target) => target.market);
       const showAll = expanded.includes(platformId);
       const visible = showAll || options.length <= 12 ? options : options.filter((market, index) => index < 8 || chosen.includes(market));
-      return <fieldset key={platformId}><legend>{platformRegistry.find((platform) => platform.id === platformId)?.shortName ?? platformId} · 目标站点</legend>
+      return <fieldset key={platformId}><legend>{platformRegistry.find((platform) => platform.id === platformId)?.shortName ?? platformId} · 目标站点（已选 {chosen.length} 个）</legend>
+        {chosen.length > 1 && <button className="target-editor-clear" type="button" disabled={busy} onClick={() => setSelected((current) => [...current.filter((target) => target.platformId !== platformId), { platformId, market: '' }])}>清空该平台站点</button>}
         <div className="choice-row">{visible.map((market) => <button key={market} type="button" className={chosen.includes(market) ? 'selected' : ''} aria-pressed={chosen.includes(market)} disabled={busy} onClick={() => toggleMarket(platformId, market)}>{market}</button>)}
           {options.length > 12 && <button type="button" disabled={busy} onClick={() => setExpanded((current) => showAll ? current.filter((id) => id !== platformId) : [...current, platformId])}>{showAll ? '收起' : '更多站点'}</button>}</div>
       </fieldset>;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { availableAgentTools, compactAgentModelHistory, requiredMediaToolAfterUser, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, withBacktrackTools } from '../lib/agents/commerce-orchestrator.ts';
+import { availableAgentTools, compactAgentModelHistory, requiredListingStageTool, requiredMediaToolAfterUser, restrictIntakeToolsForListingRequest, soleRequiredAgentTool, withBacktrackTools } from '../lib/agents/commerce-orchestrator.ts';
 import { callBailianOrchestrator } from '../lib/ai/bailian-client.ts';
 import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 
@@ -88,6 +88,16 @@ test('Bailian orchestrator sends standard function tools and parses one tool cal
   assert.equal(result.message.content, '先读取资料。');
   assert.deepEqual(requestBody?.tool_choice, { type: 'function', function: { name: 'parse_product_sources' } });
   assert.equal(requestBody?.parallel_tool_calls, false);
+});
+
+test('partial multi-market Listing generation must resume generation before review', () => {
+  const partial = state({ parsedFileCount: 2, analyzedImageCount: 1, factCount: 8, draftCount: 10, generatedDraftCount: 2 });
+  assert.equal(requiredListingStageTool(partial), 'generate_platform_listings');
+  assert.ok(availableAgentTools(partial).some((tool) => tool.function.name === 'generate_platform_listings'));
+  assert.ok(!availableAgentTools(partial).some((tool) => tool.function.name === 'open_listing_review'));
+  const ready = { ...partial, generatedDraftCount: 10 };
+  assert.equal(requiredListingStageTool(ready), 'open_listing_review');
+  assert.equal(requiredListingStageTool({ ...ready, approvedDraftCount: 10 }), null);
 });
 
 test('visual requirements are routed through structured Agent tools', () => {

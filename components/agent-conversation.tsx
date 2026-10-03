@@ -574,7 +574,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     }
     const openConflicts = loadedPassport.conflicts.some((item) => item.status === 'OPEN');
     const published = loadedPassport.platformDrafts.some((draft) => draft.status === 'DRAFT_CREATED');
-    const generated = loadedPassport.platformDrafts.some((draft) => isListingDraftPayload(draft.payload));
+    const generated = loadedPassport.platformDrafts.length > 0 && loadedPassport.platformDrafts.every((draft) => isListingDraftPayload(draft.payload));
     const allApproved = loadedPassport.platformDrafts.length > 0 && loadedPassport.platformDrafts.every((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
     const imageSelected = validSelections.some((id) => loadedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO'));
     const imagesConfirmed = imagesConfirmedFromMessages(messagesRef.current);
@@ -705,7 +705,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     if (!state.taskId) return setPhase(state.intakePresented ? 'intake' : 'idle');
     if (state.publishedDraftCount > 0) return setPhase('complete');
     if (state.openConflictCount > 0) return setPhase('conflict');
-    if (state.generatedDraftCount > 0 && state.approvedDraftCount < state.draftCount) return setPhase('listing');
+    if (state.draftCount > 0 && state.generatedDraftCount === state.draftCount && state.approvedDraftCount < state.draftCount) return setPhase('listing');
     if (state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
       return setPhase((state.selectedImageCount ?? state.selectedAssetCount) > 0 && state.imagesConfirmed ? state.videoStageComplete ? 'publish' : 'video' : state.generatedAssetCount > 0 ? 'assets' : 'image_brief');
     }
@@ -892,7 +892,12 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         return { result: { ok: true, reopened: payload.reopened, note: payload.note }, checkpoint: false };
       }
       if (name === 'generate_platform_listings') {
-        setProgressStep(2); setBusyLabel('Agent 正在读取平台字段并创作中文 Listing…'); setBusyHint('按各平台字段要求分别创作，稍后请你统一审校');
+        const latestPassport = await fetchPassport(currentTask.id);
+        const remaining = latestPassport.platformDrafts.filter((draft) => draft.status === 'PLANNED' || Object.keys(draft.payload).length === 0);
+        const nextDraft = remaining[0];
+        setProgressStep(2);
+        setBusyLabel(`Agent 正在生成 Listing（${latestPassport.platformDrafts.length - remaining.length + 1}/${latestPassport.platformDrafts.length}）…`);
+        setBusyHint(nextDraft ? `${platformNames.get(nextDraft.platformId) ?? nextDraft.platformId} · ${nextDraft.market}` : '按目标站点分别创作');
         const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport }>(await fetch(`/api/tasks/${currentTask.id}/compile-drafts`, { method: 'POST' }), '多平台 Listing 生成失败');
         setPassport(payload.passport);
         markToolRun(call, 'COMPLETED');
@@ -1096,7 +1101,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
     pauseRequestedRef.current = false; setPauseRequested(false);
     setPhase('processing'); setBusyLabel('Agent 正在规划下一步…'); setBusyHint('根据任务进度决定接下来解析、理解还是生成'); setError('');
     try {
-      for (let step = 0; step < 10; step += 1) {
+      for (let step = 0; step < 20; step += 1) {
         history = compactAgentModelHistory(history);
         if (pauseRequestedRef.current) {
           modelHistory.current = history;

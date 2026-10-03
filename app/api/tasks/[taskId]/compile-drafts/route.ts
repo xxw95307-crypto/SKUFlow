@@ -7,6 +7,7 @@ import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { loadShopifyDevConfig } from '@/lib/platforms/shopify-dev';
 import { ensureSchema, getBindings } from '@/db/client';
 import { callBailianListingGeneration } from '@/lib/ai/bailian-client';
+import { selectListingDraftBatch } from '@/lib/agents/listing-batch';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import type { DraftValidationIssue, ProductPassport } from '@/lib/domain/product-passport';
 import { compileMockListingDraft, isListingDraftPayload, validateMockListing } from '@/lib/mock-platforms/listing-compiler';
@@ -28,8 +29,11 @@ interface DraftCompileSummary {
 
 async function handlePOST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
-    const body = await request.json().catch(() => ({})) as {prefillOnly?:boolean};
+    const body = await request.json().catch(() => ({})) as {prefillOnly?:boolean;draftIds?:unknown};
     const prefillOnly = body?.prefillOnly === true;
+    if (body.draftIds !== undefined && (!Array.isArray(body.draftIds) || body.draftIds.some((id) => typeof id !== 'string'))) {
+      return Response.json({ error: 'Listing 草稿 ID 格式无效' }, { status: 400 });
+    }
     await ensureSchema();
     const { taskId } = await context.params;
     const bindings = getBindings();
@@ -53,8 +57,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const categoryLabel = typeof categoryFact?.value === 'string' ? categoryFact.value : '通用商品';
     const productNameFact = passport.facts.find((fact) => fact.key === 'product.name' && fact.value !== null && fact.status !== 'CONFLICT');
     const productName = typeof productNameFact?.value === 'string' ? productNameFact.value : task.product_name;
-    const editableDrafts = passport.platformDrafts.filter(d => !['APPROVED','DRAFT_CREATED'].includes(d.status));
-    if (!editableDrafts.length) return Response.json({error:'所有草稿已确认，不能自动改写。'},{status:409});
+    const editableDrafts = selectListingDraftBatch(passport.platformDrafts, body.draftIds as string[] | undefined);
+    if (!editableDrafts.length) return Response.json({error:'没有待生成的 Listing 草稿。'},{status:409});
     const targets = await Promise.all(editableDrafts.map(async (draft) => ({
       draftId: draft.id,
       schema: draft.platformId === 'shopify' ? await fetchShopifyListingSchema(loadShopifyDevConfig(bindings), { market: draft.market, categoryLabel }) : resolveMockListingSchema({
