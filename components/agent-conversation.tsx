@@ -626,7 +626,9 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         if (!active) return;
         setConversations(listed.conversations);
         if (listed.conversations[0]) {
-          const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${listed.conversations[0].id}`), '会话读取失败');
+          const requestedId = new URLSearchParams(window.location.search).get('conversation');
+          const initial = requestedId && /^conversation_[a-zA-Z0-9-]+$/.test(requestedId) ? requestedId : listed.conversations[0].id;
+          const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${initial}`), '会话读取失败');
           if (active) await applyConversation(payload.conversation);
           return;
         }
@@ -1510,6 +1512,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
       <nav className="agent-primary-nav" aria-label="工作区">
         <a className="active" href="#agent-workspace"><span>⌂</span>AI 上新</a>
         <a href="#conversation-list"><span>□</span>任务记录</a>
+        <a href="/batches"><span>▦</span>批量上新</a>
         <button type="button" disabled={phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
       </nav>
       <div className="agent-rail-label">最近对话</div>
