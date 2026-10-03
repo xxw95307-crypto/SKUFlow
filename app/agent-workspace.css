@@ -689,8 +689,8 @@ body {
 .account-page {
   min-height: 100dvh;
   display: grid;
-  place-items: center start;
-  padding: 32px clamp(24px, 8vw, 150px);
+  place-items: center;
+  padding: 32px;
   background-color: #f4f8f4;
   background-image: url('/login-background-oct3.png');
   background-position: center;
@@ -699,26 +699,39 @@ body {
 }
 
 .account-panel {
-  width: min(460px, 100%);
-  padding: 36px;
+  width: min(1400px, 100%);
+  min-height: min(820px, calc(100dvh - 64px));
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  overflow: hidden;
   border: 1px solid rgba(206, 221, 210, .9);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, .94);
-  box-shadow: 0 20px 56px rgba(53, 85, 66, .14);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, .12);
+  box-shadow: 0 24px 70px rgba(53, 85, 66, .16);
+}
+
+.account-panel-content {
+  padding: clamp(32px, 4vw, 52px);
+  background: rgba(255, 255, 255, .96);
   backdrop-filter: blur(14px);
 }
 
-@media (max-width: 700px) {
+@media (max-width: 820px) {
   .account-page {
-    place-items: center;
     padding: 24px 16px;
     background-position: 64% center;
   }
-  .account-panel { padding: 28px 24px; }
+  .account-panel {
+    width: min(560px, 100%);
+    min-height: 0;
+    grid-template-columns: 1fr;
+  }
+  .account-panel-content { padding: 32px 28px; }
+  .account-panel-visual { display: none; }
 }
 
 .account-mark { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 20px; border-radius: 10px; background: #e4f1e9; color: #367c57; font-weight: 800; }
-.account-panel > small { color: #748078; }
+.account-panel-content > small { color: #748078; }
 .account-panel h1 { margin: 8px 0 16px; font-size: 28px; }
 .account-panel p { color: #748078; font-size: 14px; line-height: 1.8; }
 .account-panel dl { margin: 24px 0; font-size: 14px; }

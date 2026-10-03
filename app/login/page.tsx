@@ -7,7 +7,10 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
   const account = await currentAccount();
   const { error } = await searchParams;
   return <main className="account-page"><section className="account-panel">
-    <span className="account-mark">S</span><small>SKUFlow AI</small>
-    {account ? <AccountProfile account={account} /> : <AuthForm wechatError={Boolean(error)} />}
+    <div className="account-panel-content">
+      <span className="account-mark">S</span><small>SKUFlow AI</small>
+      {account ? <AccountProfile account={account} /> : <AuthForm wechatError={Boolean(error)} />}
+    </div>
+    <div className="account-panel-visual" aria-hidden="true" />
   </section></main>;
 }
