@@ -1622,7 +1622,6 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             </div>
             <div className="ready-prompt-title">从常用任务开始</div>
             <div className="agent-starters" aria-label="快速开始">
-              <a className="batch-starter" href="/batches"><span>▦</span><b>批量上新多款商品</b><small>每款商品一个文件夹，统一导入后逐款审核与交付</small><em>打开批量工作台 →</em></a>
               <button type="button" onClick={() => setComposer('我想上新一款商品')}><span>＋</span><b>上新一款商品</b><small>上传商品资料，由 Agent 完成多平台上新流程</small></button>
               <button type="button" onClick={() => setComposer('请帮我检查这份商品资料')}><span>◎</span><b>分析商品资料</b><small>提取属性，并识别图片与文档中的事实冲突</small></button>
               <button type="button" onClick={() => setComposer('我想了解不同平台的 Listing 要求')}><span>▤</span><b>咨询平台规则</b><small>了解平台字段、内容规范与发布限制</small></button>
