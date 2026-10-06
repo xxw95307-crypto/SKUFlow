@@ -29,7 +29,7 @@ function useCooldown() {
   return [seconds, setSeconds] as const;
 }
 
-export function AuthForm({ wechatError = false }: { wechatError?: boolean }) {
+export function AuthForm({ wechatError = false, next = '/' }: { wechatError?: boolean; next?: string }) {
   const [mode, setMode] = useState<Mode>('password');
   const [identifier, setIdentifier] = useState('');
   const [username, setUsername] = useState('');
@@ -48,7 +48,7 @@ export function AuthForm({ wechatError = false }: { wechatError?: boolean }) {
       if (mode === 'register') await postJson('/api/auth/register', { username, password });
       else if (mode === 'password') await postJson('/api/auth/password-login', { identifier, password });
       else await postJson('/api/auth/sms-login', { phone, code });
-      window.location.assign('/');
+      window.location.assign(next === '/batches' ? '/batches' : '/');
     } catch (caught) { setError((caught as Error).message); }
     finally { setBusy(false); }
   };
@@ -89,7 +89,7 @@ export function AuthForm({ wechatError = false }: { wechatError?: boolean }) {
       <button className="account-primary" disabled={busy || (mode === 'sms' && !status.sms)}>{busy ? '请稍候…' : mode === 'register' ? '注册并登录' : '登录'}</button>
     </form>
     {status.wechat && <a className="account-secondary" href="/api/auth/wechat/start">微信扫码登录</a>}
-    <a className="account-secondary" href="/signin-with-chatgpt?return_to=/" target="_top">使用 ChatGPT 登录</a>
+    <a className="account-secondary" href={`/signin-with-chatgpt?return_to=${encodeURIComponent(next === '/batches' ? next : '/')}`} target="_top">使用 ChatGPT 登录</a>
   </>;
 }
 

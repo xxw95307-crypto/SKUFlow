@@ -5,6 +5,6 @@ import { BatchWorkspace } from '@/components/batch-workspace';
 export const dynamic = 'force-dynamic';
 
 export default async function BatchesPage() {
-  if (!await currentAccount()) redirect('/login');
+  if (!await currentAccount()) redirect('/login?next=%2Fbatches');
   return <BatchWorkspace />;
 }
