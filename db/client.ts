@@ -43,6 +43,19 @@ export async function ensureSchema(): Promise<void> {
     schemaPromise = (async () => {
       const { DB } = getBindings();
       await DB.batch(schemaStatements.map((statement) => DB.prepare(statement)));
+      // Older local previews created a row-based batch schema. CREATE TABLE IF NOT
+      // EXISTS leaves that schema untouched, so bring its columns forward in place.
+      const jobColumns = (await DB.prepare('PRAGMA table_info(batch_jobs)').all<{ name: string }>()).results.map((column) => column.name);
+      if (!jobColumns.includes('source_label')) {
+        await DB.prepare("ALTER TABLE batch_jobs ADD COLUMN source_label TEXT NOT NULL DEFAULT ''").run();
+        if (jobColumns.includes('source_filename')) {
+          await DB.prepare("UPDATE batch_jobs SET source_label=source_filename WHERE source_label=''").run();
+        }
+      }
+      const itemColumns = (await DB.prepare('PRAGMA table_info(batch_items)').all<{ name: string }>()).results.map((column) => column.name);
+      if (!itemColumns.includes('last_error')) {
+        await DB.prepare('ALTER TABLE batch_items ADD COLUMN last_error TEXT').run();
+      }
       await DB.prepare('PRAGMA optimize').run();
     })().catch((error) => {
       schemaPromise = null;

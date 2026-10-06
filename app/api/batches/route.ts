@@ -13,14 +13,19 @@ function safeName(name: string): string {
 }
 
 async function handleGET() {
-  await ensureSchema();
-  const { DB } = getBindings();
-  const user = (await currentAccount())!;
-  const result = await DB.prepare(`SELECT b.id,b.name,b.source_label,b.created_at,
-    (SELECT COUNT(*) FROM batch_items i WHERE i.batch_id=b.id) AS item_count
-    FROM batch_jobs b WHERE b.user_id=? ORDER BY b.created_at DESC LIMIT 30`).bind(user.id)
-    .all<{ id: string; name: string; source_label: string; created_at: string; item_count: number }>();
-  return Response.json({ batches: result.results.map((row) => ({ id: row.id, name: row.name, sourceLabel: row.source_label, createdAt: row.created_at, itemCount: row.item_count })) });
+  try {
+    await ensureSchema();
+    const { DB } = getBindings();
+    const user = (await currentAccount())!;
+    const result = await DB.prepare(`SELECT b.id,b.name,b.source_label,b.created_at,
+      (SELECT COUNT(*) FROM batch_items i WHERE i.batch_id=b.id) AS item_count
+      FROM batch_jobs b WHERE b.user_id=? ORDER BY b.created_at DESC LIMIT 30`).bind(user.id)
+      .all<{ id: string; name: string; source_label: string; created_at: string; item_count: number }>();
+    return Response.json({ batches: result.results.map((row) => ({ id: row.id, name: row.name, sourceLabel: row.source_label, createdAt: row.created_at, itemCount: row.item_count })) });
+  } catch (error) {
+    console.error('Batch list failed', error);
+    return Response.json({ error: '批量任务读取失败，请重新加载' }, { status: 500 });
+  }
 }
 
 async function handlePOST(request: Request) {
@@ -47,8 +52,14 @@ async function handlePOST(request: Request) {
     const batchId = `batch_${crypto.randomUUID()}`;
     const platforms = [...new Set(targets.map((target) => target.platformId))];
     const markets = [...new Set(targets.map((target) => target.market))];
-    const writes: D1PreparedStatement[] = [DB.prepare('INSERT INTO batch_jobs (id,user_id,name,source_label,targets_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-      .bind(batchId, user.id, name, folder.root, JSON.stringify(targets), now, now)];
+    const jobColumns = (await DB.prepare('PRAGMA table_info(batch_jobs)').all<{ name: string }>()).results.map((column) => column.name);
+    const legacyColumns = jobColumns.includes('source_filename') && jobColumns.includes('source_sheet');
+    const jobWrite = legacyColumns
+      ? DB.prepare('INSERT INTO batch_jobs (id,user_id,name,source_label,source_filename,source_sheet,targets_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .bind(batchId, user.id, name, folder.root, folder.root, '', JSON.stringify(targets), now, now)
+      : DB.prepare('INSERT INTO batch_jobs (id,user_id,name,source_label,targets_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(batchId, user.id, name, folder.root, JSON.stringify(targets), now, now);
+    const writes: D1PreparedStatement[] = [jobWrite];
 
     for (const [position, product] of folder.products.entries()) {
       const taskId = `task_${crypto.randomUUID()}`;

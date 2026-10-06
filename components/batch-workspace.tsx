@@ -38,6 +38,7 @@ export function BatchWorkspace() {
   const [batchName, setBatchName] = useState('');
   const [targets, setTargets] = useState<Target[]>([{ platformId: 'shopify', market: '美国' }]);
   const [batches, setBatches] = useState<BatchListItem[]>([]);
+  const [batchesLoaded, setBatchesLoaded] = useState(false);
   const [batch, setBatch] = useState<BatchSummary | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -52,6 +53,7 @@ export function BatchWorkspace() {
       try {
         const list = await api<{ batches: BatchListItem[] }>('/api/batches');
         setBatches(list.batches);
+        setBatchesLoaded(true);
         const wanted = new URLSearchParams(window.location.search).get('id');
         const id = list.batches.find((item) => item.id === wanted)?.id ?? list.batches[0]?.id;
         if (id) setBatch((await api<{ batch: BatchSummary }>(`/api/batches/${id}`)).batch);
@@ -239,7 +241,7 @@ export function BatchWorkspace() {
   return <main className="batch-page">
     <header className="batch-topbar"><Link href="/" className="batch-brand"><span>S</span> SKUFlow</Link><Link href="/">返回 AI 上新</Link></header>
     <div className="batch-layout">
-      <aside className="batch-sidebar"><div className="batch-sidebar-head"><b>批量任务</b><small>{batches.length} 批</small></div>
+      <aside className="batch-sidebar"><div className="batch-sidebar-head"><b>批量任务</b><small>{batchesLoaded ? `${batches.length} 批` : error ? '读取失败' : '读取中'}</small></div>
         {batches.map((item) => <button type="button" key={item.id} className={batch?.id === item.id ? 'selected' : ''} onClick={() => { void refreshBatch(item.id); window.history.replaceState({}, '', `/batches?id=${item.id}`); }}><b>{item.name}</b><small>{item.itemCount} 款商品 · {new Date(item.createdAt).toLocaleDateString('zh-CN')}</small></button>)}
       </aside>
       <section className="batch-main">
@@ -260,7 +262,7 @@ export function BatchWorkspace() {
             <button className="batch-primary" type="button" disabled={!!busy} onClick={() => void createBatch()}>{busy === 'creating' ? '正在导入…' : '创建批量任务'}</button>
           </>}
         </section>
-        {error && <p className="batch-error">{error}</p>}
+        {error && <p className="batch-error">{error}{!batchesLoaded && <button type="button" onClick={() => window.location.reload()}>重新加载</button>}</p>}
         {batch && counts && <section className="batch-board"><div className="batch-board-head"><div><span>当前批次</span><h2>{batch.name}</h2><small>{batch.sourceLabel} · {batch.targets.map((target) => `${target.platformId} ${target.market}`).join('、')}</small></div><button type="button" onClick={() => void refreshBatch(batch.id)}>刷新状态</button></div>
           <div className="batch-stats"><div><b>{counts.total}</b><span>商品</span></div><div><b>{counts.attention}</b><span>待人工处理</span></div><div><b>{counts.ready}</b><span>可交付</span></div><div><b>{counts.delivered}</b><span>已交付</span></div></div>
           <div className="batch-actions"><button type="button" disabled={!!busy || !batch.items.some((item) => ['NEW','PROCESSING','FAILED'].includes(item.stage))} onClick={() => void processBatch()}>分析未完成商品</button><button type="button" disabled={!!busy || !counts.attention} onClick={() => void prepareBulkReview()}>查看可批量审核项</button><button className="batch-primary" type="button" disabled={!!busy || !counts.ready} onClick={() => void publishBatch()}>交付已审核商品（{counts.ready}）</button>{busy && <button type="button" onClick={() => { stopRequested.current = true; }}>当前商品完成后停止</button>}</div>
