@@ -538,6 +538,37 @@ body {
   background: var(--sf-paper);
 }
 
+.agent-shell-v2[data-workspace="batch"] .agent-main {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.agent-shell-v2 [hidden] {
+  display: none !important;
+}
+
+.agent-shell-v2 .agent-batch-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-shell-v2 .topbar-batch-switch {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--sf-line-strong);
+  border-radius: 7px;
+  background: var(--sf-paper);
+  color: var(--sf-accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.agent-shell-v2 .topbar-batch-switch:hover {
+  border-color: var(--sf-accent);
+  background: var(--sf-accent-soft);
+}
+
 .agent-shell-v2 .agent-topbar {
   position: relative;
   z-index: 20;
@@ -2134,6 +2165,18 @@ body {
   }
 
   .agent-shell-v2 .agent-primary-nav .active span {
+    font-size: 16px;
+  }
+
+  .agent-shell-v2 .agent-primary-nav button {
+    display: flex;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .agent-shell-v2 .agent-primary-nav button span {
+    display: block;
     font-size: 16px;
   }
 

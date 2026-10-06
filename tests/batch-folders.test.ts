@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { groupBatchFolders } from '../lib/domain/batch-folders.ts';
+import { groupBatchFolders, uploadedFilename } from '../lib/domain/batch-folders.ts';
 import { classifyBatchItem } from '../lib/server/batch-store.ts';
+
+test('accepts either a basename or the matching folder path from multipart uploads', () => {
+  const path = '夏季新品/03_粉色T恤/参考图.jpg';
+  assert.equal(uploadedFilename('参考图.jpg', path), '参考图.jpg');
+  assert.equal(uploadedFilename(path, path), '参考图.jpg');
+  assert.throws(() => uploadedFilename('夏季新品/另一商品/参考图.jpg', path), /文件路径与名称不一致/);
+  assert.throws(() => uploadedFilename('别的图片.jpg', path), /文件路径与名称不一致/);
+});
 
 test('groups each product folder without splitting its spreadsheet rows', () => {
   const grouped = groupBatchFolders([

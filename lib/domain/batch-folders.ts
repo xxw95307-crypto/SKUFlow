@@ -4,6 +4,16 @@ export interface BatchProductFolder { name: string; files: BatchFolderFile[] }
 const allowedExtensions = new Set(['jpg', 'jpeg', 'png', 'webp', 'pdf', 'xlsx', 'xls', 'csv', 'txt']);
 const spreadsheetExtensions = new Set(['xlsx', 'xls', 'csv']);
 
+export function uploadedFilename(name: string, relativePath: string): string {
+  const normalizedName = name.replace(/\\/g, '/');
+  const normalizedPath = relativePath.replace(/\\/g, '/');
+  const basename = normalizedPath.split('/').at(-1) || '';
+  if (!basename || (normalizedName !== basename && normalizedName !== normalizedPath)) {
+    throw new Error(`文件路径与名称不一致：${relativePath}`);
+  }
+  return basename;
+}
+
 export function groupBatchFolders(files: readonly BatchFolderFile[]): { root: string; products: BatchProductFolder[] } {
   if (files.length < 2 || files.length > 100) throw new Error('每批请上传 2–100 个资料文件');
   const groups = new Map<string, BatchFolderFile[]>();

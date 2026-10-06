@@ -11,14 +11,17 @@ import { getProductPassport } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
 
-async function handlePOST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ taskId: string }> }) {
   try {
+    const body = await request.json().catch(() => ({})) as { draftId?: unknown };
+    if (body.draftId !== undefined && typeof body.draftId !== 'string') return Response.json({ error: 'Listing 草稿 ID 格式无效' }, { status: 400 });
     await ensureSchema();
     const { taskId } = await context.params;
     const bindings = getBindings();
     const passport = await getProductPassport(bindings.DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
-    const drafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload));
+    const drafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload)
+      && (body.draftId === undefined || draft.id === body.draftId));
     if (!drafts.length) return Response.json({ error: '没有等待发布的已确认 Listing' }, { status: 409 });
     const requiresModel = drafts.some((draft) => !isChineseLocale(marketLocale(draft.market).locale));
     const config = loadBailianConfig(bindings);

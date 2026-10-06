@@ -31,7 +31,7 @@ export function normalizeMarket(market: string): string {
 }
 
 export function validatePlatformTargets(targets: readonly PlatformTarget[]): PlatformTarget[] {
-  if (!targets.length || targets.length > 24) throw new Error('请选择 1-24 个平台与站点组合');
+  if (!targets.length) throw new Error('请至少选择一个平台与站点组合');
   const seen = new Set<string>();
   return targets.map(({ platformId, market }) => {
     const normalized = normalizeMarket(market);

@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
+import { BatchWorkspace } from '@/components/batch-workspace';
 import { TaskIntake } from '@/components/task-intake';
 import { TaskTargetEditor } from '@/components/task-target-editor';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
@@ -370,8 +371,10 @@ function listingTitle(payload: ListingDraftPayload): string {
   return '中文 Listing 已生成';
 }
 
-export function AgentConversation({ account }: { account: AccountIdentity }) {
+export function AgentConversation({ account, initialWorkspace = 'agent' }: { account: AccountIdentity; initialWorkspace?: 'agent' | 'batch' }) {
   const avatar = Array.from(account.name)[0]?.toUpperCase() || "用";
+  const [workspace, setWorkspace] = useState<'agent' | 'batch'>(initialWorkspace);
+  const [batchOpened, setBatchOpened] = useState(initialWorkspace === 'batch');
   const [phase, setPhase] = useState<AgentPhase>('loading');
   const [progressStep, setProgressStep] = useState(0);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
@@ -427,6 +430,26 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'image_brief' || phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
+
+  useEffect(() => {
+    const syncWorkspace = () => {
+      const next = window.location.pathname === '/batches' ? 'batch' : 'agent';
+      setWorkspace(next);
+      if (next === 'batch') setBatchOpened(true);
+    };
+    window.addEventListener('popstate', syncWorkspace);
+    return () => window.removeEventListener('popstate', syncWorkspace);
+  }, []);
+
+  const showWorkspace = (next: 'agent' | 'batch') => {
+    setWorkspace(next);
+    if (next === 'batch') setBatchOpened(true);
+    setContextOpen(false);
+    setPublishOpen(false);
+    setItemMenu(null);
+    const destination = next === 'batch' ? '/batches' : '/';
+    if (window.location.pathname !== destination) window.history.pushState({}, '', destination);
+  };
 
   useEffect(() => {
     if (!publishOpen || !task || !passport) return;
@@ -1506,14 +1529,14 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
             ? '视频不满意可以直接描述修改要求...'
           : '直接告诉 Agent 你的要求...';
 
-  return <main className="agent-shell agent-shell-v2" style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
+  return <main className="agent-shell agent-shell-v2" data-workspace={workspace} style={{ '--agent-rail-width': `${railWidth}px` } as CSSProperties}>
     <aside className="agent-rail" aria-label="SKUFlow 导航">
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
       <nav className="agent-primary-nav" aria-label="工作区">
-        <a className="active" href="#agent-workspace"><span>⌂</span>AI 上新</a>
-        <a href="#conversation-list"><span>□</span>任务记录</a>
-        <a href="/batches"><span>▦</span>批量上新</a>
-        <button type="button" disabled={phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
+        <button type="button" className={workspace === 'agent' ? 'active' : ''} aria-current={workspace === 'agent' ? 'page' : undefined} onClick={() => showWorkspace('agent')}><span>⌂</span>AI 上新</button>
+        <button type="button" onClick={() => showWorkspace('agent')}><span>□</span>任务记录</button>
+        <button type="button" className={workspace === 'batch' ? 'active' : ''} aria-current={workspace === 'batch' ? 'page' : undefined} onClick={() => showWorkspace('batch')}><span>▦</span>批量上新</button>
+        <button type="button" disabled={workspace === 'batch' || phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
       </nav>
       <div className="agent-rail-label">最近对话</div>
       <div className="conversation-list" id="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
@@ -1522,7 +1545,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
           <button className="conversation-action" type="submit" title="确认重命名" aria-label="确认重命名"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2Z"/></svg></button>
           <button className="conversation-action" type="button" title="取消" aria-label="取消重命名" onClick={() => setRenamingId(null)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12Z"/></svg></button>
         </form> : <>
-          <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void loadConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
+          <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => { showWorkspace('agent'); void loadConversation(item.id); }}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
           <div className="conversation-actions">
             <button className="conversation-action" type="button" disabled={phase === 'processing'} title="更多操作" aria-label={`会话操作：${item.title}`} aria-haspopup="menu" onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setItemMenu({ id: item.id, x: rect.right, y: rect.bottom }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg></button>
           </div>
@@ -1573,17 +1596,20 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
 
     <section className="agent-main" id="agent-workspace">
       <header className="agent-topbar">
-        <div><span className="agent-online"><i /> SKUFlow Agent</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? 'AI 上新工作台' : '创建商品上新任务'}</h1></div>
+        <div><span className="agent-online"><i /> SKUFlow Agent</span><h1>{workspace === 'batch' ? '批量上新' : task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? 'AI 上新工作台' : '创建商品上新任务'}</h1></div>
         <div className="agent-topbar-actions">
-          <a className="topbar-batch" href="/batches">批量上新 →</a>
-          {phase !== 'idle' && <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>}
-          {task && publishedCount === 0 && <button className="context-toggle" type="button" disabled={phase === 'processing'} onClick={openTargetEditor}>修改平台/站点</button>}
-          {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
-          <button className="topbar-new-chat" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span> 新建对话</button>
+          {workspace === 'batch' ? <button className="topbar-batch-switch" type="button" onClick={() => showWorkspace('agent')}>返回 AI 上新</button> : <>
+            <button className="topbar-batch-switch" type="button" onClick={() => showWorkspace('batch')}>批量上新 →</button>
+            {phase !== 'idle' && <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>}
+            {task && publishedCount === 0 && <button className="context-toggle" type="button" disabled={phase === 'processing'} onClick={openTargetEditor}>修改平台/站点</button>}
+            {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
+            <button className="topbar-new-chat" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span> 新建对话</button>
+          </>}
         </div>
       </header>
 
-      <div className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
+      {batchOpened && <div className="agent-batch-panel" hidden={workspace !== 'batch'}><BatchWorkspace embedded onOpenConversation={(id) => { showWorkspace('agent'); window.history.replaceState({}, '', `/?conversation=${id}`); void loadConversation(id); }} /></div>}
+      <div hidden={workspace === 'batch'} className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
           {!showWelcomeWorkspace && messages.map((message, index) => {
@@ -1672,7 +1698,7 @@ export function AgentConversation({ account }: { account: AccountIdentity }) {
         </>}
       </div>
 
-      {!showWelcomeWorkspace && <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
+      {!showWelcomeWorkspace && <footer hidden={workspace === 'batch'} className={`agent-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
         <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
         {composerAttachments}
         <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务，资料需在任务创建前提供' : '添加图片、表格或文档（可一次选多个，也可以直接拖进输入框）'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>

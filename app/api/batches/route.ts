@@ -1,15 +1,19 @@
 import { currentAccount, withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { groupBatchFolders } from '@/lib/domain/batch-folders';
+import { groupBatchFolders, uploadedFilename } from '@/lib/domain/batch-folders';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
 import { createInitialProductPassport } from '@/lib/domain/product-passport';
-import { prepareInitialPassportWrites } from '@/lib/server/passport-store';
 import { validatePlatformTargets, type PlatformTarget } from '@/lib/platforms/market-options';
 
 export const dynamic = 'force-dynamic';
 
 function safeName(name: string): string {
   return name.normalize('NFKC').replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(-100) || 'source';
+}
+
+function prepareJsonInsert(DB: D1Database, table: string, columns: readonly string[], rows: readonly Record<string, unknown>[]): D1PreparedStatement {
+  const values = columns.map((column) => `json_extract(value, '$.${column}')`).join(',');
+  return DB.prepare(`INSERT INTO ${table} (${columns.join(',')}) SELECT ${values} FROM json_each(?)`).bind(JSON.stringify(rows));
 }
 
 async function handleGET() {
@@ -40,13 +44,14 @@ async function handlePOST(request: Request) {
     if (!Array.isArray(paths) || paths.length !== files.length || paths.some((path) => typeof path !== 'string')) {
       return Response.json({ error: '文件夹路径与上传文件不匹配' }, { status: 400 });
     }
-    const folder = groupBatchFolders(files.map((file, index) => ({ index, name: file.name, relativePath: paths[index], size: file.size })));
+    const folder = groupBatchFolders(files.map((file, index) => ({
+      index, name: uploadedFilename(file.name, paths[index]), relativePath: paths[index], size: file.size,
+    })));
     const rawTargets = JSON.parse(String(form.get('targets') || '[]')) as unknown;
     if (!Array.isArray(rawTargets) || rawTargets.some((target) => !target || typeof target !== 'object' || typeof target.platformId !== 'string' || typeof target.market !== 'string')) {
       return Response.json({ error: '平台站点选择无效' }, { status: 400 });
     }
     const targets = validatePlatformTargets(rawTargets as PlatformTarget[]);
-    if (targets.length > 4) return Response.json({ error: '批量任务一次最多选择 4 个平台站点组合' }, { status: 400 });
     const name = String(form.get('name') || folder.root).trim().slice(0, 80) || folder.root;
     const now = new Date().toISOString();
     const batchId = `batch_${crypto.randomUUID()}`;
@@ -59,7 +64,14 @@ async function handlePOST(request: Request) {
         .bind(batchId, user.id, name, folder.root, folder.root, '', JSON.stringify(targets), now, now)
       : DB.prepare('INSERT INTO batch_jobs (id,user_id,name,source_label,targets_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
         .bind(batchId, user.id, name, folder.root, JSON.stringify(targets), now, now);
-    const writes: D1PreparedStatement[] = [jobWrite];
+    const taskRows: Record<string, unknown>[] = [];
+    const ownerRows: Record<string, unknown>[] = [];
+    const eventRows: Record<string, unknown>[] = [];
+    const fileRows: Record<string, unknown>[] = [];
+    const passportRows: Record<string, unknown>[] = [];
+    const draftRows: Record<string, unknown>[] = [];
+    const conversationRows: Record<string, unknown>[] = [];
+    const itemRows: Record<string, unknown>[] = [];
 
     for (const [position, product] of folder.products.entries()) {
       const taskId = `task_${crypto.randomUUID()}`;
@@ -69,29 +81,32 @@ async function handlePOST(request: Request) {
       for (const item of product.files) {
         const file = files[item.index];
         const id = `file_${crypto.randomUUID()}`;
-        const key = `tasks/${taskId}/source/${id}-${safeName(file.name)}`;
+        const key = `tasks/${taskId}/source/${id}-${safeName(item.name)}`;
         const type = file.type || 'application/octet-stream';
-        await UPLOADS.put(key, file.stream(), { httpMetadata: { contentType: type }, customMetadata: { taskId, fileId: id, originalName: file.name } });
+        await UPLOADS.put(key, file.stream(), { httpMetadata: { contentType: type }, customMetadata: { taskId, fileId: id, originalName: item.name } });
         storedKeys.push(key);
-        storedFiles.push({ id, name: file.name, key, type, size: file.size });
+        storedFiles.push({ id, name: item.name, key, type, size: file.size });
       }
-      writes.push(
-        DB.prepare('INSERT INTO tasks (id,product_name,status,markets_json,platforms_json,created_at,updated_at) VALUES (?, ?,\'CREATED\',?,?,?,?)')
-          .bind(taskId, PENDING_PRODUCT_NAME, JSON.stringify(markets), JSON.stringify(platforms), now, now),
-        DB.prepare("INSERT INTO resource_owners (kind,resource_id,user_id) VALUES ('task',?,?)").bind(taskId, user.id),
-        DB.prepare("INSERT INTO task_events (task_id,from_status,to_status,actor,note,created_at) VALUES (?,NULL,'CREATED','user',?,?)")
-          .bind(taskId, `来自批量导入：${product.name}`, now),
-        ...storedFiles.map((file) => DB.prepare('INSERT INTO task_files (id,task_id,filename,object_key,content_type,size,status,created_at) VALUES (?,?,?,?,?, ?,\'STORED\',?)')
-          .bind(file.id, taskId, file.name, file.key, file.type, file.size, now)),
-        ...prepareInitialPassportWrites(DB, passport),
-        DB.prepare("INSERT INTO agent_conversations (id,task_id,title,status,messages_json,model_history_json,tool_runs_json,selected_assets_json,created_at,updated_at) VALUES (?,?,?,'ACTIVE',?,'[]','[]','[]',?,?)")
-          .bind(conversationId, taskId, product.name, JSON.stringify([{ id: `message_${crypto.randomUUID()}`, role: 'agent', text: `已导入 ${product.name} 的资料。请在此确认冲突、审核 Listing 和选择素材。`, meta: '批量任务' }]), now, now),
-        DB.prepare("INSERT INTO resource_owners (kind,resource_id,user_id) VALUES ('conversation',?,?)").bind(conversationId, user.id),
-        DB.prepare('INSERT INTO batch_items (batch_id,task_id,conversation_id,row_number,sku,product_name) VALUES (?,?,?,?,?,?)')
-          .bind(batchId, taskId, conversationId, position + 1, product.name, product.name),
-      );
+      taskRows.push({ id: taskId, product_name: PENDING_PRODUCT_NAME, status: 'CREATED', markets_json: JSON.stringify(markets), platforms_json: JSON.stringify(platforms), created_at: now, updated_at: now });
+      ownerRows.push({ kind: 'task', resource_id: taskId, user_id: user.id }, { kind: 'conversation', resource_id: conversationId, user_id: user.id });
+      eventRows.push({ task_id: taskId, from_status: null, to_status: 'CREATED', actor: 'user', note: `来自批量导入：${product.name}`, created_at: now });
+      fileRows.push(...storedFiles.map((file) => ({ id: file.id, task_id: taskId, filename: file.name, object_key: file.key, content_type: file.type, size: file.size, status: 'STORED', created_at: now })));
+      passportRows.push({ id: passport.id, task_id: taskId, version: passport.version, status: passport.status, locked_at: passport.lockedAt, created_at: now, updated_at: now });
+      draftRows.push(...passport.platformDrafts.map((draft) => ({ id: draft.id, task_id: taskId, passport_id: passport.id, platform_id: draft.platformId, market: draft.market, locale: draft.locale, category_id: draft.categoryId, status: draft.status, schema_version: draft.schemaVersion, payload_json: JSON.stringify(draft.payload), validation_json: JSON.stringify(draft.validationIssues), created_at: now, updated_at: now })));
+      conversationRows.push({ id: conversationId, task_id: taskId, title: product.name, status: 'ACTIVE', messages_json: JSON.stringify([{ id: `message_${crypto.randomUUID()}`, role: 'agent', text: `已导入 ${product.name} 的资料。请在此确认冲突、审核 Listing 和选择素材。`, meta: '批量任务' }]), model_history_json: '[]', tool_runs_json: '[]', selected_assets_json: '[]', created_at: now, updated_at: now });
+      itemRows.push({ batch_id: batchId, task_id: taskId, conversation_id: conversationId, row_number: position + 1, sku: product.name, product_name: product.name });
     }
-    await DB.batch(writes);
+    await DB.batch([
+      jobWrite,
+      prepareJsonInsert(DB, 'tasks', ['id','product_name','status','markets_json','platforms_json','created_at','updated_at'], taskRows),
+      prepareJsonInsert(DB, 'task_events', ['task_id','from_status','to_status','actor','note','created_at'], eventRows),
+      prepareJsonInsert(DB, 'task_files', ['id','task_id','filename','object_key','content_type','size','status','created_at'], fileRows),
+      prepareJsonInsert(DB, 'product_passports', ['id','task_id','version','status','locked_at','created_at','updated_at'], passportRows),
+      prepareJsonInsert(DB, 'platform_drafts', ['id','task_id','passport_id','platform_id','market','locale','category_id','status','schema_version','payload_json','validation_json','created_at','updated_at'], draftRows),
+      prepareJsonInsert(DB, 'agent_conversations', ['id','task_id','title','status','messages_json','model_history_json','tool_runs_json','selected_assets_json','created_at','updated_at'], conversationRows),
+      prepareJsonInsert(DB, 'resource_owners', ['kind','resource_id','user_id'], ownerRows),
+      prepareJsonInsert(DB, 'batch_items', ['batch_id','task_id','conversation_id','row_number','sku','product_name'], itemRows),
+    ]);
     return Response.json({ id: batchId, name, count: folder.products.length }, { status: 201 });
   } catch (error) {
     if (storedKeys.length) {

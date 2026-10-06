@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createInitialProductPassport, isFactStatus } from '../lib/domain/product-passport.ts';
+import { marketOptionsForPlatform } from '../lib/platforms/market-options.ts';
 
 test('creates an empty open fact collection and one draft per platform-market pair', () => {
   let sequence = 0;
@@ -37,4 +38,17 @@ test('explicit platform targets create only seller-selected drafts', () => {
     now: '2026-09-26T00:00:00.000Z', idFactory: () => `id-${++sequence}`,
   });
   assert.deepEqual(passport.platformDrafts.map((draft) => `${draft.platformId}:${draft.market}`), ['amazon:美国', 'shopee:新加坡']);
+});
+
+test('a product gets a distinct draft for every supported selected site', () => {
+  let sequence = 0;
+  const targets = (['amazon', 'tiktok-shop', 'shopify', 'shopee'] as const)
+    .flatMap((platformId) => marketOptionsForPlatform(platformId).map((market) => ({ platformId, market })));
+  const passport = createInitialProductPassport({
+    taskId: 'task_many_sites', platforms: ['amazon', 'tiktok-shop', 'shopify', 'shopee'],
+    markets: [...new Set(targets.map((target) => target.market))], targets,
+    idFactory: () => `id-${++sequence}`,
+  });
+  assert.equal(passport.platformDrafts.length, targets.length);
+  assert.deepEqual(passport.platformDrafts.map(({ platformId, market }) => ({ platformId, market })), targets);
 });

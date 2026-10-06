@@ -48,14 +48,16 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     const { taskId } = await context.params;
     const bindings = getBindings();
     const { DB } = bindings;
-    const body = await _request.json().catch(()=>({})) as {selectedAssetIds?:unknown;mediaPlanId?:string};
+    const body = await _request.json().catch(()=>({})) as {selectedAssetIds?:unknown;mediaPlanId?:string;draftId?:unknown};
+    if(body.draftId !== undefined && typeof body.draftId !== 'string') return Response.json({error:'Listing 草稿 ID 格式无效'},{status:400});
     const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
     if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 项媒体'},{status:400});
     const media: ShopifyMediaInput[] = [];
     let orderedMediaIds: string[] = [];
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
-    const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload));
+    const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload)
+      && (body.draftId === undefined || draft.id === body.draftId));
     if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建测试草稿' }, { status: 409 });
 
     const hasShopify = publishable.some((draft) => draft.platformId === 'shopify');

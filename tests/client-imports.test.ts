@@ -16,6 +16,7 @@ test('entire workspace client import graph excludes server sanitizer and Shopify
       const name=match[1];
       if(!name.startsWith('.')&&!name.startsWith('@/'))continue;
       const base=name.startsWith('@/')?resolve(root,name.slice(2)):resolve(dirname(file),name);
+      if(name.endsWith('.css')) { assert.ok(existsSync(base),`Unresolved ${name} in ${file}`); continue; }
       const path=[base,base+'.ts',base+'.tsx',resolve(base,'index.ts')].find(p=>existsSync(p)&&/\.tsx?$/.test(p));
       assert.ok(path,`Unresolved ${name} in ${file}`);
       assert.ok(!/shopify-(integrated|dev)\.ts$/.test(path),`Client reaches server connector: ${file} -> ${path}`);

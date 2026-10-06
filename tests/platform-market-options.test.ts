@@ -16,3 +16,11 @@ test('seller-selected pairs are normalized and unsupported pairs fail closed', (
   assert.throws(() => validatePlatformTargets([{ platformId: 'shopee', market: '美国' }]), /暂不支持/);
   assert.throws(() => targetsFromSharedSelection(['amazon', 'shopee'], ['美国', '新加坡']), /分别配对/);
 });
+
+test('all supported sites can be selected across the content platforms', () => {
+  const platforms = ['amazon', 'tiktok-shop', 'shopify', 'shopee'] as const;
+  const targets = platforms.flatMap((platformId) => marketOptionsForPlatform(platformId).map((market) => ({ platformId, market })));
+  assert.ok(targets.length > 24);
+  assert.deepEqual(validatePlatformTargets(targets), targets);
+  assert.throws(() => validatePlatformTargets([...targets, targets[0]]), /重复/);
+});

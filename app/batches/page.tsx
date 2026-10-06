@@ -1,10 +1,11 @@
 import { currentAccount } from '@/lib/server/auth';
 import { redirect } from 'next/navigation';
-import { BatchWorkspace } from '@/components/batch-workspace';
+import { AgentConversation } from '@/components/agent-conversation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function BatchesPage() {
-  if (!await currentAccount()) redirect('/login?next=%2Fbatches');
-  return <BatchWorkspace />;
+  const account = await currentAccount();
+  if (!account) redirect('/login?next=%2Fbatches');
+  return <AgentConversation account={account} initialWorkspace="batch" />;
 }
