@@ -862,7 +862,7 @@ body {
 }
 
 .agent-shell-v2 .agent-welcome-workspace {
-  width: min(1000px, 100%);
+  width: min(1080px, 100%);
   min-height: clamp(560px, calc(100dvh - 230px), 900px);
   display: flex;
   flex-direction: column;
@@ -1016,10 +1016,10 @@ body {
 }
 
 .agent-shell-v2 .ready-prompt-title {
-  margin: auto 0 13px;
+  margin: auto 0 16px;
   padding-top: clamp(90px, 14vh, 150px);
   color: #252b27;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -1027,19 +1027,19 @@ body {
   width: 100%;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 14px;
   margin: 0;
 }
 
 .agent-shell-v2 .agent-starters button {
   min-width: 0;
-  min-height: 120px;
+  min-height: 166px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 15px;
+  padding: 21px;
   border: 1px solid #edf0ee;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #fff;
   color: #303632;
   text-align: left;
@@ -1054,27 +1054,27 @@ body {
 }
 
 .agent-shell-v2 .agent-starters span {
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--sf-accent-soft);
   color: var(--sf-accent-strong);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 800;
 }
 
 .agent-shell-v2 .agent-starters b {
-  margin-top: 13px;
+  margin-top: 19px;
   color: #282e2a;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .agent-shell-v2 .agent-starters small {
-  margin-top: 6px;
+  margin-top: 8px;
   color: #8a928d;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
