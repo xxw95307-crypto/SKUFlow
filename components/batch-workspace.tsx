@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { groupBatchFolders } from '@/lib/domain/batch-folders';
 import type { BatchSummary, BatchItemSummary } from '@/lib/server/batch-store';
@@ -49,6 +49,13 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [reviewCandidates, setReviewCandidates] = useState<ReviewCandidate[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const attachFolderInput = useCallback((input: HTMLInputElement | null) => {
+    folderInput.current = input;
+    if (input) {
+      input.setAttribute('webkitdirectory', '');
+      input.setAttribute('directory', '');
+    }
+  }, []);
 
   useEffect(() => {
     if (!targetsEdited.current) setTargets(preferredTargets);
@@ -61,7 +68,6 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
     window.history.replaceState({}, '', `${url.pathname}${url.search}`);
   };
 
-  useEffect(() => { folderInput.current?.setAttribute('webkitdirectory', ''); folderInput.current?.setAttribute('directory', ''); }, []);
   useEffect(() => {
     void (async () => {
       try {
@@ -300,7 +306,7 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
         {view === 'create' ? <div className="batch-heading"><div><span>批量上新</span><h1>创建批量任务</h1><p>每款商品一个文件夹。选好总文件夹和目标站点，就可以开始。</p></div></div> : <div className="batch-detail-toolbar"><button type="button" onClick={() => { setView('create'); updateBatchUrl(); }}>＋ 新建批次</button></div>}
         {batches.length > 0 && <details className="batch-history"><summary>历史批次 <span>{batches.length} 批</span></summary><div>{batches.map((item) => <button type="button" key={item.id} className={view === 'detail' && batch?.id === item.id ? 'selected' : ''} onClick={() => { void refreshBatch(item.id); setView('detail'); updateBatchUrl(item.id); }}><b>{item.name}</b><small>{item.itemCount} 款商品 · {new Date(item.createdAt).toLocaleDateString('zh-CN')}</small></button>)}</div></details>}
         {view === 'create' && <section className="batch-create">
-          <div className="batch-create-header"><div><b>创建新批次</b><small>选择包含 2–10 个商品子文件夹的总文件夹</small></div><label className="batch-folder-button">选择总文件夹<input ref={folderInput} type="file" multiple onChange={(event) => chooseFiles(event.target.files)} /></label></div>
+          <div className="batch-create-header"><div><b>创建新批次</b><small>选择包含 2–10 个商品子文件夹的总文件夹</small></div><label className="batch-folder-button">选择总文件夹<input ref={attachFolderInput} type="file" multiple onChange={(event) => chooseFiles(event.target.files)} /></label></div>
           {folderError && <p className="batch-error">{folderError}</p>}
           {preview && <><div className="batch-preview-summary">识别到 <b>{preview.products.length}</b> 款商品、<b>{files.length}</b> 份资料</div>
             <div className="batch-preview-list">{preview.products.map((product) => <span key={product.name}>{product.name} <small>{product.files.length} 个文件</small></span>)}</div>
