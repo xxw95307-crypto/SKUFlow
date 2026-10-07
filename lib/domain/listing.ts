@@ -66,6 +66,8 @@ export interface ListingDraftPayload {
     draftId: string;
     status: 'DRAFT_CREATED';
     createdAt: string;
+    mediaPlanId?: string;
+    mediaAssetIds?: string[];
   };
   sandboxPublication?: {
     provider: 'AMAZON_STATIC_SANDBOX';

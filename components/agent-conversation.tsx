@@ -1091,14 +1091,11 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
       if (name === 'open_publish_confirmation') {
-        if(currentTask.platforms.includes('shopify') || currentTask.platforms.includes('amazon')) {
-          setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…'); setBusyHint('编排主图、细节图与视频的展示顺序');
-          await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
-        }
-        const needsMediaPlan = currentTask.platforms.includes('shopify') || currentTask.platforms.includes('amazon');
-        setPhase('publish'); setPublishOpen(!needsMediaPlan);
+        setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…'); setBusyHint('编排主图、细节图与视频的展示顺序');
+        await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
+        setPhase('publish'); setPublishOpen(false);
         mediaPlanRef.current=null;setMediaPlanReady(false);
-        append('agent', '上架包已经准备完成。请做最后一次检查，只有你明确确认后我才会调用测试交付工具。Shopify 会创建未公开的 Dev Store 草稿；Amazon 会按所选站点调用对应区域的官方静态沙箱。', '等待最终确认', {
+        append('agent', '上架包已经准备完成。请先确认封面和图片／视频顺序，再检查目标站点译文；只有你明确确认后我才会调用测试交付工具。', '等待媒体编排确认', {
           kind: 'publish',
           items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · 测试草稿`, status: '待确认' }],
         });
@@ -1728,8 +1725,8 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
           {phase === 'assets' && !joinAssetsToLastAgentReply && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span>{assetCard}</article>}
           {phase === 'video' && !joinVideoToLastAgentReply && <article className="chat-message agent video-stage-conversation"><span className="chat-avatar">AI</span>{videoCard}</article>}
 
-          {phase === 'publish' && (task?.platforms.includes('shopify') || task?.platforms.includes('amazon')) && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview hasShopify={task.platforms.includes('shopify')} hasAmazonSandbox={task.platforms.includes('amazon')} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
-          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用测试交付工具。</p></div><button type="button" disabled={Boolean((task?.platforms.includes('shopify') || task?.platforms.includes('amazon')) && !mediaPlanReady)} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
+          {phase === 'publish' && task && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview hasShopify={task.platforms.includes('shopify')} hasAmazonSandbox={task.platforms.includes('amazon')} hasMock={task.platforms.some((platform) => platform !== 'shopify' && platform !== 'amazon')} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
+          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用测试交付工具。</p></div><button type="button" disabled={!mediaPlanReady} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
 
           {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>测试交付已完成</small><h3>{publishedCount} 个平台结果已保存</h3><p>任务、商品事实、人工决策和测试结果均已保留追溯信息。</p></div>{task?.platforms.includes('shopify') && <button type="button" onClick={recheckShopify}>重新核对 Shopify</button>}<button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 

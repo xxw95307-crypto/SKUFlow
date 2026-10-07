@@ -15,6 +15,6 @@ export async function getSelectedMedia(DB:D1Database,taskId:string,ids:string[])
    results.push({id,type:'IMAGE',title:r.title,purpose:`${r.asset_kind}：${r.note}`,url:`/api/tasks/${taskId}/generated-assets/${id}/file`,objectKey:r.object_key,contentType:r.content_type});
   }
  }
- if(!results.some(c=>c.type==='IMAGE'))throw new Error('Shopify 媒体包需要至少一张商品图片作为封面');
+ if(!results.some(c=>c.type==='IMAGE'))throw new Error('媒体编排需要至少一张商品图片作为封面');
  return results;
 }

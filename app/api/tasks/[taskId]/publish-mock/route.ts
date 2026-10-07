@@ -63,7 +63,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     const hasShopify = publishable.some((draft) => draft.platformId === 'shopify');
     const hasAmazon = publishable.some((draft) => draft.platformId === 'amazon');
     for (const draft of publishable.filter((item) => item.platformId === 'amazon')) requireAmazonMarket(draft.market);
-    const needsMediaPlan = hasShopify || hasAmazon;
+    const needsMediaPlan = hasShopify || hasAmazon || body.draftId === undefined;
     if(needsMediaPlan) {
       const row=await DB.prepare("SELECT plan_json FROM media_order_plans WHERE task_id=? AND id=? AND status='CONFIRMED'").bind(taskId,body.mediaPlanId??'').first<{plan_json:string}>();
       if(!row)throw new Error('请先在对话中确认封面和媒体顺序，再发布');
@@ -147,7 +147,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       const mockDraftId = `mock_${draft.platformId.replace(/-/g, '_')}_${crypto.randomUUID()}`;
       const payload: ListingDraftPayload = {
         ...currentPayload,
-        mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now },
+        mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now, ...(needsMediaPlan ? { mediaPlanId: body.mediaPlanId!, mediaAssetIds: orderedMediaIds } : {}) },
       };
       await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
       results.push({ platformId: draft.platformId, market: draft.market, draftId: mockDraftId, status: 'DRAFT_CREATED', mode: 'MOCK', targetLocale: currentPayload.localization?.targetLocale, targetLanguage: currentPayload.localization?.targetLanguage });
