@@ -683,6 +683,9 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       body: JSON.stringify(taskId ? { taskId } : {}),
     }), '新建会话失败');
     await applyConversation(payload.conversation);
+    const url = new URL(window.location.href);
+    url.searchParams.set('conversation', payload.conversation.id);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
     return payload.conversation;
   };
 
@@ -1415,10 +1418,15 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     finally { setActionBusy(false); }
   };
 
-  const newConversation = async () => {
+  const newConversation = async (openAgentHome = false) => {
     try {
+      if (openAgentHome && phase === 'idle' && messagesRef.current.length === 1 && messagesRef.current[0]?.id === 'welcome') {
+        showWorkspace('agent');
+        return;
+      }
       await persistConversation();
       await createConversation();
+      if (openAgentHome) showWorkspace('agent');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '新建会话失败');
     }
@@ -1579,7 +1587,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     <aside className="agent-rail" aria-label="SKUFlow 导航">
       <div className="agent-brand"><span>S</span><div><b>SKUFlow</b><small>Agentic Commerce</small></div></div>
       <nav className="agent-primary-nav" aria-label="工作区">
-        <button type="button" className={workspace === 'agent' ? 'active' : ''} aria-current={workspace === 'agent' ? 'page' : undefined} onClick={() => showWorkspace('agent')}><span>⌂</span>AI 上新</button>
+        <button type="button" className={workspace === 'agent' ? 'active' : ''} aria-current={workspace === 'agent' ? 'page' : undefined} disabled={phase === 'processing' || phase === 'loading'} onClick={() => void newConversation(true)}><span>⌂</span>AI 上新</button>
         <button type="button" onClick={() => showWorkspace('agent')}><span>□</span>任务记录</button>
         <button type="button" className={workspace === 'batch' ? 'active' : ''} aria-current={workspace === 'batch' ? 'page' : undefined} onClick={() => showWorkspace('batch')}><span>▦</span>批量上新</button>
         <button type="button" disabled={workspace === 'batch' || phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
