@@ -180,7 +180,7 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
     if (passport.conflicts.some((conflict) => conflict.status === 'OPEN')) return;
     for (let i = 0; i < passport.platformDrafts.length; i++) {
       if (!passport.platformDrafts.some((draft) => draft.status === 'PLANNED')) break;
-      setProgress(`正在生成 ${current.folder} 的 Listing · 站点 ${i + 1}/${passport.platformDrafts.length}`);
+      setProgress(`正在为「${current.folder}」准备第 ${i + 1}/${passport.platformDrafts.length} 份站点文案…`);
       await post('compile-drafts');
       passport = (await api<{ passport: typeof passport }>(`/api/tasks/${taskId}/passport`)).passport;
     }

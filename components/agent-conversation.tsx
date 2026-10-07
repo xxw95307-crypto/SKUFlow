@@ -345,9 +345,9 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
   const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && hasCompleteListingLocalization(draft.payload, marketLocale(draft.market).locale));
   return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose} wide>
     <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 份 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
-    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{platformNames.join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
+    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{platformNames.join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? '正在准备各站点的语言版本…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
     <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文用于测试交付</b></header>
-      {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>Agent 正在为各目标市场翻译 Listing，并校验字段长度与结构…</p></div>}
+      {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>正在准备各站点的商品文案。完成后请先检查译文，再决定是否继续。</p></div>}
       {localizationError && <div className="publish-localization-error" role="alert"><p>{localizationError}</p><button type="button" onClick={onRetryLocalization}>重新生成译文</button></div>}
       {!localizationBusy && !localizationError && approved.map((draft) => {
         if (!isListingDraftPayload(draft.payload)) return null;
@@ -401,7 +401,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [passport, setPassport] = useState<ProductPassport | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [busyLabel, setBusyLabel] = useState('正在读取最近任务…');
+  const [busyLabel, setBusyLabel] = useState('正在打开你的工作区…');
   const [busyHint, setBusyHint] = useState('');
   const [error, setError] = useState('');
   const [canRetryFailedTurn, setCanRetryFailedTurn] = useState(false);
@@ -661,7 +661,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const loadConversation = async (id: string) => {
     if (id === conversationIdRef.current) return;
     await persistConversation();
-    setPhase('loading'); setBusyLabel('正在恢复会话记忆…'); setBusyHint('正在加载历史消息与任务状态，马上就好');
+    setPhase('loading'); setBusyLabel('正在打开这件商品的进度…'); setBusyHint('稍后就可以接着上次的步骤继续');
     const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${id}`), '会话读取失败');
     await applyConversation(payload.conversation);
   };
@@ -814,7 +814,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (name === 'inspect_chat_attachments') {
         if (attachmentFiles.length === 0) throw new Error('本轮没有可读取的聊天附件');
-        setBusyLabel('Agent 正在读取本轮附件…'); setBusyHint('附件会先安全存入你的空间，再交给 Agent 阅读');
+        setBusyLabel('正在查看你上传的资料…'); setBusyHint('看完后会整理出与你的问题有关的信息');
         const body = new FormData();
         attachmentFiles.forEach((file) => body.append('files', file));
         const payload = await responseJson<Record<string, unknown>>(await fetch('/api/agent/inspect-attachments', { method: 'POST', body }), '附件读取失败');
@@ -825,7 +825,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       if (name === 'create_listing_task_from_attachments') {
         if (currentTask) throw new Error('当前会话已经绑定商品任务');
         if (attachmentFiles.length === 0) throw new Error('本轮没有可用于创建任务的附件');
-        setBusyLabel('Agent 正在安全保存资料并创建商品任务…'); setBusyHint('资料加密存储，任务随时可在左侧会话找回');
+        setBusyLabel('正在创建这件商品的上新任务…'); setBusyHint('完成后可以从左侧对话继续查看');
         const body = new FormData();
         const targets = inferConversationTargets(modelHistory.current);
         let targetError = '';
@@ -891,14 +891,14 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (!currentTask) throw new Error('当前还没有创建商品任务');
       if (name === 'parse_product_sources') {
-        setProgressStep(0); setBusyLabel('Agent 正在解析图片、表格和文档…'); setBusyHint('逐个文件提取文本、表格和画面信息');
+        setProgressStep(0); setBusyLabel('正在整理商品资料…'); setBusyHint('会从图片、表格和文档中找出商品信息');
         const payload = await responseJson<{ summary: Record<string, unknown> }>(await fetch(`/api/tasks/${currentTask.id}/parse`, { method: 'POST' }), '资料解析失败');
         await refreshTaskState(currentTask.id);
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: false };
       }
       if (name === 'analyze_product_images') {
-        setProgressStep(1); setBusyLabel('Agent 正在逐张理解商品实物图…'); setBusyHint('识别品牌、材质、规格等可见属性，图片越清晰识别越准');
+        setProgressStep(1); setBusyLabel('正在查看商品图片…'); setBusyHint('会辨认图片中看得清的款式、颜色和细节');
         const payload = await responseJson<{ summary: { completed: number; failed: number } }>(await fetch(`/api/tasks/${currentTask.id}/analyze-images`, { method: 'POST' }), '图片理解失败');
         if (payload.summary.completed === 0) throw new Error(`图片理解未得到有效结果（失败 ${payload.summary.failed} 张）`);
         await refreshTaskState(currentTask.id);
@@ -906,7 +906,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         return { result: { ok: true, summary: payload.summary }, checkpoint: false };
       }
       if (name === 'merge_product_facts') {
-        setProgressStep(1); setBusyLabel('Agent 正在合并图文证据并检查冲突…'); setBusyHint('图文说法不一致的地方会列出来，交给你裁决');
+        setProgressStep(1); setBusyLabel('正在核对商品信息…'); setBusyHint('如果图片和资料说法不同，会请你确认');
         const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport; task: TaskSnapshot }>(await fetch(`/api/tasks/${currentTask.id}/extract-facts`, { method: 'POST' }), '商品事实合并失败');
         setPassport(payload.passport); setTask(payload.task);
         markToolRun(call, 'COMPLETED');
@@ -918,7 +918,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         try { args = JSON.parse(call.function.arguments || '{}'); } catch { throw new Error('目标参数无效'); }
         const platforms = Array.isArray(args.platforms) ? args.platforms.filter((item): item is string => typeof item === 'string') : [];
         const markets = Array.isArray(args.markets) ? args.markets.filter((item): item is string => typeof item === 'string') : [];
-        setBusyLabel('Agent 正在更新目标平台与站点…'); setBusyHint('旧的审校稿会作废，稍后按新目标重新生成；冲突与事实进度保留');
+        setBusyLabel('正在调整发布目标…'); setBusyHint('稍后会按新选择的站点重新准备商品文案');
         const payload = await responseJson<{ task: TaskSnapshot }>(await fetch(`/api/tasks/${currentTask.id}/targets`, {
           method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platforms, markets }),
         }), '目标平台与站点更新失败');
@@ -933,7 +933,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (name === 'reparse_sources') {
         if (!currentTask) throw new Error('当前还没有创建商品任务');
-        setBusyLabel('Agent 正在重新解析全部资料…'); setBusyHint('覆盖旧的解析结果，旧审校稿已作废');
+        setBusyLabel('正在重新整理商品资料…'); setBusyHint('整理完成后会更新商品信息和待确认内容');
         const payload = await responseJson<{ summary: Record<string, unknown> }>(await fetch(`/api/tasks/${currentTask.id}/parse`, {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }),
         }), '资料重新解析失败');
@@ -944,7 +944,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (name === 'reanalyze_images') {
         if (!currentTask) throw new Error('当前还没有创建商品任务');
-        setProgressStep(1); setBusyLabel('Agent 正在重新理解全部商品实物图…'); setBusyHint('覆盖旧的图片分析结果，旧审校稿已作废');
+        setProgressStep(1); setBusyLabel('正在重新查看商品图片…'); setBusyHint('看完后会更新从图片中辨认出的信息');
         const payload = await responseJson<{ summary: { completed: number; failed: number } }>(await fetch(`/api/tasks/${currentTask.id}/analyze-images`, {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }),
         }), '图片重新理解失败');
@@ -956,7 +956,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (name === 'reopen_resolved_conflicts') {
         if (!currentTask) throw new Error('当前还没有创建商品任务');
-        setBusyLabel('Agent 正在重置冲突裁决…'); setBusyHint('全部已裁决的冲突将回到待确认状态，供你重新选择');
+        setBusyLabel('正在准备重新确认有分歧的信息…'); setBusyHint('之前的选择会重新开放，方便你修改');
         const payload = await responseJson<{ reopened: number; note: string }>(await fetch(`/api/tasks/${currentTask.id}/conflicts/reopen`, {
           method: 'PUT',
         }), '冲突重置失败');
@@ -969,8 +969,8 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         const remaining = latestPassport.platformDrafts.filter((draft) => draft.status === 'PLANNED' || Object.keys(draft.payload).length === 0);
         const nextDraft = remaining[0];
         setProgressStep(2);
-        setBusyLabel(`Agent 正在生成 Listing（${latestPassport.platformDrafts.length - remaining.length + 1}/${latestPassport.platformDrafts.length}）…`);
-        setBusyHint(nextDraft ? `${platformNames.get(nextDraft.platformId) ?? nextDraft.platformId} · ${nextDraft.market}` : '按目标站点分别创作');
+        setBusyLabel(`正在准备第 ${latestPassport.platformDrafts.length - remaining.length + 1}/${latestPassport.platformDrafts.length} 份站点文案…`);
+        setBusyHint(nextDraft ? `${platformNames.get(nextDraft.platformId) ?? nextDraft.platformId} · ${nextDraft.market}，完成后请你检查` : '完成后可以逐份检查和修改');
         const payload = await responseJson<{ summary: Record<string, unknown>; passport: ProductPassport }>(await fetch(`/api/tasks/${currentTask.id}/compile-drafts`, { method: 'POST' }), '多平台 Listing 生成失败');
         setPassport(payload.passport);
         markToolRun(call, 'COMPLETED');
@@ -1016,7 +1016,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       if (name === 'trim_product_video') {
         let args:Record<string,unknown>={};
         try { args=JSON.parse(call.function.arguments); } catch { throw new Error('视频裁剪参数无效'); }
-        setBusyLabel('正在处理你的视频要求…'); setBusyHint('视频处理耗时较长，请稍候');
+        setBusyLabel('正在按你的要求调整视频…'); setBusyHint('视频处理可能需要几分钟，完成后可以预览');
         const response=await fetch(`/api/tasks/${currentTask.id}/video-trims`, {
           method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...args,guidance:requestText}),
         });
@@ -1038,8 +1038,8 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         const revising = name === 'revise_product_video';
         const selectedImageIds = selectedAssetsRef.current.filter((id) => id.startsWith('asset_'));
         if (!selectedImageIds.length) throw new Error('请先确认要用于视频的商品图片');
-        setBusyLabel('视频 Agent 正在准备可编辑的提示词…');
-        setBusyHint('确认提示词后才会调用视频生成模型');
+        setBusyLabel('正在准备视频画面说明…');
+        setBusyHint('写好后你可以先修改，再决定是否生成视频');
         const payload = await responseJson<{job:{id:string}}>(await fetch(`/api/tasks/${currentTask.id}/videos`, {
           method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guidance:requestText,selectedImageIds,purpose:revising?'revision':'initial'}),
         }), '视频修改规划失败');
@@ -1056,7 +1056,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (name === 'generate_visual_assets') {
         const initialBrief = requestText.startsWith('我已确认图片生成需求，请生成图片') ? imageBriefRef.current : null;
-        setProgressStep(3); setBusyLabel('视觉策划 Agent 正在理解要求并生成商品图片…'); setBusyHint('会根据你的描述决定生成整组或修改指定图片');
+        setProgressStep(3); setBusyLabel('正在按你的要求制作商品图片…'); setBusyHint('完成后你可以逐张查看、挑选或提出修改');
         const payload = await responseJson<{
           assets: GeneratedAsset[];
           summary: { total: number; completed: number; failed: number };
@@ -1094,7 +1094,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
       if (name === 'open_publish_confirmation') {
-        setBusyLabel('Agent 正在安排商品封面与图片／视频顺序…'); setBusyHint('编排主图、细节图与视频的展示顺序');
+        setBusyLabel('正在安排封面和展示顺序…'); setBusyHint('完成后你可以调整图片和视频的先后顺序');
         await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
         setPhase('publish'); setPublishOpen(false);
         mediaPlanRef.current=null;setMediaPlanReady(false);
@@ -1107,7 +1107,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       }
       if (name === 'publish_mock_drafts') {
         if (!publishApproved) throw new Error('发布工具缺少本轮商家明确授权');
-        setProgressStep(4); setBusyLabel('Agent 正在创建平台测试草稿…'); setBusyHint('仅创建测试草稿，不会改动你的真实店铺');
+        setProgressStep(4); setBusyLabel('正在进行平台测试交付…'); setBusyHint('不会公开上架，完成后会显示各站点结果');
         const payload = await responseJson<{
           passport: ProductPassport;
           message?: string;
@@ -1171,7 +1171,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       : [...retainedHistory, { role: 'user', content: modelUserText }]);
     let checkpointHistory = history;
     pauseRequestedRef.current = false; setPauseRequested(false);
-    setPhase('processing'); setBusyLabel('Agent 正在规划下一步…'); setBusyHint('根据任务进度决定接下来解析、理解还是生成'); setError('');
+    setPhase('processing'); setBusyLabel(activeTask ? '收到，正在继续处理这件商品…' : '收到，正在看你的要求…'); setBusyHint(activeTask ? '需要你确认时，会把内容展示出来' : '稍后给你答复'); setError('');
     try {
       for (let step = 0; step < 20; step += 1) {
         history = compactAgentModelHistory(history);
@@ -1208,7 +1208,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         }];
         const nextTool = payload.message.toolCalls[0]?.function.name;
         if (payload.message.content && !['generate_visual_assets', 'open_asset_selection', 'generate_product_video', 'revise_product_video'].includes(nextTool ?? '')) {
-          append('agent', payload.message.content, payload.message.toolCalls.length ? '正在调用工具' : undefined);
+          append('agent', payload.message.content, payload.message.toolCalls.length ? '正在处理' : undefined);
         }
         const call = payload.message.toolCalls[0];
         if (!call) {
@@ -1247,7 +1247,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       };
       setCanRetryFailedTurn(true);
       setError(message); setPhase('error');
-      if (!message.includes('连续 3 次未通过画面验收')) append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
+      if (!message.includes('连续 3 次未通过画面验收')) append('agent', `处理时遇到问题：${message}`, '任务已暂停');
       await persistConversation(activeTask?.id ?? null).catch(() => undefined);
     }
   };
@@ -1570,7 +1570,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
 
   const composerPlaceholder = phase === 'processing'
-    ? 'Agent 正在执行工具...'
+    ? '正在处理你的要求，请稍等…'
     : pendingFiles.length
       ? '告诉 Agent 要处理附件，还是用这些资料上新...'
         : phase === 'idle'
@@ -1734,7 +1734,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
           {phase === 'video' && !joinVideoToLastAgentReply && <article className="chat-message agent video-stage-conversation"><span className="chat-avatar">AI</span>{videoCard}</article>}
 
           {phase === 'publish' && task && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview hasShopify={task.platforms.includes('shopify')} hasAmazonSandbox={task.platforms.includes('amazon')} hasMock={task.platforms.some((platform) => platform !== 'shopify' && platform !== 'amazon')} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
-          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最终人工门禁</span><h3>上架包已准备完成</h3><p>只有你明确确认后，Agent 才会调用测试交付工具。</p></div><button type="button" disabled={!mediaPlanReady} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
+          {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最后确认</span><h3>上新内容已准备好</h3><p>检查并确认后，才会开始测试交付。</p></div><button type="button" disabled={!mediaPlanReady} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
 
           {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>测试交付已完成</small><h3>{publishedCount} 个平台结果已保存</h3><p>任务、商品事实、人工决策和测试结果均已保留追溯信息。</p></div>{task?.platforms.includes('shopify') && <button type="button" onClick={recheckShopify}>重新核对 Shopify</button>}<button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}
 
@@ -1746,7 +1746,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
           <button className="agent-context-scrim" type="button" aria-label="关闭任务进度" onClick={() => setContextOpen(false)} />
           <aside className="agent-context" aria-label="任务进度">
           <div className="context-head"><div><span>任务进度</span><b>{phase === 'complete' ? '已完成' : '进行中'}</b></div><button type="button" aria-label="关闭任务进度" onClick={() => setContextOpen(false)}>×</button></div>
-          <ol className="agent-progress">{['接收资料', '商品理解', 'Listing 审核', '视觉选择', '发布交付'].map((label, index) => <li className={index < currentStep || phase === 'complete' ? 'done' : index === currentStep ? 'current' : ''} key={label}><span>{index < currentStep || phase === 'complete' ? '✓' : index + 1}</span><div><b>{label}</b><small>{index < currentStep || phase === 'complete' ? '已完成' : index === currentStep ? '当前阶段' : '由 Agent 继续'}</small></div></li>)}</ol>
+          <ol className="agent-progress">{['接收资料', '商品理解', '文案审核', '视觉选择', '发布交付'].map((label, index) => <li className={index < currentStep || phase === 'complete' ? 'done' : index === currentStep ? 'current' : ''} key={label}><span>{index < currentStep || phase === 'complete' ? '✓' : index + 1}</span><div><b>{label}</b><small>{index < currentStep || phase === 'complete' ? '已完成' : index === currentStep ? '当前阶段' : '稍后进行'}</small></div></li>)}</ol>
           {task && <div className="context-summary"><span>当前商品</span><h3>{task.productName}</h3><div><b>{visibleFacts.length}</b><small>属性</small><b>{openConflictCount}</b><small>冲突</small><b>{approvedCount}</b><small>已审核</small></div><p>{task.platforms.map((id) => platformNames.get(id) ?? id).join(' · ')}</p></div>}
           {task && publishedCount === 0 && <div className="context-backtrack"><b>返回修改</b><button type="button" disabled={phase === 'processing'} onClick={openTargetEditor}>平台与站点</button>{passport?.platformDrafts.some((draft) => isListingDraftPayload(draft.payload)) && <button type="button" disabled={phase === 'processing'} onClick={() => { setContextOpen(false); setError(''); setPhase('listing'); }}>Listing 审核</button>}{approvedCount === passport?.platformDrafts.length && generatedAssets.some((asset) => asset.kind !== 'VIDEO') && <button type="button" disabled={phase === 'processing'} onClick={() => { setContextOpen(false); setError(''); setPhase('assets'); }}>图片选择</button>}{selectedAssets.some((id) => id.startsWith('asset_')) && <button type="button" disabled={phase === 'processing'} onClick={() => { setContextOpen(false); setError(''); setPhase('video'); }}>视频选择</button>}</div>}
           {passport && <details className="agent-evidence"><summary>查看商品事实与证据</summary><div>{visibleFacts.slice(0, 12).map((fact) => <p key={fact.id}><b>{fact.label}</b><span>{displayValue(fact.value, fact.unit)}</span></p>)}{visibleFacts.length > 12 && <small>还有 {visibleFacts.length - 12} 项属性已收起</small>}</div></details>}

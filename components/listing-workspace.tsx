@@ -126,7 +126,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
 
   const generate = async (prefillOnly = false) => {
     if (!task) return;
-    setBusy(true); setError(''); setMessage(prefillOnly ? '正在从资料和对话补全缺失信息…' : '正在获取各平台字段，并由 Listing Agent 生成内容…');
+    setBusy(true); setError(''); setMessage(prefillOnly ? '正在从资料和对话中补全商品信息…' : '正在准备各站点的商品文案，完成后可以逐份检查…');
     try {
       let currentPassport = passport;
       if (!currentPassport) {
@@ -138,7 +138,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
       const ids = currentPassport.platformDrafts.filter((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED').map((draft) => draft.id);
       let latest = currentPassport;
       for (let offset = 0; offset < ids.length; offset += 1) {
-        setMessage(`正在生成 Listing：${offset + 1}/${ids.length}`);
+        setMessage(`正在准备第 ${offset + 1}/${ids.length} 份站点文案…`);
         const response = await fetch(`/api/tasks/${task.id}/compile-drafts`, { method: 'POST', headers:{'content-type':'application/json'},body:JSON.stringify({prefillOnly,draftIds:[ids[offset]]}) });
         const payload = await response.json() as { passport?: ProductPassport; error?: string };
         if (!response.ok || !payload.passport) throw new Error(payload.error || '多平台 Listing 生成失败');
