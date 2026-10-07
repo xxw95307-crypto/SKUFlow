@@ -99,3 +99,17 @@
 .batch-page.embedded .batch-market-options button{min-height:38px;font-size:13px}
 .batch-page.embedded .batch-field input{font-size:14px}
 .batch-page.embedded .batch-board-head small{font-size:13px;line-height:1.55;color:#647568}
+
+/* Keep the active batch focused on products and actions. Secondary context stays available on demand. */
+.batch-detail-toolbar{display:flex;justify-content:flex-end;margin:0 0 12px}
+.batch-detail-toolbar button{padding:8px 11px;border:1px solid #c9ddce;border-radius:9px;background:#fff;color:#397952;font-weight:700}
+.batch-target-details{margin:8px 0 18px;color:#5f7164}
+.batch-target-details summary{width:max-content;cursor:pointer;font-size:13px;color:#397952}
+.batch-target-details p{margin:8px 0 0;font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.batch-page.embedded .batch-detail-toolbar button{font-size:13px}
+.batch-page.embedded .batch-board-head{flex-direction:row;align-items:flex-start}
+.batch-page.embedded .batch-board-head h2{margin:0 0 5px}
+.batch-page.embedded .batch-board-head button{flex:none;padding:7px 10px;font-size:13px}
+.batch-page.embedded .batch-actions{margin-bottom:16px}
+.batch-page.embedded .batch-actions:empty{display:none}
+@media(max-width:800px){.batch-page.embedded .batch-board-head{flex-wrap:wrap}}

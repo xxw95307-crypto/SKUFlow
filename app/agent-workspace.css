@@ -2561,3 +2561,45 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+@media (min-width: 1101px) {
+  .agent-shell-v2[data-workspace="batch"] {
+    grid-template-columns: 220px clamp(380px, 30vw, 500px) minmax(0, 1fr);
+  }
+  .agent-shell-v2[data-workspace="batch"] .agent-rail-resizer {
+    display: none;
+  }
+}
+
+.agent-shell-v2[data-workspace="batch"] .agent-model {
+  display: none;
+}
+
+.agent-shell-v2 .batch-conversation-history {
+  width: min(1100px, 100%);
+  margin: 0 auto 16px;
+  border: 1px solid var(--sf-line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.agent-shell-v2 .batch-conversation-history > summary {
+  padding: 12px 16px;
+  color: var(--sf-accent-strong);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.agent-shell-v2 .batch-conversation-history[open] > summary {
+  border-bottom: 1px solid var(--sf-line);
+}
+
+.agent-shell-v2 .batch-conversation-history > .chat-message {
+  margin: 14px 16px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .chat-action-card.batch-resume {
+  max-width: 760px;
+  margin-top: 0;
+}
