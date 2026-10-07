@@ -539,7 +539,7 @@ body {
 }
 
 .agent-shell-v2[data-workspace="batch"] {
-  grid-template-columns: var(--agent-rail-width) clamp(360px, 29vw, 460px) minmax(0, 1fr);
+  grid-template-columns: var(--agent-rail-width) clamp(380px, 30vw, 500px) minmax(0, 1fr);
 }
 
 .agent-shell-v2 [hidden] {
@@ -2471,3 +2471,93 @@ body {
 .chat-result-video { grid-column: 1 / -1; width: 100%; }
 .chat-result-video video { display: block; width: 100%; max-height: 460px; background: #17251e; border-radius: 10px; margin: 12px 0; }
 .chat-result-video a { font-size: 12px; color: #3f8060; }
+
+/* Comfortable reading size in the three-column batch workspace. */
+.agent-shell-v2[data-workspace="batch"] .agent-brand small,
+.agent-shell-v2[data-workspace="batch"] .agent-rail-label,
+.agent-shell-v2[data-workspace="batch"] .agent-user small,
+.agent-shell-v2[data-workspace="batch"] .agent-batch-panel-head small {
+  color: #66746b;
+  font-size: 13px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .agent-primary-nav a,
+.agent-shell-v2[data-workspace="batch"] .agent-primary-nav button,
+.agent-shell-v2[data-workspace="batch"] .agent-rail-links > button {
+  min-height: 43px;
+  font-size: 15px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .conversation-item b,
+.agent-shell-v2[data-workspace="batch"] .agent-user b {
+  font-size: 15px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .conversation-item small {
+  color: #68776d;
+  font-size: 13px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .agent-batch-panel-head b,
+.agent-shell-v2[data-workspace="batch"] .agent-topbar h1 {
+  font-size: 16px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .agent-online,
+.agent-shell-v2[data-workspace="batch"] .agent-model span,
+.agent-shell-v2[data-workspace="batch"] .agent-model b {
+  font-size: 13px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .agent-topbar-actions > button {
+  font-size: 14px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .chat-message p {
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.agent-shell-v2[data-workspace="batch"] .chat-message small,
+.agent-shell-v2[data-workspace="batch"] .rich-file small,
+.agent-shell-v2[data-workspace="batch"] .rich-item-list small {
+  color: #66756b;
+  font-size: 14px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .rich-file b,
+.agent-shell-v2[data-workspace="batch"] .rich-item-list b {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.agent-shell-v2[data-workspace="batch"] .rich-item-list span,
+.agent-shell-v2[data-workspace="batch"] .rich-item-list em,
+.agent-shell-v2[data-workspace="batch"] .listing-conversation-head > span {
+  font-size: 13px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .listing-conversation-head h3 {
+  font-size: 20px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .listing-conversation-head p,
+.agent-shell-v2[data-workspace="batch"] .listing-conversation-preview dt,
+.agent-shell-v2[data-workspace="batch"] .listing-conversation-preview dd {
+  font-size: 15px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .listing-conversation-preview span,
+.agent-shell-v2[data-workspace="batch"] .platform-tabs small {
+  font-size: 13px;
+}
+
+.agent-shell-v2[data-workspace="batch"] .agent-composer-input {
+  font-size: 16px;
+}
+
+@media (min-width: 821px) and (max-width: 1300px) {
+  .agent-shell-v2[data-workspace="batch"] .rich-item-list {
+    grid-template-columns: 1fr;
+  }
+}

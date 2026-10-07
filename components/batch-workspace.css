@@ -70,3 +70,32 @@
 .batch-page.embedded .batch-history button{min-width:0;width:100%;max-width:none}
 .batch-page.embedded .batch-item.is-active{border-color:#8ebba0;background:#f5faf6;box-shadow:inset 3px 0 #4b8964}
 .batch-page.embedded .batch-item.is-active .batch-item-side button:first-of-type{background:#e7f3eb;border-color:#b7d7c2;color:#2f704b}
+
+.batch-page.embedded{font-size:14px;line-height:1.55}
+.batch-page.embedded .batch-heading p{font-size:14px;color:#5f7164}
+.batch-page.embedded .batch-heading>button,
+.batch-page.embedded .batch-folder-button,
+.batch-page.embedded .batch-actions button,
+.batch-page.embedded .batch-item-side button{font-size:13px;line-height:1.4}
+.batch-page.embedded .batch-create-header small,
+.batch-page.embedded .batch-preview-summary,
+.batch-page.embedded .batch-target-count,
+.batch-page.embedded .batch-stats span,
+.batch-page.embedded .batch-history button small{font-size:14px;color:#627568}
+.batch-page.embedded .batch-history summary,
+.batch-page.embedded .batch-history button b,
+.batch-page.embedded .batch-create-header b,
+.batch-page.embedded .batch-market-heading strong{font-size:15px}
+.batch-page.embedded .batch-history summary span,
+.batch-page.embedded .batch-preview-list span,
+.batch-page.embedded .batch-market-heading span,
+.batch-page.embedded .batch-note,
+.batch-page.embedded .batch-badge,
+.batch-page.embedded .batch-folder{font-size:13px}
+.batch-page.embedded .batch-item-info h3{font-size:16px;line-height:1.45}
+.batch-page.embedded .batch-item-info small{font-size:14px;color:#65766a;line-height:1.55}
+.batch-page.embedded .batch-item-info em{font-size:13px}
+.batch-page.embedded .batch-platform-options button,
+.batch-page.embedded .batch-market-options button{min-height:38px;font-size:13px}
+.batch-page.embedded .batch-field input{font-size:14px}
+.batch-page.embedded .batch-board-head small{font-size:13px;line-height:1.55;color:#647568}
