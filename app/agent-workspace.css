@@ -863,7 +863,6 @@ body {
 
 .agent-shell-v2 .agent-welcome-workspace {
   width: min(1080px, 100%);
-  min-height: clamp(560px, calc(100dvh - 230px), 900px);
   display: flex;
   flex-direction: column;
   margin: 0 auto;
@@ -1016,8 +1015,7 @@ body {
 }
 
 .agent-shell-v2 .ready-prompt-title {
-  margin: auto 0 16px;
-  padding-top: clamp(90px, 14vh, 150px);
+  margin: clamp(48px, 5vh, 72px) 0 16px;
   color: #252b27;
   font-size: 13px;
   font-weight: 700;
