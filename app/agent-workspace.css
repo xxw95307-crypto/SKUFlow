@@ -900,8 +900,8 @@ body {
 
 .agent-shell-v2 .welcome-composer {
   display: grid;
-  grid-template-rows: auto minmax(105px, 1fr) auto;
-  min-height: 188px;
+  grid-template-rows: auto minmax(145px, 1fr) auto;
+  min-height: 228px;
   overflow: hidden;
   border: 1px solid #d8deda;
   border-radius: 10px;
@@ -920,7 +920,7 @@ body {
   grid-column: 1;
   grid-row: 2;
   width: 100%;
-  min-height: 105px;
+  min-height: 145px;
   resize: none;
   padding: 16px 17px 8px;
   border: 0;
