@@ -30,7 +30,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-export function BatchWorkspace({ embedded = false, onOpenConversation }: { embedded?: boolean; onOpenConversation?: (id: string) => void }) {
+export function BatchWorkspace({ embedded = false, onOpenConversation, activeConversationId, conversationSwitchDisabled = false }: { embedded?: boolean; onOpenConversation?: (id: string) => void; activeConversationId?: string | null; conversationSwitchDisabled?: boolean }) {
   const folderInput = useRef<HTMLInputElement>(null);
   const stopRequested = useRef(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -47,6 +47,13 @@ export function BatchWorkspace({ embedded = false, onOpenConversation }: { embed
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [reviewCandidates, setReviewCandidates] = useState<ReviewCandidate[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
+
+  const updateBatchUrl = (id?: string) => {
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('id', id);
+    else url.searchParams.delete('id');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+  };
 
   useEffect(() => { folderInput.current?.setAttribute('webkitdirectory', ''); folderInput.current?.setAttribute('directory', ''); }, []);
   useEffect(() => {
@@ -131,7 +138,7 @@ export function BatchWorkspace({ embedded = false, onOpenConversation }: { embed
       setBatches(list.batches);
       await refreshBatch(created.id);
       setView('detail');
-      window.history.replaceState({}, '', `/batches?id=${created.id}`);
+      updateBatchUrl(created.id);
     } catch (caught) { setError(caught instanceof Error ? caught.message : '创建失败'); }
     finally { setBusy(''); }
   };
@@ -281,8 +288,8 @@ export function BatchWorkspace({ embedded = false, onOpenConversation }: { embed
     {!embedded && <header className="batch-topbar"><Link href="/" className="batch-brand"><span>S</span> SKUFlow</Link><Link href="/">返回 AI 上新</Link></header>}
     <div className="batch-layout">
       <section className="batch-main">
-        <div className="batch-heading"><div><span>批量上新</span><h1>{view === 'create' ? '创建批量任务' : '批次工作台'}</h1><p>{view === 'create' ? '每款商品一个文件夹。选好总文件夹和目标站点，就可以开始。' : '查看每款商品的进度，并处理需要确认的内容。'}</p></div>{view === 'detail' && <button type="button" onClick={() => { setView('create'); window.history.replaceState({}, '', '/batches'); }}>＋ 新建批次</button>}</div>
-        {batches.length > 0 && <details className="batch-history"><summary>历史批次 <span>{batches.length} 批</span></summary><div>{batches.map((item) => <button type="button" key={item.id} className={view === 'detail' && batch?.id === item.id ? 'selected' : ''} onClick={() => { void refreshBatch(item.id); setView('detail'); window.history.replaceState({}, '', `/batches?id=${item.id}`); }}><b>{item.name}</b><small>{item.itemCount} 款商品 · {new Date(item.createdAt).toLocaleDateString('zh-CN')}</small></button>)}</div></details>}
+        <div className="batch-heading"><div><span>批量上新</span><h1>{view === 'create' ? '创建批量任务' : '批次工作台'}</h1><p>{view === 'create' ? '每款商品一个文件夹。选好总文件夹和目标站点，就可以开始。' : '查看每款商品的进度，并处理需要确认的内容。'}</p></div>{view === 'detail' && <button type="button" onClick={() => { setView('create'); updateBatchUrl(); }}>＋ 新建批次</button>}</div>
+        {batches.length > 0 && <details className="batch-history"><summary>历史批次 <span>{batches.length} 批</span></summary><div>{batches.map((item) => <button type="button" key={item.id} className={view === 'detail' && batch?.id === item.id ? 'selected' : ''} onClick={() => { void refreshBatch(item.id); setView('detail'); updateBatchUrl(item.id); }}><b>{item.name}</b><small>{item.itemCount} 款商品 · {new Date(item.createdAt).toLocaleDateString('zh-CN')}</small></button>)}</div></details>}
         {view === 'create' && <section className="batch-create">
           <div className="batch-create-header"><div><b>创建新批次</b><small>选择包含 2–10 个商品子文件夹的总文件夹</small></div><label className="batch-folder-button">选择总文件夹<input ref={folderInput} type="file" multiple onChange={(event) => chooseFiles(event.target.files)} /></label></div>
           {folderError && <p className="batch-error">{folderError}</p>}
@@ -311,7 +318,7 @@ export function BatchWorkspace({ embedded = false, onOpenConversation }: { embed
           <div className="batch-stats"><div><b>{counts.total}</b><span>商品</span></div><div><b>{counts.attention}</b><span>待人工处理</span></div><div><b>{counts.ready}</b><span>可交付</span></div><div><b>{counts.delivered}</b><span>已交付</span></div></div>
           <div className="batch-actions"><button type="button" disabled={!!busy || !batch.items.some((item) => ['NEW','PROCESSING','FAILED'].includes(item.stage))} onClick={() => void processBatch()}>分析未完成商品</button><button type="button" disabled={!!busy || !counts.attention} onClick={() => void prepareBulkReview()}>查看可批量审核项</button><button className="batch-primary" type="button" disabled={!!busy || !counts.ready} onClick={() => void publishBatch()}>交付已审核商品（{counts.ready}）</button>{busy && <button type="button" onClick={() => { stopRequested.current = true; }}>当前商品完成后停止</button>}</div>
           {progress && <p className="batch-progress" role="status">{progress}</p>}
-          <div className="batch-items">{batch.items.map((item) => <article key={item.taskId} className={`batch-item ${item.stage.toLowerCase()}`}><div className="batch-item-info"><span className="batch-folder">{item.folder}</span><h3>{item.productName}</h3><small>{item.fileCount} 份资料 · {item.draftCount} 份平台稿 · {item.reason}</small>{(itemErrors[item.taskId] || item.lastError) && <em>{itemErrors[item.taskId] || item.lastError}</em>}</div><div className="batch-item-side"><span className="batch-badge">{stageLabels[item.stage]}</span>{onOpenConversation ? <button type="button" onClick={() => onOpenConversation(item.conversationId)}>打开商品任务</button> : <Link href={`/?conversation=${item.conversationId}`}>打开商品任务</Link>}{['NEW','PROCESSING','FAILED'].includes(item.stage) && <button type="button" disabled={!!busy} onClick={() => void processBatch(item)}>继续分析</button>}{item.stage === 'READY_TO_PUBLISH' && <button type="button" disabled={!!busy} onClick={() => void publishBatch(item)}>交付此商品</button>}</div></article>)}</div>
+          <div className="batch-items">{batch.items.map((item) => <article key={item.taskId} className={`batch-item ${item.stage.toLowerCase()}${activeConversationId === item.conversationId ? ' is-active' : ''}`}><div className="batch-item-info"><span className="batch-folder">{item.folder}</span><h3>{item.productName}</h3><small>{item.fileCount} 份资料 · {item.draftCount} 份平台稿 · {item.reason}</small>{(itemErrors[item.taskId] || item.lastError) && <em>{itemErrors[item.taskId] || item.lastError}</em>}</div><div className="batch-item-side"><span className="batch-badge">{stageLabels[item.stage]}</span>{onOpenConversation ? <button type="button" disabled={conversationSwitchDisabled} onClick={() => onOpenConversation(item.conversationId)}>{activeConversationId === item.conversationId ? '右侧已打开' : '打开商品任务'}</button> : <Link href={`/?conversation=${item.conversationId}`}>打开商品任务</Link>}{['NEW','PROCESSING','FAILED'].includes(item.stage) && <button type="button" disabled={!!busy} onClick={() => void processBatch(item)}>继续分析</button>}{item.stage === 'READY_TO_PUBLISH' && <button type="button" disabled={!!busy} onClick={() => void publishBatch(item)}>交付此商品</button>}</div></article>)}</div>
           <p className="batch-note">批量交付仅处理已逐项审核、完成必要媒体确认的商品。Shopify 创建未公开草稿；Amazon 使用官方静态沙箱；其他平台为本地演示草稿。</p>
         </section>}
       </section>

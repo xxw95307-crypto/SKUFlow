@@ -68,3 +68,5 @@
 .batch-page.embedded .batch-item-side{justify-content:flex-start;gap:7px}
 .batch-page.embedded .batch-item-side button{font-size:11px;padding:7px 9px}
 .batch-page.embedded .batch-history button{min-width:0;width:100%;max-width:none}
+.batch-page.embedded .batch-item.is-active{border-color:#8ebba0;background:#f5faf6;box-shadow:inset 3px 0 #4b8964}
+.batch-page.embedded .batch-item.is-active .batch-item-side button:first-of-type{background:#e7f3eb;border-color:#b7d7c2;color:#2f704b}

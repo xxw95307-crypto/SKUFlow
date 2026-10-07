@@ -448,7 +448,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     setPublishOpen(false);
     setItemMenu(null);
     const destination = next === 'batch' ? '/batches' : '/';
-    if (window.location.pathname !== destination) window.history.pushState({}, '', destination);
+    if (window.location.pathname !== destination) window.history.pushState({}, '', `${destination}${window.location.search}`);
   };
 
   useEffect(() => {
@@ -630,6 +630,17 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     setPhase('loading'); setBusyLabel('正在恢复会话记忆…'); setBusyHint('正在加载历史消息与任务状态，马上就好');
     const payload = await responseJson<{ conversation: AgentConversationRecord }>(await fetch(`/api/conversations/${id}`), '会话读取失败');
     await applyConversation(payload.conversation);
+  };
+
+  const openConversation = async (id: string) => {
+    try {
+      await loadConversation(id);
+      const url = new URL(window.location.href);
+      url.searchParams.set('conversation', id);
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '商品任务加载失败');
+    }
   };
 
   const createConversation = async (taskId?: string) => {
@@ -1545,7 +1556,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
           <button className="conversation-action" type="submit" title="确认重命名" aria-label="确认重命名"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2Z"/></svg></button>
           <button className="conversation-action" type="button" title="取消" aria-label="取消重命名" onClick={() => setRenamingId(null)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12Z"/></svg></button>
         </form> : <>
-          <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => { showWorkspace('agent'); void loadConversation(item.id); }}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
+          <button className="conversation-open" type="button" disabled={phase === 'processing'} onClick={() => void openConversation(item.id)}><span>{item.id === conversationId ? '◉' : '○'}</span><div><b>{item.title}</b><small>{item.status === 'COMPLETED' ? '已完成' : item.taskId ? '进行中' : '等待资料'}</small></div></button>
           <div className="conversation-actions">
             <button className="conversation-action" type="button" disabled={phase === 'processing'} title="更多操作" aria-label={`会话操作：${item.title}`} aria-haspopup="menu" onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setItemMenu({ id: item.id, x: rect.right, y: rect.bottom }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg></button>
           </div>
@@ -1596,7 +1607,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
 
     {batchOpened && <section className="agent-batch-panel" hidden={workspace !== 'batch'} aria-label="批量上新控制台">
       <div className="agent-batch-panel-head"><div><small>SKUFlow 工作区</small><b>批量上新</b></div><button type="button" aria-label="收起批量上新控制台" onClick={() => showWorkspace('agent')}>×</button></div>
-      <BatchWorkspace embedded onOpenConversation={(id) => { showWorkspace('agent'); window.history.replaceState({}, '', `/?conversation=${id}`); void loadConversation(id); }} />
+      <BatchWorkspace embedded activeConversationId={conversationId} conversationSwitchDisabled={phase === 'processing'} onOpenConversation={(id) => void openConversation(id)} />
     </section>}
 
     <section className="agent-main" id="agent-workspace">
