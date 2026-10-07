@@ -538,8 +538,8 @@ body {
   background: var(--sf-paper);
 }
 
-.agent-shell-v2[data-workspace="batch"] .agent-main {
-  grid-template-rows: auto minmax(0, 1fr);
+.agent-shell-v2[data-workspace="batch"] {
+  grid-template-columns: var(--agent-rail-width) clamp(360px, 29vw, 460px) minmax(0, 1fr);
 }
 
 .agent-shell-v2 [hidden] {
@@ -549,7 +549,54 @@ body {
 .agent-shell-v2 .agent-batch-panel {
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
+  border-right: 1px solid var(--sf-line);
+  background: #f8fbf8;
+}
+
+.agent-shell-v2 .agent-batch-panel-head {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--sf-line);
+  background: #fff;
+}
+
+.agent-shell-v2 .agent-batch-panel-head small,
+.agent-shell-v2 .agent-batch-panel-head b {
+  display: block;
+}
+
+.agent-shell-v2 .agent-batch-panel-head small {
+  color: var(--sf-faint);
+  font-size: 10px;
+}
+
+.agent-shell-v2 .agent-batch-panel-head b {
+  margin-top: 2px;
+  color: var(--sf-ink);
+  font-size: 14px;
+}
+
+.agent-shell-v2 .agent-batch-panel-head button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--sf-line);
+  border-radius: 7px;
+  background: #fff;
+  color: #64746a;
+  cursor: pointer;
+}
+
+.agent-shell-v2 .agent-batch-panel-head button:hover {
+  background: var(--sf-accent-soft);
+  color: var(--sf-accent-strong);
 }
 
 .agent-shell-v2 .topbar-batch-switch {
@@ -2137,6 +2184,10 @@ body {
     grid-template-columns: 74px minmax(0, 1fr);
   }
 
+  .agent-shell-v2[data-workspace="batch"] {
+    grid-template-columns: 74px minmax(340px, 390px) minmax(0, 1fr);
+  }
+
   .agent-shell-v2 .agent-rail {
     padding: 17px 9px;
   }
@@ -2227,6 +2278,14 @@ body {
     width: 100%;
     height: 100dvh;
     display: block;
+  }
+
+  .agent-shell-v2[data-workspace="batch"] .agent-batch-panel {
+    position: fixed;
+    z-index: 35;
+    inset: 0 auto 0 0;
+    width: min(440px, 94vw);
+    box-shadow: 18px 0 50px rgba(29, 55, 36, .2);
   }
 
   .agent-shell-v2 .agent-rail {

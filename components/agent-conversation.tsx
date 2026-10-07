@@ -1594,22 +1594,24 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       ><span /></button>
     </aside>
 
+    {batchOpened && <section className="agent-batch-panel" hidden={workspace !== 'batch'} aria-label="批量上新控制台">
+      <div className="agent-batch-panel-head"><div><small>SKUFlow 工作区</small><b>批量上新</b></div><button type="button" aria-label="收起批量上新控制台" onClick={() => showWorkspace('agent')}>×</button></div>
+      <BatchWorkspace embedded onOpenConversation={(id) => { showWorkspace('agent'); window.history.replaceState({}, '', `/?conversation=${id}`); void loadConversation(id); }} />
+    </section>}
+
     <section className="agent-main" id="agent-workspace">
       <header className="agent-topbar">
-        <div><span className="agent-online"><i /> SKUFlow Agent</span><h1>{workspace === 'batch' ? '批量上新' : task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? 'AI 上新工作台' : '创建商品上新任务'}</h1></div>
+        <div><span className="agent-online"><i /> SKUFlow Agent</span><h1>{task && task.productName !== PENDING_PRODUCT_NAME ? task.productName : phase === 'idle' ? 'AI 上新工作台' : '创建商品上新任务'}</h1></div>
         <div className="agent-topbar-actions">
-          {workspace === 'batch' ? <button className="topbar-batch-switch" type="button" onClick={() => showWorkspace('agent')}>返回 AI 上新</button> : <>
-            <button className="topbar-batch-switch" type="button" onClick={() => showWorkspace('batch')}>批量上新 →</button>
+          <button className="topbar-batch-switch" type="button" aria-expanded={workspace === 'batch'} onClick={() => showWorkspace(workspace === 'batch' ? 'agent' : 'batch')}>{workspace === 'batch' ? '收起批量台' : '批量上新 →'}</button>
             {phase !== 'idle' && <div className="agent-model"><span>百炼</span><b>qwen3.8-max</b></div>}
             {task && publishedCount === 0 && <button className="context-toggle" type="button" disabled={phase === 'processing'} onClick={openTargetEditor}>修改平台/站点</button>}
             {phase !== 'idle' && <button className="context-toggle" type="button" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}><span>{currentStep + 1}/5</span>任务进度</button>}
             <button className="topbar-new-chat" type="button" disabled={phase === 'processing'} onClick={() => void newConversation()}><span>+</span> 新建对话</button>
-          </>}
         </div>
       </header>
 
-      {batchOpened && <div className="agent-batch-panel" hidden={workspace !== 'batch'}><BatchWorkspace embedded onOpenConversation={(id) => { showWorkspace('agent'); window.history.replaceState({}, '', `/?conversation=${id}`); void loadConversation(id); }} /></div>}
-      <div hidden={workspace === 'batch'} className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
+      <div className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           {!showWelcomeWorkspace && <div className="agent-date">今天 · Agent 工作区</div>}
           {!showWelcomeWorkspace && messages.map((message, index) => {
@@ -1698,7 +1700,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         </>}
       </div>
 
-      {!showWelcomeWorkspace && <footer hidden={workspace === 'batch'} className={`agent-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
+      {!showWelcomeWorkspace && <footer className={`agent-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
         <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
         {composerAttachments}
         <button className="composer-attach" type="button" aria-label="添加商品资料" title={task ? '当前会话已有商品任务，资料需在任务创建前提供' : '添加图片、表格或文档（可一次选多个，也可以直接拖进输入框）'} disabled={phase === 'processing' || task !== null} onClick={() => composerFileInput.current?.click()}>+</button>

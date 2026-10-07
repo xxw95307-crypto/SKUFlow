@@ -31,3 +31,40 @@
 .batch-create,.batch-board{margin-inline:auto}
 .batch-create{margin-bottom:0}
 @media(max-width:800px){.batch-page.embedded .batch-layout{padding:22px 16px 60px}.batch-heading{align-items:stretch;flex-direction:column;gap:0}.batch-heading>button{align-self:flex-start;margin:0 0 18px}.batch-heading p{margin-bottom:18px}}
+
+/* The embedded workspace lives in the middle column, regardless of viewport width. */
+.batch-page.embedded{min-height:0;height:100%;overflow-y:auto;overscroll-behavior:contain}
+.batch-page.embedded .batch-layout{max-width:none;padding:18px 16px 44px}
+.batch-page.embedded .batch-heading{align-items:flex-start;flex-direction:column;gap:0}
+.batch-page.embedded .batch-heading>div>span{display:none}
+.batch-page.embedded .batch-heading h1{margin:0 0 5px;font-size:24px}
+.batch-page.embedded .batch-heading p{margin:0 0 18px;font-size:12px;line-height:1.6}
+.batch-page.embedded .batch-heading>button{margin:0 0 16px;padding:8px 11px;font-size:12px}
+.batch-page.embedded .batch-create,.batch-page.embedded .batch-board{padding:18px;border-radius:14px;box-shadow:0 8px 24px rgba(36,81,50,.035)}
+.batch-page.embedded .batch-create-header{align-items:flex-start;flex-direction:column;gap:13px}
+.batch-page.embedded .batch-create-header b{font-size:15px}
+.batch-page.embedded .batch-create-header small{font-size:11px;line-height:1.5}
+.batch-page.embedded .batch-folder-button{padding:9px 12px;font-size:12px}
+.batch-page.embedded .batch-preview-summary{margin-top:17px;font-size:12px}
+.batch-page.embedded .batch-preview-list span{max-width:100%;font-size:11px;overflow-wrap:anywhere}
+.batch-page.embedded .batch-field{margin-top:17px}
+.batch-page.embedded .batch-target-picker{margin:17px 0}
+.batch-page.embedded .batch-platform-options button,.batch-page.embedded .batch-market-options button{min-height:34px;padding:6px 10px;font-size:12px}
+.batch-page.embedded .batch-market-group{padding:11px}
+.batch-page.embedded .batch-market-heading{align-items:center;flex-wrap:wrap;gap:6px}
+.batch-page.embedded .batch-target-count{font-size:12px}
+.batch-page.embedded .batch-board-head{align-items:flex-start;flex-direction:column;gap:10px}
+.batch-page.embedded .batch-board-head h2{font-size:20px;overflow-wrap:anywhere}
+.batch-page.embedded .batch-board-head small{overflow-wrap:anywhere}
+.batch-page.embedded .batch-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:17px 0}
+.batch-page.embedded .batch-stats>div{padding:10px;gap:5px}
+.batch-page.embedded .batch-stats b{font-size:20px}
+.batch-page.embedded .batch-stats span{font-size:11px}
+.batch-page.embedded .batch-actions{gap:8px}
+.batch-page.embedded .batch-actions button{font-size:12px}
+.batch-page.embedded .batch-item{align-items:stretch;flex-direction:column;gap:12px;padding:13px}
+.batch-page.embedded .batch-item-info h3{font-size:14px}
+.batch-page.embedded .batch-item-info small{line-height:1.5}
+.batch-page.embedded .batch-item-side{justify-content:flex-start;gap:7px}
+.batch-page.embedded .batch-item-side button{font-size:11px;padding:7px 9px}
+.batch-page.embedded .batch-history button{min-width:0;width:100%;max-width:none}
