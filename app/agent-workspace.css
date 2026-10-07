@@ -1053,16 +1053,17 @@ body {
   transform: translateY(-1px);
 }
 
-.agent-shell-v2 .agent-starters span {
-  width: 32px;
-  height: 32px;
+.agent-shell-v2 .agent-starters .starter-icon {
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: var(--sf-accent-soft);
-  color: var(--sf-accent-strong);
-  font-size: 15px;
-  font-weight: 800;
+  background: transparent;
+}
+
+.agent-shell-v2 .agent-starters .starter-icon svg {
+  width: 36px;
+  height: 36px;
 }
 
 .agent-shell-v2 .agent-starters b {

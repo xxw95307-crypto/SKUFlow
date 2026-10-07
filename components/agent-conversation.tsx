@@ -67,6 +67,33 @@ const COMPOSER_FILE_ACCEPT = '.jpg,.jpeg,.png,.webp,.pdf,.xlsx,.xls,.csv,.txt,.d
 const MAX_COMPOSER_FILES = 12;
 const MAX_COMPOSER_TOTAL_SIZE = 40 * 1024 * 1024;
 
+function StarterIcon({ kind }: { kind: 'new' | 'analyze' | 'rules' | 'optimize' }) {
+  const shared = { viewBox: '0 0 32 32', fill: 'none', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const };
+  if (kind === 'new') return <svg {...shared}>
+    <path d="M6.5 24.5l4.2-.8L24 10.4a2.4 2.4 0 0 0-3.4-3.4L7.3 20.3l-.8 4.2Z" stroke="#5d9685" />
+    <path d="m18.7 8.9 3.4 3.4M7.2 20.6l3.2 3.2" stroke="#d5a252" />
+    <path d="M22.5 20.5v6M19.5 23.5h6" stroke="#d88d70" />
+  </svg>;
+  if (kind === 'analyze') return <svg {...shared}>
+    <circle cx="13.7" cy="13.7" r="8" stroke="#668da1" />
+    <path d="m19.5 19.5 6.2 6.2" stroke="#668da1" />
+    <path d="M10.2 16.5v-3.2M13.7 16.5V10M17.2 16.5v-5" stroke="#dba655" />
+  </svg>;
+  if (kind === 'rules') return <svg {...shared}>
+    <rect x="5" y="5.5" width="22" height="21" rx="3.4" stroke="#d0a24e" />
+    <path d="M5 11.5h22" stroke="#d0a24e" />
+    <path d="M9.5 16.5h9M9.5 20.5h13" stroke="#6b9a94" />
+    <circle cx="9" cy="8.5" r=".9" fill="#dc9275" stroke="none" />
+    <circle cx="12.5" cy="8.5" r=".9" fill="#8b80ad" stroke="none" />
+  </svg>;
+  return <svg {...shared}>
+    <path d="M6 8.5h20M6 16h20M6 23.5h20" stroke="#8b7db2" />
+    <circle cx="12" cy="8.5" r="2.5" fill="#fff" stroke="#d99d76" />
+    <circle cx="20" cy="16" r="2.5" fill="#fff" stroke="#6ba798" />
+    <circle cx="14" cy="23.5" r="2.5" fill="#fff" stroke="#d0aa58" />
+  </svg>;
+}
+
 interface ToolRun {
   id: string;
   name: AgentToolName;
@@ -1705,10 +1732,10 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
             </div>
             <div className="ready-prompt-title">从常用任务开始</div>
             <div className="agent-starters" aria-label="快速开始">
-              <button type="button" onClick={() => setComposer('我想上新一款商品')}><span>＋</span><b>上新一款商品</b><small>上传商品资料，由 Agent 完成多平台上新流程</small></button>
-              <button type="button" onClick={() => setComposer('请帮我检查这份商品资料')}><span>◎</span><b>分析商品资料</b><small>提取属性，并识别图片与文档中的事实冲突</small></button>
-              <button type="button" onClick={() => setComposer('我想了解不同平台的 Listing 要求')}><span>▤</span><b>咨询平台规则</b><small>了解平台字段、内容规范与发布限制</small></button>
-              <button type="button" onClick={() => setComposer('请帮我优化这款商品的 Listing')}><span>◇</span><b>优化 Listing</b><small>改写标题、卖点、描述与平台营销内容</small></button>
+              <button type="button" onClick={() => setComposer('我想上新一款商品')}><span className="starter-icon"><StarterIcon kind="new" /></span><b>上新一款商品</b><small>上传商品资料，由 Agent 完成多平台上新流程</small></button>
+              <button type="button" onClick={() => setComposer('请帮我检查这份商品资料')}><span className="starter-icon"><StarterIcon kind="analyze" /></span><b>分析商品资料</b><small>提取属性，并识别图片与文档中的事实冲突</small></button>
+              <button type="button" onClick={() => setComposer('我想了解不同平台的 Listing 要求')}><span className="starter-icon"><StarterIcon kind="rules" /></span><b>咨询平台规则</b><small>了解平台字段、内容规范与发布限制</small></button>
+              <button type="button" onClick={() => setComposer('请帮我优化这款商品的 Listing')}><span className="starter-icon"><StarterIcon kind="optimize" /></span><b>优化 Listing</b><small>改写标题、卖点、描述与平台营销内容</small></button>
             </div>
           </div>}
 
