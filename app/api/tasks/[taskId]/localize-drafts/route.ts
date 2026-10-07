@@ -6,7 +6,7 @@ import type { ListingDraftPayload } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { isChineseLocale, marketLocale } from '@/lib/localization/market-locales';
-import { translatableListingFields } from '@/lib/agents/listing-localization';
+import { hasCompleteListingLocalization, translatableListingFields } from '@/lib/agents/listing-localization';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getShopPreferences } from '@/lib/server/shop-preferences-store';
 
@@ -33,9 +33,10 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }
     const summaries: Array<{ draftId: string; market: string; targetLocale: string; targetLanguage: string; translatedFields: number }> = [];
     for (const draft of drafts) {
-      const payload = draft.payload as ListingDraftPayload;
+      if (!isListingDraftPayload(draft.payload)) throw new Error('Listing 草稿格式无效');
+      const payload = draft.payload;
       const target = marketLocale(draft.market);
-      const reusable = payload.localization?.status === 'READY' && payload.localization.targetLocale === target.locale;
+      const reusable = hasCompleteListingLocalization(payload, target.locale);
       let localization = payload.localization;
       if (!reusable) {
         if (isChineseLocale(target.locale)) {
@@ -64,6 +65,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           };
         }
       }
+      if (!localization) throw new Error('Listing 本地化结果缺失');
       const nextPayload: ListingDraftPayload = { ...payload, schema: { ...payload.schema, locale: target.locale }, localization };
       await bindings.DB.prepare('UPDATE platform_drafts SET payload_json = ?, updated_at = ? WHERE id = ? AND task_id = ? AND status = ?')
         .bind(JSON.stringify(nextPayload), new Date().toISOString(), draft.id, taskId, 'APPROVED').run();

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildListingLocalizationMessages, localizedPublicationPayload, parseListingLocalizationOutput } from '../lib/agents/listing-localization.ts';
+import { buildListingLocalizationMessages, hasCompleteListingLocalization, localizedPublicationPayload, parseListingLocalizationOutput, translatableListingFields } from '../lib/agents/listing-localization.ts';
 import { marketLocale } from '../lib/localization/market-locales.ts';
 import { callBailianListingLocalization } from '../lib/ai/bailian-client.ts';
 import type { ListingDraftPayload } from '../lib/domain/listing.ts';
@@ -44,6 +44,34 @@ test('localization rejects extra fields and changed list structure', () => {
   const context = { payload, targetLocale: 'ja-JP', targetLanguage: '日语' };
   assert.throws(() => parseListingLocalizationOutput(JSON.stringify({ fields: { title: '商品', body_html: '説明', tags: ['一つ'], variant_sku: '改ざん' } }), context), /未授权字段/);
   assert.throws(() => parseListingLocalizationOutput(JSON.stringify({ fields: { title: '商品', body_html: '説明', tags: ['一つ'] } }), context), /条目数发生变化/);
+});
+
+test('mock delivery localizes buyer-facing facts while preserving seller values and brand names', () => {
+  const mockPayload: ListingDraftPayload = {
+    ...payload,
+    mode: 'MOCK',
+    schema: { ...payload.schema, mode: 'MOCK', platformId: 'tiktok-shop', fields: [
+      { key: 'product_name', label: '商品名称', type: 'string', source: 'PRODUCT_FACT', required: true, maxLength: 120 },
+      { key: 'material', label: '材质', type: 'string', source: 'PRODUCT_FACT', required: false },
+      { key: 'color', label: '颜色', type: 'string', source: 'PRODUCT_FACT', required: false },
+      { key: 'brand', label: '品牌', type: 'string', source: 'PRODUCT_FACT', required: true },
+      { key: 'seller_sku', label: 'SKU', type: 'string', source: 'SELLER_INPUT', required: true },
+      { key: 'price', label: '售价', type: 'number', source: 'SELLER_INPUT', required: true },
+    ] },
+    fields: { product_name: '浅驼色针织开衫', material: '羊毛混纺', color: '浅驼色', brand: 'Acme', seller_sku: 'A101', price: 49.9 },
+  };
+  assert.deepEqual(translatableListingFields(mockPayload).map((field) => field.key), ['product_name', 'material', 'color']);
+  const oldLocalization = { status: 'READY' as const, sourceLocale: 'zh-CN' as const, targetLocale: 'en-US', targetLanguage: '英语', fields: { product_name: 'Light camel cardigan' }, model: 'test', requestId: null, createdAt: 'now' };
+  assert.equal(hasCompleteListingLocalization({ ...mockPayload, localization: oldLocalization }, 'en-US'), false);
+  const fields = parseListingLocalizationOutput(JSON.stringify({ fields: { product_name: 'Light camel knit cardigan', material: 'Wool blend', color: 'Light camel' } }), { payload: mockPayload, targetLocale: 'en-US', targetLanguage: '英语' });
+  const localized = localizedPublicationPayload({ ...mockPayload, localization: { ...oldLocalization, fields } });
+  assert.equal(hasCompleteListingLocalization(localized, 'en-US'), true);
+  assert.equal(localized.fields.material, 'Wool blend');
+  assert.equal(localized.fields.color, 'Light camel');
+  assert.equal(localized.fields.brand, 'Acme');
+  assert.equal(localized.fields.seller_sku, 'A101');
+  assert.equal(localized.fields.price, 49.9);
+  assert.deepEqual(translatableListingFields({ ...mockPayload, fields: { ...mockPayload.fields, brand: '无品牌' } }).map((field) => field.key), ['product_name', 'material', 'color', 'brand']);
 });
 
 test('overlong localized video copy is rewritten before delivery', async () => {

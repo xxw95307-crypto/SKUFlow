@@ -39,6 +39,8 @@ import type { FactConflict, FactValue, ProductPassport } from '@/lib/domain/prod
 import type { GeneratedAsset } from '@/lib/domain/generated-asset';
 import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
+import { hasCompleteListingLocalization } from '@/lib/agents/listing-localization';
+import { marketLocale } from '@/lib/localization/market-locales';
 import { platformRegistry } from '@/lib/platforms/registry';
 
 type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'image_brief' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
@@ -339,7 +341,7 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
   const amazonCount = approved.filter((draft) => draft.platformId === 'amazon').length;
   const mockCount = approved.length - shopifyCount - amazonCount;
   const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', amazonCount ? 'Amazon 所选站点官方静态沙箱测试' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
-  const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && draft.payload.localization?.status === 'READY');
+  const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && hasCompleteListingLocalization(draft.payload, marketLocale(draft.market).locale));
   return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose} wide>
     <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 份 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
     <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{platformNames.join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
@@ -347,10 +349,13 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
       {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>Agent 正在为各目标市场翻译 Listing，并校验字段长度与结构…</p></div>}
       {localizationError && <div className="publish-localization-error" role="alert"><p>{localizationError}</p><button type="button" onClick={onRetryLocalization}>重新生成译文</button></div>}
       {!localizationBusy && !localizationError && approved.map((draft) => {
-        if (!isListingDraftPayload(draft.payload) || !draft.payload.localization) return null;
+        if (!isListingDraftPayload(draft.payload)) return null;
         const payload = draft.payload;
-        const entries = payload.schema.fields.flatMap((field) => field.key in payload.localization!.fields ? [[field.label, payload.localization!.fields[field.key]] as const] : []).slice(0, 5);
-        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{payload.localization.targetLanguage} · {payload.localization.targetLocale}</span></div><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl><small>由 {payload.localization.model} 根据已确认中文稿生成；SKU、价格、尺寸及其他经营字段保持原值。</small></article>;
+        const localization = payload.localization;
+        if (!localization) return null;
+        const entries = payload.schema.fields.flatMap((field) => field.key in localization.fields ? [[field.label, localization.fields[field.key]] as const] : []);
+        const remaining = entries.slice(5);
+        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{localization.targetLanguage} · {localization.targetLocale}</span></div><dl>{entries.slice(0, 5).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl>{remaining.length > 0 && <details className="publish-localization-more"><summary>查看其余 {remaining.length} 个已翻译字段</summary><dl>{remaining.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl></details>}<small>由 {localization.model} 根据已确认中文稿生成；SKU、价格、尺寸及其他经营字段保持原值。</small></article>;
       })}
     </section>
     <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{amazonCount ? 'Amazon 会按所选站点调用对应区域的官方静态沙箱；预设响应不代表真实上架，媒体编排只保存在 SKUFlow；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若连接未配置，Agent 会暂停并提示所需信息。</span></div>
@@ -478,7 +483,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   useEffect(() => {
     if (!publishOpen || !task || !passport) return;
     const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED');
-    if (!approved.length || approved.every((draft) => isListingDraftPayload(draft.payload) && draft.payload.localization?.status === 'READY')) {
+    if (!approved.length || approved.every((draft) => isListingDraftPayload(draft.payload) && hasCompleteListingLocalization(draft.payload, marketLocale(draft.market).locale))) {
       queueMicrotask(() => { setLocalizationError(''); setLocalizationBusy(false); });
       return;
     }
