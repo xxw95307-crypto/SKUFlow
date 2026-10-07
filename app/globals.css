@@ -556,10 +556,7 @@ h1 { margin:0; font-size:26px; letter-spacing:-.03em; } .top-actions { display:f
 .publish-localizations article dl { margin:0; }
 .publish-localizations article dl>div { display:grid; grid-template-columns:110px minmax(0,1fr); gap:12px; padding:8px 0; border-top:1px solid #edf1ef; }
 .publish-localizations article dt { color:#71817b; font-size:12px; }
-.publish-localizations article dd { max-height:64px; margin:0; overflow:auto; color:#223d34; font-size:13px; line-height:1.55; }
-.publish-localization-more { margin-top:8px; }
-.publish-localization-more summary { width:fit-content; cursor:pointer; color:#297251; font-size:12px; font-weight:700; }
-.publish-localization-more dl { margin-top:8px; }
+.publish-localizations article dd { min-width:0; margin:0; overflow-wrap:anywhere; color:#223d34; font-size:13px; line-height:1.55; }
 .publish-localizations article>small { display:block; margin-top:9px; color:#75837e; font-size:11px; }
 .publish-localization-loading,.publish-localization-error { display:flex; align-items:center; gap:10px; padding:18px; color:#52665e; font-size:13px; }
 .publish-localization-error { justify-content:space-between; color:#9c3d35; background:#fff8f6; }

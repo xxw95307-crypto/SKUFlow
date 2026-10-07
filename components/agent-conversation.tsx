@@ -319,7 +319,8 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
 }
 
 function localizationPreviewValue(value: unknown): string {
-  if (Array.isArray(value)) return value.join(' · ');
+  if (Array.isArray(value)) return value.map(localizationPreviewValue).join(' · ');
+  if (value && typeof value === 'object') return Object.entries(value).map(([key, item]) => `${key}：${localizationPreviewValue(item)}`).join('；');
   return typeof value === 'string' ? value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : String(value ?? '');
 }
 
@@ -353,9 +354,13 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
         const payload = draft.payload;
         const localization = payload.localization;
         if (!localization) return null;
-        const entries = payload.schema.fields.flatMap((field) => field.key in localization.fields ? [[field.label, localization.fields[field.key]] as const] : []);
-        const remaining = entries.slice(5);
-        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{localization.targetLanguage} · {localization.targetLocale}</span></div><dl>{entries.slice(0, 5).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl>{remaining.length > 0 && <details className="publish-localization-more"><summary>查看其余 {remaining.length} 个已翻译字段</summary><dl>{remaining.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl></details>}<small>由 {localization.model} 根据已确认中文稿生成；SKU、价格、尺寸及其他经营字段保持原值。</small></article>;
+        const entries = payload.schema.fields.flatMap((field) => {
+          if (!Object.prototype.hasOwnProperty.call(payload.fields, field.key)) return [];
+          const value = Object.prototype.hasOwnProperty.call(localization.fields, field.key)
+            ? localization.fields[field.key] : payload.fields[field.key];
+          return [[field.key, field.label, value] as const];
+        });
+        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{localization.targetLanguage} · {localization.targetLocale}</span></div><dl>{entries.map(([key, label, value]) => <div key={key}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl><small>文案及描述性属性已本地化；SKU、价格、库存及品牌专名等经营字段保持原值。</small></article>;
       })}
     </section>
     <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{amazonCount ? 'Amazon 会按所选站点调用对应区域的官方静态沙箱；预设响应不代表真实上架，媒体编排只保存在 SKUFlow；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若连接未配置，Agent 会暂停并提示所需信息。</span></div>
