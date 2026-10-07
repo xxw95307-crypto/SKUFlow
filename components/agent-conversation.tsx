@@ -1549,7 +1549,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         <button type="button" className={workspace === 'batch' ? 'active' : ''} aria-current={workspace === 'batch' ? 'page' : undefined} onClick={() => showWorkspace('batch')}><span>▦</span>批量上新</button>
         <button type="button" disabled={workspace === 'batch' || phase === 'idle'} onClick={() => setContextOpen(true)}><span>◫</span>任务进度</button>
       </nav>
-      {workspace !== 'batch' && <><div className="agent-rail-label">最近对话</div>
+      <div className="agent-rail-label">最近对话</div>
       <div className="conversation-list" id="conversation-list">{conversations.map((item) => <div className={`conversation-item ${item.id === conversationId ? 'active' : ''}`} key={item.id}>
         {renamingId === item.id ? <form className="conversation-rename" onSubmit={(event) => { event.preventDefault(); void renameConversation(item.id); }}>
           <input autoFocus value={renameValue} maxLength={60} aria-label="会话名称" onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null); }} />
@@ -1561,7 +1561,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
             <button className="conversation-action" type="button" disabled={phase === 'processing'} title="更多操作" aria-label={`会话操作：${item.title}`} aria-haspopup="menu" onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setItemMenu({ id: item.id, x: rect.right, y: rect.bottom }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg></button>
           </div>
         </>}
-      </div>)}</div></>}
+      </div>)}</div>
       <div className="agent-rail-links">
         <button type="button" title="帮助中心"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm1-4h-2v2h2v-2Zm1.9-5.6c-.3.4-.8.8-1.4 1.1-.4.2-.5.4-.5.8v.7h-2v-.9c0-1 .5-1.7 1.4-2.2.5-.3.8-.5.9-.8.2-.3.3-.6.3-1 0-.9-.7-1.6-1.6-1.6s-1.6.7-1.6 1.6H9c0-2 1.3-3.6 3-3.6s3 1.4 3 3.2c0 .7-.2 1.3-.6 1.7Z"/></svg><span>帮助中心</span></button>
         <button type="button" title="偏好设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.7c.2-.2.3-.5.1-.7l-2-3.5c-.1-.2-.4-.3-.7-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1L14.2 2c0-.3-.3-.5-.5-.5h-4c-.2 0-.5.2-.5.5l-.4 2.7c-.6.2-1.2.5-1.7 1l-2.5-1c-.2-.1-.5 0-.7.2l-2 3.5c-.1.2-.1.5.1.7L4.1 11c0 .3-.1.7-.1 1s0 .7.1 1l-2.1 1.7c-.2.2-.3.5-.1.7l2 3.5c.1.2.4.3.7.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.7c0 .3.3.5.5.5h4c.2 0 .5-.2.5-.5l.4-2.7c.6-.2 1.2-.5 1.7-1l2.5 1c.2.1.5 0 .7-.2l2-3.5c.1-.2.1-.5-.1-.7L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg><span>偏好设置</span></button>

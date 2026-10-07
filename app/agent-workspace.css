@@ -2562,15 +2562,6 @@ body {
   }
 }
 
-@media (min-width: 1101px) {
-  .agent-shell-v2[data-workspace="batch"] {
-    grid-template-columns: 220px clamp(380px, 30vw, 500px) minmax(0, 1fr);
-  }
-  .agent-shell-v2[data-workspace="batch"] .agent-rail-resizer {
-    display: none;
-  }
-}
-
 .agent-shell-v2[data-workspace="batch"] .agent-model {
   display: none;
 }
