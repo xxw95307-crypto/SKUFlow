@@ -73,7 +73,6 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
   const [detailsOpen, setDetailsOpen] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
   const [locatedField, setLocatedField] = useState<{key:string;sequence:number} | null>(null);
-  useEffect(() => { setLocatedField(null); }, [selectedDraftId]);
   useEffect(() => {
     if (!locatedField || (conversation && !detailsOpen)) return;
     const field = Array.from(formRef.current?.querySelectorAll<HTMLElement>('[data-listing-field]') ?? []).find(node => node.dataset.listingField === locatedField.key);
@@ -93,6 +92,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
         setPassport(payload.passport);
         onPassportChange?.(payload.passport);
         setSelectedDraftId((current) => current || payload.passport!.platformDrafts.find((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED')?.id || payload.passport!.platformDrafts[0]?.id || '');
+        setLocatedField(null);
       })
       .catch((caught) => {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
@@ -113,6 +113,16 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
   const generatedCount = passport?.platformDrafts.filter((draft) => isListingDraftPayload(draft.payload)).length ?? 0;
   const approvedCount = passport?.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED').length ?? 0;
   const allApproved = Boolean(passport?.platformDrafts.length && approvedCount === passport.platformDrafts.length);
+  const previewKeys = ['item_name', 'title', 'bullet_points', 'body_html', 'product_description', 'tags'];
+  const previewFields = listing?.schema.fields
+    .filter((field) => previewKeys.includes(field.key))
+    .sort((left, right) => previewKeys.indexOf(left.key) - previewKeys.indexOf(right.key))
+    .slice(0, 3) ?? [];
+  const issueFields = listing && selectedDraft
+    ? selectedDraft.validationIssues.filter((issue) => listing.schema.fields.some((field) => field.key === issue.path))
+    : [];
+  const unconfirmedInferences = listing?.schema.fields.filter((field) =>
+    (fieldSources[field.key] ?? field.source) === 'AI_INFERRED' && !confirmations.includes(field.key)) ?? [];
 
   const generate = async (prefillOnly = false) => {
     if (!task) return;
@@ -137,6 +147,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
         onPassportChange?.(latest);
       }
       setSelectedDraftId(latest.platformDrafts[0]?.id ?? '');
+      setLocatedField(null);
       setDraftEdits({});
       setDraftConfirmations({});
       setMessage(prefillOnly ? '已重新核对资料与对话。有明确依据的缺失项已补全，请核对来源；其余按提示处理。' : `已生成 ${latest.platformDrafts.length} 个平台的中文审校稿，请逐个确认。`);
@@ -208,6 +219,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
         const remaining = payload.passport.platformDrafts.find((draft) => draft.status !== 'APPROVED' && draft.status !== 'DRAFT_CREATED');
         if (remaining) {
           setSelectedDraftId(remaining.id);
+          setLocatedField(null);
           setDetailsOpen(false);
           setMessage('该平台 Listing 已确认，接下来请确认下一份。');
         } else {
@@ -226,23 +238,30 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
   if (!task) return <section className="panel listing-panel"><h2>请先创建商品任务</h2><p>完成商品资料处理后，才能生成平台 Listing。</p></section>;
 
   return <section className={conversation ? 'listing-conversation-card' : 'panel listing-panel'}>
-    {conversation ? <header className="listing-conversation-head"><span>需要你确认 · 还剩 {Math.max(0, (passport?.platformDrafts.length ?? 0) - approvedCount)} 个平台</span><h3>{listing?.schema.platformName ?? '平台'}中文 Listing 可以使用吗？</h3><p>我已按该平台字段完成中文稿。你可以直接确认，也可以展开修改具体内容。</p></header> : <>
+    {conversation ? <header className="listing-conversation-head"><span>还需确认 {Math.max(0, (passport?.platformDrafts.length ?? 0) - approvedCount)} 份</span><h3>{selectedDraft ? `${platformNames.get(selectedDraft.platformId) ?? selectedDraft.platformId} · ${selectedDraft.market}` : '确认商品内容'}</h3></header> : <>
       <div className="section-heading"><div><span>STEP 03 · PLATFORM LISTING REVIEW</span><h2>按平台审核中文 Listing</h2><p>系统按选定平台获取字段，将商品资料映射到对应表单，并由智能体用中文补全各平台的营销内容。</p></div><button className="primary" type="button" onClick={()=>generate()} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成中文审校稿' : '生成各平台中文审校稿'}</button></div>
       <div className="mock-mode-note"><b>中文审校阶段</b><span>先用简体中文审核，再在交付前生成目标站点译文。Shopify 将创建 Dev Store 草稿；Amazon 会按所选站点发送审核稿映射请求至对应区域的官方静态沙箱；其他平台仍为本地 Mock。</span></div>
     </>}
-    {conversation && listing && !allApproved && <div className="listing-replenish"><button type="button" disabled={busy || Object.keys(draftEdits).length > 0} title="如有未保存修改，请先保存" onClick={()=>generate(true)}>从资料补全缺失项</button></div>}
+    {conversation && listing && !allApproved && issueFields.length > 0 && <div className="listing-replenish"><button type="button" disabled={busy || Object.keys(draftEdits).length > 0} title="如有未保存修改，请先保存" onClick={()=>generate(true)}>从资料补全缺失项</button></div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {message && <div className="form-success" role="status">{message}</div>}
-    <div className={`platform-tabs dynamic ${conversation ? 'conversation-tabs' : ''}`}>{passport?.platformDrafts.map((draft) => <button className={selectedDraft?.id === draft.id ? 'active' : ''} onClick={() => { setSelectedDraftId(draft.id); setDetailsOpen(false); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market} · {draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'}</small></button>)}</div>
+    <div className={`platform-tabs dynamic ${conversation ? 'conversation-tabs' : ''}`} role="group" aria-label="选择要审核的站点">{passport?.platformDrafts.map((draft) => { const status = draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'; return <button className={selectedDraft?.id === draft.id ? 'active' : ''} aria-label={`${platformNames.get(draft.platformId) ?? draft.platformId} ${draft.market}，${status}`} aria-pressed={selectedDraft?.id === draft.id} onClick={() => { setSelectedDraftId(draft.id); setLocatedField(null); setDetailsOpen(false); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market}{conversation ? status === '已确认' ? ' · ✓' : '' : ` · ${status}`}</small></button>; })}</div>
 
     {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成各平台中文审校稿”，系统将获取平台字段（Shopify 使用真实接口），并让百炼用中文填写每个平台的营销字段。</p></div> : <>
-      <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · 发布前由 Agent 转换为 {listing.schema.locale} 并展示译文 · {listing.schema.categoryLabel}</span></div>{!conversation && <code>{listing.schema.schemaVersion}</code>}</div>
+      {!conversation && <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · 发布前由 Agent 转换为 {listing.schema.locale} 并展示译文 · {listing.schema.categoryLabel}</span></div><code>{listing.schema.schemaVersion}</code></div>}
       {listing.schema.platformId === 'shopify' && listing.schema.mode === 'MOCK' && <p role="alert">这是旧版 Mock 审核稿，请重新生成 Listing 获取 Shopify 实际字段后再确认发布。</p>}
-      {listing.schema.platformId === 'amazon' && listing.schema.mode === 'MOCK' && <div className="listing-sync-note" role="status"><b>Amazon {listing.schema.market} · 沙箱演示审核稿</b><span>字段来自 SKUFlow 示例规则。最终确认后会把当前审核稿的目标站点语言内容映射为 Listing 请求，并发送至该站点所在区域的官方静态沙箱；沙箱只返回预设响应，不能校验真实必填字段，也不会创建店铺商品。</span><div><button className="ghost" type="button" disabled={amazonSandboxBusy} onClick={testAmazonSandbox}>{amazonSandboxBusy ? '测试中…' : '单独测试此站点沙箱连通性'}</button>{amazonSandboxResult && <p>沙箱已连通：商品类型示例 {amazonSandboxResult.productType}；Listing 预设响应为 {amazonSandboxResult.listingPreviewStatus}{amazonSandboxResult.listingIssueCodes.length ? `（问题代码 ${amazonSandboxResult.listingIssueCodes.join('、')}）` : ''}。这不是当前商品的校验结果。</p>}{amazonSandboxError && <p role="alert">{amazonSandboxError}</p>}</div></div>}
-      {listing.schema.mode === 'SHOPIFY_API' && <div className="listing-sync-note"><b>字段来源：Shopify 实际接口 · {listing.schema.storeDomain}</b><span>商品、变体、地点库存、运输及所选图片将在发布时同步；库存需授权读写与地点权限。尚未接入：{listing.schema.unsupportedFields?.join('、')}。发布后逐项回读核对。</span></div>}
-      {listing.testPublication?.verification && <div className="listing-sync-note"><b>Shopify 回读核对</b><ul>{listing.testPublication.verification.map((item) => <li key={item.field}>{item.field}：{item.status === 'MATCH' ? '已核对一致' : item.status === 'MISMATCH' ? '值不一致' : item.status === 'NOT_SYNCED' ? '未同步' : item.status === 'PENDING' ? '平台处理中' : '未能核对'}</li>)}</ul></div>}
-      {listing.localization && <div className="listing-sync-note"><b>发布语言：{listing.localization.targetLanguage}（{listing.localization.targetLocale}）</b><span>译文已由 {listing.localization.model} 根据确认后的中文稿生成；发布及回读核对使用该译文。</span></div>}
-      {conversation && !detailsOpen && <dl className="listing-conversation-preview">{listing.schema.fields.slice(0, 5).map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{field.key === 'body_html' ? <DescriptionPreview value={fields[field.key]}/> : editableValue(field, fields[field.key]) || '待补充'}</dd><span>{(fieldSources[field.key] ?? field.source) === 'SELLER_INPUT' ? sellerFieldLabel(fields[field.key],listing.schema.mode === 'SHOPIFY_API' ? listingRequirement(field,fields) : field.required) : sourceLabels[fieldSources[field.key] ?? field.source]}</span></div>)}</dl>}
+      {conversation && listing.schema.platformId === 'amazon' && listing.schema.mode === 'MOCK' && <p className="listing-demo-disclosure">Amazon 演示稿 · 不会创建商品或校验真实站点字段</p>}
+      <details className={`listing-technical-details ${conversation ? 'compact' : ''}`} open={!conversation}>
+        <summary>平台与发布说明</summary>
+        {listing.schema.platformId === 'amazon' && listing.schema.mode === 'MOCK' && <div className="listing-sync-note"><b>Amazon {listing.schema.market} · 沙箱演示审核稿</b><span>字段来自 SKUFlow 示例规则。最终确认后会把当前审核稿的目标站点语言内容映射为 Listing 请求，并发送至该站点所在区域的官方静态沙箱；沙箱只返回预设响应，不能校验真实必填字段，也不会创建店铺商品。</span><div><button className="ghost" type="button" disabled={amazonSandboxBusy} onClick={testAmazonSandbox}>{amazonSandboxBusy ? '测试中…' : '测试沙箱连通性'}</button>{amazonSandboxResult && <p>沙箱已连通：商品类型示例 {amazonSandboxResult.productType}；Listing 预设响应为 {amazonSandboxResult.listingPreviewStatus}{amazonSandboxResult.listingIssueCodes.length ? `（问题代码 ${amazonSandboxResult.listingIssueCodes.join('、')}）` : ''}。这不是当前商品的校验结果。</p>}{amazonSandboxError && <p role="alert">{amazonSandboxError}</p>}</div></div>}
+        {listing.schema.mode === 'SHOPIFY_API' && <div className="listing-sync-note"><b>字段来源：Shopify 实际接口 · {listing.schema.storeDomain}</b><span>商品、变体、地点库存、运输及所选图片将在发布时同步；库存需授权读写与地点权限。尚未接入：{listing.schema.unsupportedFields?.join('、')}。发布后逐项回读核对。</span></div>}
+        {listing.testPublication?.verification && <div className="listing-sync-note"><b>Shopify 回读核对</b><ul>{listing.testPublication.verification.map((item) => <li key={item.field}>{item.field}：{item.status === 'MATCH' ? '已核对一致' : item.status === 'MISMATCH' ? '值不一致' : item.status === 'NOT_SYNCED' ? '未同步' : item.status === 'PENDING' ? '平台处理中' : '未能核对'}</li>)}</ul></div>}
+        {listing.localization && <div className="listing-sync-note"><b>发布语言：{listing.localization.targetLanguage}（{listing.localization.targetLocale}）</b><span>译文已由 {listing.localization.model} 根据确认后的中文稿生成；发布及回读核对使用该译文。</span></div>}
+      </details>
+      {conversation && !detailsOpen && <>
+        {(issueFields.length > 0 || unconfirmedInferences.length > 0) && <div className="listing-attention"><b>确认前请核对</b><span>{[...new Set([...issueFields.map((issue) => listing.schema.fields.find((field) => field.key === issue.path)?.label ?? issue.path), ...unconfirmedInferences.map((field) => field.label)])].join('、')}</span><button type="button" onClick={() => { setDetailsOpen(true); const first = issueFields[0]?.path ?? unconfirmedInferences[0]?.key; if (first) setLocatedField((current) => ({ key: first, sequence: (current?.sequence ?? 0) + 1 })); }}>查看</button></div>}
+        <dl className="listing-conversation-preview">{previewFields.map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{field.key === 'body_html' ? <DescriptionPreview value={fields[field.key]}/> : editableValue(field, fields[field.key]) || '待补充'}</dd></div>)}</dl>
+      </>}
       {(!conversation || detailsOpen) && <div className="listing-form-grid" ref={formRef}>{listing.schema.fields.map((field) => <ListingFieldEditor
         key={field.key}
         active={locatedField?.key === field.key}
@@ -274,7 +293,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
           };
         })}
       />)}</div>}
-      <div className="listing-review-actions"><span>整体确认会同时核对智能体推断值</span><div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看并修改'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认这份 Listing'}</button></div></div>
+      <div className="listing-review-actions">{!conversation && <span>确认前请核对所有商品内容</span>}<div>{conversation && <button className="ghost" type="button" onClick={() => setDetailsOpen((current) => !current)}>{detailsOpen ? '收起字段' : '查看全部字段'}</button>}{(!conversation || detailsOpen) && <button className="ghost" type="button" onClick={() => persist('save')} disabled={busy}>保存修改</button>}<button className="primary" type="button" onClick={() => persist('approve')} disabled={busy || selectedDraft.status === 'APPROVED'}>{busy ? '确认中…' : selectedDraft.status === 'APPROVED' ? '✓ 已确认' : '确认此站点'}</button></div></div>
     </>}
 
     {conversation && allApproved && <div className="listing-review-actions"><span>Listing 已确认，可继续选择图片。</span><button className="primary" type="button" onClick={onAssets}>继续到图片选择 →</button></div>}

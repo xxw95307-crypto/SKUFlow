@@ -2448,6 +2448,21 @@ body {
 .agent-shell-v2 .shopify-variant-fields label:first-child { grid-column: 1 / -1; }
 .agent-shell-v2 .shopify-variant-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .agent-shell-v2 .listing-review-actions { align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--sf-line); }
+.agent-shell-v2 .listing-conversation-card .conversation-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; }
+.agent-shell-v2 .listing-conversation-card .conversation-tabs button { display: flex; align-items: baseline; gap: 5px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }
+.agent-shell-v2 .listing-conversation-card .conversation-tabs small { display: inline; margin: 0; color: inherit; font-size: 12px; }
+.agent-shell-v2 .listing-conversation-card .listing-demo-disclosure { margin: 12px 24px 0; color: #875d20; font-size: 12px; line-height: 1.5; }
+.agent-shell-v2 .listing-conversation-card > .listing-technical-details { margin: 10px 24px 0; }
+.agent-shell-v2 .listing-technical-details > summary { cursor: pointer; color: #597166; font-size: 12px; }
+.agent-shell-v2 .listing-technical-details:not(.compact) > summary { display: none; }
+.agent-shell-v2 .listing-technical-details.compact .listing-sync-note { margin-top: 10px; }
+.agent-shell-v2 .listing-conversation-card .listing-attention { display: flex; align-items: center; gap: 10px; margin: 14px 24px 2px; padding: 10px 12px; border: 1px solid #edd7b4; border-radius: 9px; background: #fffbf2; color: #725a35; font-size: 12px; }
+.agent-shell-v2 .listing-conversation-card .listing-attention b { flex-shrink: 0; color: #8a6227; }
+.agent-shell-v2 .listing-conversation-card .listing-attention span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-shell-v2 .listing-conversation-card .listing-attention button { flex-shrink: 0; border: 0; background: transparent; color: #477658; font: inherit; font-weight: 700; cursor: pointer; }
+.agent-shell-v2 .listing-conversation-card .listing-conversation-preview > div { grid-template-columns: 100px minmax(0,1fr); }
+.agent-shell-v2 .listing-conversation-card .listing-conversation-preview dd { max-height: 48px; }
+.agent-shell-v2 .listing-conversation-card .listing-review-actions > div { margin-left: auto; }
 @media (max-width: 640px) {
  .agent-shell-v2 .listing-conversation-head { padding: 18px 16px; }
  .agent-shell-v2 .listing-conversation-card > .listing-replenish,
@@ -2457,6 +2472,12 @@ body {
  .agent-shell-v2 .listing-conversation-card > .form-error,
  .agent-shell-v2 .listing-conversation-card .listing-form-grid,
  .agent-shell-v2 .listing-conversation-card .listing-review-actions { margin-left: 16px; margin-right: 16px; }
+ .agent-shell-v2 .listing-conversation-card .listing-demo-disclosure,
+ .agent-shell-v2 .listing-conversation-card > .listing-technical-details { margin-left: 16px; margin-right: 16px; }
+ .agent-shell-v2 .listing-conversation-card .listing-attention { margin-left: 16px; margin-right: 16px; flex-wrap: wrap; }
+ .agent-shell-v2 .listing-conversation-card .listing-attention span { white-space: normal; }
+ .agent-shell-v2 .listing-conversation-card .listing-conversation-preview > div { grid-template-columns: 1fr; }
+ .agent-shell-v2 .listing-conversation-card .listing-review-actions > div { width: 100%; margin-left: 0; }
  .agent-shell-v2 .shopify-variant-fields { grid-template-columns: 1fr; }
 }
 .agent-shell-v2 .listing-field.is-located { border-color: #6ba886; box-shadow: 0 0 0 3px #6ba88633; scroll-margin: 24px; }
