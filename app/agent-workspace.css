@@ -1175,11 +1175,20 @@ body {
   margin-top: 0;
 }
 
-.agent-shell-v2 .image-picker-review-note {
-  margin: 0 0 12px;
-  color: #965521;
+.agent-shell-v2 .image-picker-failure-details {
+  margin-top: 12px;
+  color: #766f61;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.agent-shell-v2 .image-picker-failure-details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.agent-shell-v2 .image-picker-failure-details p {
+  margin: 6px 0 0 18px;
 }
 
 .agent-shell-v2 .image-picker-review-badge {

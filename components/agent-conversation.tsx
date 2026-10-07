@@ -286,8 +286,6 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   const previewAsset = previewIndex === null ? null : completed[previewIndex] ?? null;
   return <div className="asset-conversation-card image-picker-card">
     <h3 className="visually-hidden">选择商品图片</h3>
-    {!readOnly && rejectedCount > 0 && <p className="image-picker-review-note" role="status">{rejectedCount} 张旧图未通过画面验收，已从可选结果中移除。</p>}
-    {!readOnly && failed.length > 0 && <p className="image-picker-review-note" role="status">{failed.length} 张图片未通过验收，未加入可选结果。{failed.map((asset) => `${asset.title}：${asset.error || '生成失败'}`).join('；')}</p>}
     <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
         <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
@@ -295,6 +293,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
       {!readOnly && <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>}
       {asset.error && <span className="image-picker-review-badge">未通过验收</span>}
     </div>)}</div>
+    {!readOnly && (failed.length > 0 || rejectedCount > 0) && <details className="image-picker-failure-details"><summary>{failed.length + rejectedCount} 张图片未加入可选结果</summary>{failed.map((asset) => <p key={asset.id}>{asset.title}：{asset.error || '生成失败'}</p>)}{rejectedCount > 0 && <p>{rejectedCount} 张旧图未通过验收。</p>}</details>}
     {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
       <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
@@ -1646,7 +1645,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       <div className={`agent-chat-layout ${showWelcomeWorkspace ? 'idle' : ''} ${contextOpen ? 'context-open' : ''}`}>
         <section className="agent-thread" aria-label="Agent 对话">
           {!showWelcomeWorkspace && workspace !== 'batch' && <div className="agent-date">今天 · Agent 工作区</div>}
-          {!showWelcomeWorkspace && workspace === 'batch' && phase === 'resume' && messages.length > 0 && <details className="batch-conversation-history"><summary>查看历史消息（{messages.length}）</summary>{messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}><span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span><div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}><RichMessageContent message={currentListingMessage(message, passport)} />{message.kind === 'assets' && message.assets && message.assets.length > 0 && <AssetConversationCard assets={displaySnapshots(message.assets)} selected={[]} onToggle={() => {}} onConfirm={() => {}} onSkipVideo={() => {}} readOnly />}{task && message.kind === 'video' && Boolean(message.videoJobIds?.length) && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable jobIds={message.videoJobIds} />}</div></article>)}</details>}
+          {!showWelcomeWorkspace && workspace === 'batch' && phase === 'resume' && messages.length > 0 && <details className="batch-conversation-history"><summary>查看历史消息（{messages.length}）</summary>{messages.map((message) => <article className={`chat-message ${message.role}`} key={message.id}><span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span><div className={message.kind && message.kind !== 'text' ? 'rich-message-bubble' : ''}>{!(message.kind === 'assets' && message.assets?.length) && <RichMessageContent message={currentListingMessage(message, passport)} />}{message.kind === 'assets' && message.assets && message.assets.length > 0 && <AssetConversationCard assets={displaySnapshots(message.assets)} selected={[]} onToggle={() => {}} onConfirm={() => {}} onSkipVideo={() => {}} readOnly />}{task && message.kind === 'video' && Boolean(message.videoJobIds?.length) && <VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable jobIds={message.videoJobIds} />}</div></article>)}</details>}
           {!showWelcomeWorkspace && !(workspace === 'batch' && phase === 'resume') && messages.map((message, index) => {
             const joinsIntake = joinIntakeToLastAgentReply && index === messages.length - 1;
             const joinsImageBrief = joinImageBriefToLastAgentReply && index === messages.length - 1;
@@ -1658,7 +1657,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
             return <article className={`chat-message ${message.role}${joinsAction ? ' joined-action' : ''}${message.kind === 'video' ? ' video-round-message' : ''}`} key={message.id}>
               <span className="chat-avatar">{message.role === 'agent' ? 'AI' : avatar}</span>
               <div className={`${richClass}${joinsAction ? ' joined-action-bubble' : ''}`}>
-                {joinsAssets ? null : joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
+                {joinsAssets || (message.kind === 'assets' && message.assets?.length) ? null : joinsAction ? <div className="joined-message-copy"><RichMessageContent message={displayedMessage} /></div> : <RichMessageContent message={displayedMessage} />}
                 {joinsIntake && intakeCard}
                 {joinsImageBrief && imageBriefCard}
                 {joinsAssets && assetCard}
