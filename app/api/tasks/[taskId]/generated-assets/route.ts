@@ -79,7 +79,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
     const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
-    if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
+    if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0 && existing.every((asset) => asset.status === 'COMPLETED')) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
 
     const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED');
     if (approved.length === 0 || approved.length < passport.platformDrafts.length) {
@@ -168,18 +168,33 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: plan.assets, plannerModel: plan.model, decision });
     }
 
-    const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
+    const prepared = await Promise.allSettled(plan.assets.map(async (spec, position) => {
       const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, preferences });
       const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
       return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
     }));
-    const writes = await Promise.all(prepared.map(async ({ spec, prompt, generated, reviewWarning, id, position }) => {
+    if (!prepared.some((result) => result.status === 'fulfilled')) {
+      const failure = prepared[0].status === 'rejected' ? prepared[0].reason : null;
+      throw failure instanceof Error ? failure : new Error('本轮图片都未通过验收，已有图片保持不变');
+    }
+    const writes = await Promise.all(prepared.map(async (result, position) => {
+      const spec = plan.assets[position];
+      const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
+      if (result.status === 'rejected') {
+        const reason = result.reason instanceof Error ? result.reason.message : '图片生成失败';
+        return prepareGeneratedAssetInsert(bindings.DB, {
+          id: `asset_${crypto.randomUUID()}`, taskId, sourceFileId: image.id, batchId,
+          kind: spec.kind, title: spec.title, note: spec.note,
+          prompt: '', objectKey: null, contentType: null, model: config.model, status: 'FAILED',
+          width: null, height: null, error: reason, createdAt: timestamp, completedAt: timestamp,
+        });
+      }
+      const { prompt, generated, reviewWarning, id } = result.value;
       const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
       await bindings.UPLOADS.put(objectKey, generated.bytes, {
         httpMetadata: { contentType: generated.contentType },
         customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
       });
-      const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
       return prepareGeneratedAssetInsert(bindings.DB, {
         id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
         prompt, objectKey, contentType: generated.contentType, model: generated.model, status: 'COMPLETED',

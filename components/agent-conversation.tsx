@@ -251,6 +251,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   readOnly?: boolean;
 }) {
   const rejectedCount = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl && asset.error).length;
+  const failed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'FAILED');
   const completed = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl && (readOnly || !asset.error));
   const selectedCount = completed.filter((asset) => selected.includes(asset.id)).length;
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -286,6 +287,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   return <div className="asset-conversation-card image-picker-card">
     <h3 className="visually-hidden">选择商品图片</h3>
     {!readOnly && rejectedCount > 0 && <p className="image-picker-review-note" role="status">{rejectedCount} 张旧图未通过画面验收，已从可选结果中移除。</p>}
+    {!readOnly && failed.length > 0 && <p className="image-picker-review-note" role="status">{failed.length} 张图片未通过验收，未加入可选结果。{failed.map((asset) => `${asset.title}：${asset.error || '生成失败'}`).join('；')}</p>}
     <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
         <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
@@ -1055,7 +1057,9 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         setSelectedAssets(selectedAssetsRef.current);
         if (selectableIds.size === 0) throw new Error('图像模型没有生成通过验收的图片');
         setPhase('assets');
-        append('agent', targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
+        append('agent', payload.summary.failed > 0
+          ? `${payload.summary.completed} 张图片已通过验收，${payload.summary.failed} 张未通过：${payload.assets.filter((asset) => asset.status === 'FAILED').map((asset) => asset.title).join('、')}。已通过的图片可以继续使用；如还需要缺失的图片，请调整要求后重新生成。`
+          : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }
@@ -1226,7 +1230,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       };
       setCanRetryFailedTurn(true);
       setError(message); setPhase('error');
-      if (!message.startsWith('这次没有生成符合要求的')) append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
+      if (!message.includes('连续 3 次未通过画面验收')) append('agent', `我在执行工具时遇到了问题：${message}`, '任务已安全暂停');
       await persistConversation(activeTask?.id ?? null).catch(() => undefined);
     }
   };

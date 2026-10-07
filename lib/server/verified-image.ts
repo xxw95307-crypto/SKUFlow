@@ -50,5 +50,5 @@ export async function generateVerifiedImage(
     }
     currentPrompt = `${prompt}\n\n上一版未通过画面验收：${feedback}。必须更换画面方案，并满足：${spec.acceptance}`;
   }
-  throw new Error(`这次没有生成符合要求的“${spec.title}”，已有图片保持不变。可调整要求或换一张更清晰的商品原图后重试`);
+  throw new Error(`“${spec.title}”连续 3 次未通过画面验收：${feedback.slice(0, 160)}。可修改这张图的要求，或补充更清晰的商品细节原图后重试`);
 }

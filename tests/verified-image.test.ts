@@ -23,7 +23,7 @@ test('rejected images are never returned as selectable results', async () => {
   const review = (async () => ({ matches: false, reason: '画面仍有模特' })) as typeof checkGeneratedImageAgainstIntent;
   await assert.rejects(
     generateVerifiedImage(imageConfig, reviewConfig, source, spec, '商品海报', '只展示衣服，不要模特', source, [], { generate, review }),
-    /没有生成符合要求/,
+    /连续 3 次未通过画面验收：画面仍有模特/,
   );
   assert.equal(requests.length, 3);
   assert.equal(requests[0].negativePrompt, '模特、人物、真人');
