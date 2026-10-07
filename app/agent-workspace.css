@@ -1647,6 +1647,8 @@ body {
 .agent-shell-v2 .video-card-heading { display: flex; align-items: baseline; gap: 10px; }
 .agent-shell-v2 .video-card-heading span { color: #3c7e5b; font-size: 12px; font-weight: 700; }
 .agent-shell-v2 .video-card-heading b { color: #233b32; font-size: 17px; }
+.agent-shell-v2 .video-card-heading button { margin-left: auto; padding: 6px 10px; border: 1px solid #cbded1; border-radius: 7px; background: #fff; color: #346f51; font: inherit; font-size: 12px; cursor: pointer; }
+.agent-shell-v2 .video-card-heading button:disabled { opacity: .5; cursor: not-allowed; }
 .agent-shell-v2 .video-audio-choice { margin: 18px 0 0; padding: 0; border: 0; }
 .agent-shell-v2 .video-audio-choice legend { margin-bottom: 9px; color: #283c34; font-size: 14px; font-weight: 650; }
 .agent-shell-v2 .video-audio-options { display: flex; flex-wrap: wrap; gap: 8px; }

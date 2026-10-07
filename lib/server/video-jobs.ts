@@ -1,10 +1,24 @@
 import {ensureSchema,getBindings} from '@/db/client';
 import {getProductPassport} from '@/lib/server/passport-store';
 import {loadWanVideoConfig,requireWanConfig,submitWanVideo,queryWanVideo,synthesizeNarration,matchedVideoDuration,WanVideoRequestError,VideoAudioMode} from '@/lib/ai/wan-video';
+import {loadBailianConfig} from '@/lib/config/bailian';
+import {translateVideoPromptToChinese} from '@/lib/ai/video-prompt-language';
 interface VideoJobRow { id:string; task_id:string; source_file_id:string; plan_json:string; status:string; provider_task_id:string|null; error:string|null; }
 const publicJob=(r:VideoJobRow)=>({id:r.id,status:r.status,plan:JSON.parse(r.plan_json),error:r.error,videoUrl:r.status==='SUCCEEDED'?`/api/tasks/${r.task_id}/videos/${r.id}/file`:null});
 export async function updateVideoJob(req:Request,ctx:{params:Promise<{taskId:string}>}) {
- try {await ensureSchema();const {taskId}=await ctx.params;const {id,action,prompt,audioMode,narrationText}=await req.json() as {id:string;action:string;prompt?:unknown;audioMode?:unknown;narrationText?:unknown};if(!['start','refresh'].includes(action))return Response.json({error:'无效操作'},{status:400});const b=getBindings();let job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first<VideoJobRow>();if(!job)return Response.json({error:'视频任务不存在'},{status:404});const c=loadWanVideoConfig(b);
+ try {await ensureSchema();const {taskId}=await ctx.params;const {id,action,prompt,audioMode,narrationText}=await req.json() as {id:string;action:string;prompt?:unknown;audioMode?:unknown;narrationText?:unknown};if(!['start','refresh','translate_prompt'].includes(action))return Response.json({error:'无效操作'},{status:400});const b=getBindings();let job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first<VideoJobRow>();if(!job)return Response.json({error:'视频任务不存在'},{status:404});const c=loadWanVideoConfig(b);
+ if(action==='translate_prompt') {
+  if(job.status!=='DRAFT')return Response.json({error:'只能转换尚未提交的视频提示词'},{status:409});
+  const plan=JSON.parse(job.plan_json) as {prompt:string};
+  const currentPrompt=typeof prompt==='string'?prompt.trim():plan.prompt;
+  if(!currentPrompt||currentPrompt.length>4000)return Response.json({error:'请填写不超过 4000 字的视频生成提示词'},{status:400});
+  const translated=await translateVideoPromptToChinese(loadBailianConfig(b),currentPrompt);
+  const updated=await b.DB.prepare("UPDATE video_jobs SET plan_json=? WHERE id=? AND task_id=? AND status='DRAFT'")
+   .bind(JSON.stringify({...plan,prompt:translated}),id,taskId).run();
+  if(!updated.meta.changes)return Response.json({error:'提示词状态已变化，请刷新后重试'},{status:409});
+  job=await b.DB.prepare('SELECT * FROM video_jobs WHERE task_id=? AND id=?').bind(taskId,id).first<VideoJobRow>();
+  return Response.json({job:publicJob(job!)});
+ }
  if(action==='start'&&job.status==='DRAFT') {
  requireWanConfig(c);const p=await getProductPassport(b.DB,taskId);if(!p||p.conflicts.some(v=>v.status==='OPEN')||p.platformDrafts.some(d=>!['APPROVED','DRAFT_CREATED'].includes(d.status)))throw new Error('请先完成 Listing 确认');
  const source=await b.DB.prepare("SELECT object_key,content_type FROM generated_assets WHERE task_id=? AND id=? AND status='COMPLETED' AND object_key IS NOT NULL").bind(taskId,job.source_file_id).first<{object_key:string;content_type:string}>()
