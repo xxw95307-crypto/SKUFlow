@@ -1865,6 +1865,7 @@ body {
   border-radius: 5px 11px 11px;
 }
 
+.agent-shell-v2 .chat-message.listing-conversation > .listing-conversation-card,
 .agent-shell-v2 .chat-message.asset-conversation > .asset-conversation-card {
   margin-left: 0;
   margin-right: auto;
