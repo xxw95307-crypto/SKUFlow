@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildListingLocalizationMessages, localizedPublicationPayload, parseListingLocalizationOutput } from '../lib/agents/listing-localization.ts';
 import { marketLocale } from '../lib/localization/market-locales.ts';
+import { callBailianListingLocalization } from '../lib/ai/bailian-client.ts';
 import type { ListingDraftPayload } from '../lib/domain/listing.ts';
 
 const payload: ListingDraftPayload = {
@@ -43,4 +44,29 @@ test('localization rejects extra fields and changed list structure', () => {
   const context = { payload, targetLocale: 'ja-JP', targetLanguage: '日语' };
   assert.throws(() => parseListingLocalizationOutput(JSON.stringify({ fields: { title: '商品', body_html: '説明', tags: ['一つ'], variant_sku: '改ざん' } }), context), /未授权字段/);
   assert.throws(() => parseListingLocalizationOutput(JSON.stringify({ fields: { title: '商品', body_html: '説明', tags: ['一つ'] } }), context), /条目数发生变化/);
+});
+
+test('overlong localized video copy is rewritten before delivery', async () => {
+  const videoPayload: ListingDraftPayload = {
+    ...payload,
+    mode: 'MOCK',
+    schema: { ...payload.schema, mode: 'MOCK', platformId: 'tiktok-shop', fields: [
+      { key: 'video_hook', label: '短视频开场文案', type: 'string', source: 'AI_GENERATED', required: false, maxLength: 150 },
+    ] },
+    fields: { video_hook: '浅粉色披肩蝴蝶结针织开衫，适合秋冬穿搭。' },
+  };
+  const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+  const fetcher = async (_url: string | URL | Request, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body)));
+    const video_hook = requests.length === 1 ? 'A'.repeat(170) : 'A soft pink knit cardigan with a bow for autumn outfits.';
+    return Response.json({ id: `request-${requests.length}`, model: 'test', choices: [{ message: { content: JSON.stringify({ fields: { video_hook } }) } }] });
+  };
+  const result = await callBailianListingLocalization(
+    { apiKey: 'test', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'test' },
+    { payload: videoPayload, targetLocale: 'en-US', targetLanguage: '英语' },
+    fetcher as typeof fetch,
+  );
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].messages.at(-1)?.content ?? '', /超过 150 字符上限/);
+  assert.equal(result.fields.video_hook, 'A soft pink knit cardigan with a bow for autumn outfits.');
 });

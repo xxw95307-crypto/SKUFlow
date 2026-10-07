@@ -1,7 +1,7 @@
 import { buildFactExtractionMessages, parseFactExtractionOutput, type ExtractionContext } from '../agents/fact-extraction.ts';
 import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/vision-analysis.ts';
 import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
-import { buildListingLocalizationMessages, parseListingLocalizationOutput, type ListingLocalizationContext } from '../agents/listing-localization.ts';
+import { buildListingLocalizationMessages, ListingLocalizationLengthError, parseListingLocalizationOutput, type ListingLocalizationContext } from '../agents/listing-localization.ts';
 import { buildAssetPlanningMessages, parseAssetPlan, parseVisualToolDecision, type AssetGenerationSpec, type AssetPlanningContext, type VisualToolDecision } from '../agents/asset-generation.ts';
 import type { BailianConfig, BailianImageConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
@@ -441,33 +441,45 @@ export async function callBailianListingLocalization(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: buildListingLocalizationMessages(context),
-        response_format: { type: 'json_object' },
-        enable_thinking: false,
-        temperature: 0.15,
-        max_completion_tokens: 4_096,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
-      throw new Error(`百炼 Listing 本地化失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = buildListingLocalizationMessages(context);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages,
+          response_format: { type: 'json_object' },
+          enable_thinking: false,
+          temperature: 0.15,
+          max_completion_tokens: 4_096,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const requestId = response.headers.get('x-request-id') || response.headers.get('request-id');
+        throw new Error(`百炼 Listing 本地化失败（HTTP ${response.status}${requestId ? `，Request ID ${requestId}` : ''}）`);
+      }
+      const payload = await response.json() as ChatCompletionResponse;
+      const content = responseText(payload.choices?.[0]?.message?.content);
+      if (!content) throw new Error('百炼 Listing 本地化返回内容为空');
+      try {
+        return {
+          fields: parseListingLocalizationOutput(content, context),
+          model: payload.model || model,
+          usage: normalizeUsage(payload.usage),
+          requestId: payload.id || response.headers.get('x-request-id'),
+        };
+      } catch (error) {
+        if (!(error instanceof ListingLocalizationLengthError) || attempt > 0) throw error;
+        messages.push(
+          { role: 'assistant', content },
+          { role: 'user', content: `上次译文的 ${error.fieldKey}（${error.fieldLabel}）有 ${error.actualLength} 个字符，超过 ${error.maxLength} 字符上限。请保留原意与所有已确认的商品事实，尽量把这个字段精简到 ${Math.max(1, Math.floor(error.maxLength * 0.8))} 个字符以内，绝对不能超过 ${error.maxLength} 个字符（包含空格和标点）；其他字段、数组条目数和 JSON 结构保持不变。重新输出完整 JSON。` },
+        );
+      }
     }
-    const payload = await response.json() as ChatCompletionResponse;
-    const content = responseText(payload.choices?.[0]?.message?.content);
-    if (!content) throw new Error('百炼 Listing 本地化返回内容为空');
-    return {
-      fields: parseListingLocalizationOutput(content, context),
-      model: payload.model || model,
-      usage: normalizeUsage(payload.usage),
-      requestId: payload.id || response.headers.get('x-request-id'),
-    };
+    throw new Error('Listing 本地化未能通过长度校验');
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw new Error('百炼 Listing 本地化超时');
     throw error;

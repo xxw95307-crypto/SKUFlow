@@ -10,6 +10,27 @@ export interface ListingLocalizationContext {
   preferences?: ShopPreferences | null;
 }
 
+export class ListingLocalizationLengthError extends Error {
+  readonly fieldKey: string;
+  readonly fieldLabel: string;
+  readonly maxLength: number;
+  readonly actualLength: number;
+
+  constructor(
+    fieldKey: string,
+    fieldLabel: string,
+    maxLength: number,
+    actualLength: number,
+  ) {
+    super(`${fieldLabel}本地化内容超过 ${maxLength} 个字符`);
+    this.name = 'ListingLocalizationLengthError';
+    this.fieldKey = fieldKey;
+    this.fieldLabel = fieldLabel;
+    this.maxLength = maxLength;
+    this.actualLength = actualLength;
+  }
+}
+
 function shouldTranslate(field: ListingFieldDefinition): boolean {
   if (field.source === 'SELLER_INPUT' || field.type === 'number' || field.type === 'boolean' || field.type === 'variants' || field.lookup) return false;
   return field.key === 'title' || field.key === 'body_html' || field.key === 'tags' || field.key.startsWith('seo_') || field.source === 'AI_GENERATED';
@@ -59,13 +80,16 @@ export function parseListingLocalizationOutput(content: string, context: Listing
       const source = context.payload.fields[field.key];
       if (Array.isArray(source) && value.length !== source.length) throw new Error(`${field.label}本地化条目数发生变化`);
       if (field.maxItems && value.length > field.maxItems) throw new Error(`${field.label}本地化条目过多`);
-      if (field.itemMaxLength && value.some((item) => item.length > field.itemMaxLength!)) throw new Error(`${field.label}本地化内容过长`);
+      if (field.itemMaxLength) {
+        const longest = Math.max(0, ...value.map((item) => item.length));
+        if (longest > field.itemMaxLength) throw new ListingLocalizationLengthError(field.key, field.label, field.itemMaxLength, longest);
+      }
       fields[field.key] = value.map((item) => field.source === 'AI_GENERATED' && context.preferences?.bannedWords.length
         ? removeBannedWords(item, context.preferences.bannedWords) : item.trim());
       continue;
     }
     if (typeof value !== 'string' || !value.trim()) throw new Error(`${field.label}本地化内容为空`);
-    if (field.maxLength && value.length > field.maxLength) throw new Error(`${field.label}本地化内容超过 ${field.maxLength} 个字符`);
+    if (field.maxLength && value.length > field.maxLength) throw new ListingLocalizationLengthError(field.key, field.label, field.maxLength, value.length);
     fields[field.key] = field.source === 'AI_GENERATED' && context.preferences?.bannedWords.length
       ? removeBannedWords(value, context.preferences.bannedWords) : value.trim();
   }
