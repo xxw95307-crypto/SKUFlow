@@ -1,4 +1,4 @@
-import { withAuthentication } from '@/lib/server/auth';
+import { currentAccount, withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { callBailianListingLocalization } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
@@ -8,6 +8,7 @@ import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { isChineseLocale, marketLocale } from '@/lib/localization/market-locales';
 import { translatableListingFields } from '@/lib/agents/listing-localization';
 import { getProductPassport } from '@/lib/server/passport-store';
+import { getShopPreferences } from '@/lib/server/shop-preferences-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const bindings = getBindings();
     const passport = await getProductPassport(bindings.DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
+    const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const drafts = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload)
       && (body.draftId === undefined || draft.id === body.draftId));
     if (!drafts.length) return Response.json({ error: '没有等待发布的已确认 Listing' }, { status: 409 });
@@ -49,7 +51,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
             createdAt: new Date().toISOString(),
           };
         } else {
-          const response = await callBailianListingLocalization(config, { payload, targetLocale: target.locale, targetLanguage: target.language });
+          const response = await callBailianListingLocalization(config, { payload, targetLocale: target.locale, targetLanguage: target.language, preferences });
           localization = {
             status: 'READY' as const,
             sourceLocale: 'zh-CN' as const,

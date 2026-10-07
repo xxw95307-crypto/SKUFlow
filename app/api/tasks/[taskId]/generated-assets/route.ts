@@ -1,4 +1,4 @@
-import { withAuthentication } from '@/lib/server/auth';
+import { currentAccount, withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
 import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
 import { callBailianAssetPlanning, callBailianVisualIntent } from '@/lib/ai/bailian-client';
@@ -8,6 +8,7 @@ import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { listGeneratedAssetHistory, listLatestGeneratedAssets, prepareGeneratedAssetInsert } from '@/lib/server/generated-asset-store';
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
+import { getShopPreferences } from '@/lib/server/shop-preferences-store';
 import { generateVerifiedImage } from '@/lib/server/verified-image';
 
 export const dynamic = 'force-dynamic';
@@ -76,6 +77,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     ]);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
+    const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
     if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
 
@@ -114,6 +116,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       styleGuidance: decision.style,
       existingAssets: decision.targetIndices.length ? priorImages : [],
       targetIndices: decision.targetIndices,
+      preferences,
     });
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
@@ -132,7 +135,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
           reference = { bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type, sourceFileId: oldAsset.sourceFileId };
         }
-        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: spec.sourceMode === 'CURRENT' ? oldAsset : null });
+        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: spec.sourceMode === 'CURRENT' ? oldAsset : null, preferences });
         const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, {
           bytes: reference.bytes, contentType: reference.contentType,
         }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
@@ -166,7 +169,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }
 
     const prepared = await Promise.all(plan.assets.map(async (spec, position) => {
-      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings });
+      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, preferences });
       const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
       return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
     }));

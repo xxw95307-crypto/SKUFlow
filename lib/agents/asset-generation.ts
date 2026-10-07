@@ -2,6 +2,7 @@ import type { ListingDraftPayload } from '../domain/listing.ts';
 import { GENERATED_ASSET_KINDS, type GeneratedAsset, type GeneratedAssetKind } from '../domain/generated-asset.ts';
 import type { PlatformId } from '../domain/platform.ts';
 import type { ProductFact } from '../domain/product-passport.ts';
+import type { ShopPreferences } from '../domain/shop-preferences.ts';
 
 export const ASSET_PLAN_VERSION = 'dynamic-v3';
 const ALLOWED_SIZES = ['1024*1024', '1024*1280', '1280*1024'] as const;
@@ -30,6 +31,7 @@ export interface AssetPlanningContext {
   styleGuidance?: string | null;
   existingAssets?: readonly Pick<GeneratedAsset, 'kind' | 'title' | 'note'>[];
   targetIndices?: readonly number[];
+  preferences?: ShopPreferences | null;
 }
 
 export interface VisualToolDecision {
@@ -86,17 +88,17 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
   const targeted = Boolean(context.targetIndices?.length);
   return [{
     role: 'system',
-    content: `你是跨境电商视觉策划 Agent。根据商家本轮自然语言要求、已有图片和可信商品事实，自由规划这一轮要生成的商品图片。商家要求是唯一的创作目标，不套用固定图种组合。
+    content: `你是跨境电商视觉策划 Agent。根据商家本轮自然语言要求、已确认的店铺默认偏好、已有图片和可信商品事实，自由规划这一轮要生成的商品图片。商家本轮要求优先，不套用固定图种组合。
 
 只输出 JSON：{"assets":[{"kind":"CUSTOM","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的详细中文生成指令","acceptance":"该图完成后可从画面判断的具体验收标准","negativePrompt":"这张图片中明确禁止出现的元素；没有则为空字符串","sourceMode":"ORIGINAL 或 CURRENT"}]}。
 
 这一阶段只规划图片，不规划、提交或生成视频。视频会在商家确认最终图片后单独处理。
 
 规则：
-0. 先把商家本轮要求拆成每一张独立的视觉任务，再逐项落实数量、内容、人物、风格、背景、角度、排除项和指定图片的要求。每张的 instruction 只能描述这一张的目标，不得混入其他图片的目标。例如“一张海报、一张模特图”应有两个可辨认且不同的画面形式，不能都只是模特场景照。本轮明确提出的要求覆盖旧图的风格和早先的偏好；旧图只用于理解商品或定位修改对象，不得从中继承排除项。明确不需要的元素绝不加入；商家没有要求的模特、主图、细节图等绝不作为必需项补入。
+0. 先把商家本轮要求拆成每一张独立的视觉任务，再逐项落实数量、内容、人物、风格、背景、角度、排除项和指定图片的要求。每张的 instruction 只能描述这一张的目标，不得混入其他图片的目标。例如“一张海报、一张模特图”应有两个可辨认且不同的画面形式，不能都只是模特场景照。本轮明确提出的要求覆盖旧图的风格和早先的店铺偏好；店铺偏好只在本轮未指定时作为默认风格，不得作为商品事实。旧图只用于理解商品或定位修改对象，不得从中继承排除项。明确不需要的元素绝不加入；商家没有要求的模特、主图、细节图等绝不作为必需项补入。
 1. ${targeted ? `本轮只修改第 ${context.targetIndices!.join('、')} 张。只输出 ${context.targetIndices!.length} 个 assets，与这些序号依次对应。其余图片保持原样。` : `生成整组图片。${context.requestedCount == null ? '未指定数量时由你根据本轮要求决定 1–6 张；若自然语言明确列出了若干张，按列出的张数生成。' : `严格生成 ${context.requestedCount} 张。`}`}
 2. kind 只是可选展示标签，可用 HERO、LIFESTYLE、DETAIL、MODEL、FEATURE、SCALE、PACKAGING、POSTER；不贴切时用 CUSTOM。不得让标签反过来限制商家需求。封面和顺序由后续 Agent 决定，本阶段不指定主图。
-3. instruction 应描述每张图的主体、动作或摆放、构图、场景、光线、风格和必须避免的元素；negativePrompt 必须写入商家对这张图明确排除的画面元素，并用于图像模型的负向提示。例如商家说“只展示衣服，不要模特”，该图的 instruction、acceptance 和 negativePrompt 都必须落实无人、无模特、无人物。acceptance 要把本轮要求转成视觉上可核对的标准，不得只写“符合要求”。当商家用不同名称指定多张时，验收标准必须能区分各张的画面形式，不能只检查商品或背景。若要求海报，验收要检查可辨认的海报设计构图、视觉层次与可用信息区域，普通人物场景照不能充当海报；是否有人物仍以商家要求为准。禁止把本轮商家明确要求出现的元素写进排除项；任何额外排除项都必须有本轮原话或商品事实支持。
+3. instruction 应描述每张图的主体、动作或摆放、构图、场景、光线、风格和必须避免的元素；negativePrompt 必须写入商家对这张图明确排除的画面元素，并用于图像模型的负向提示。例如商家说“只展示衣服，不要模特”，该图的 instruction、acceptance 和 negativePrompt 都必须落实无人、无模特、无人物。acceptance 要把本轮要求转成视觉上可核对的标准，不得只写“符合要求”。当商家用不同名称指定多张时，验收标准必须能区分各张的画面形式，不能只检查商品或背景。若要求海报，验收要检查可辨认的海报设计构图、视觉层次与可用信息区域，普通人物场景照不能充当海报；是否有人物仍以商家要求为准。禁止把本轮商家明确要求出现的元素写进排除项；额外排除项只可来自本轮原话、已确认店铺禁用词（限画面文字）或商品事实。
 4. size 只能是 1024*1024、1024*1280 或 1280*1024。
 4a. sourceMode 决定生成参考图：ORIGINAL 使用商家上传的原始商品图，CURRENT 使用要修改的现有成图。整组新图以及人物、主体、构图或画面形式需要明显改变时使用 ORIGINAL，避免把旧图中的错误模特、文字或背景带入；只有明确的小范围局部调整且要保留当前构图时使用 CURRENT。
 5. 商品身份、外形、颜色、结构、材质和真实标识必须与原图及已确认事实一致；不得虚构功能、配件、认证、促销或价格。海报文字仅可使用已确认事实，难以可靠生成时预留排版空间。
@@ -114,6 +116,8 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 商家本轮补充要求：${plainText(context.userGuidance) || '无，由你根据商品与平台自主判断'}
 商家指定图片数量：${targeted ? '局部修改，不改变总张数' : context.requestedCount == null ? '未指定，由你判断' : `${context.requestedCount} 张，必须严格遵守`}
 商家指定图片风格：${plainText(context.styleGuidance) || '未指定，由你根据商品与平台自主判断'}
+店铺默认视觉偏好：${context.preferences?.visualStyle || '无'}
+店铺禁用词（仅限画面文字，不改变商品事实）：${context.preferences?.bannedWords.join('、') || '无'}
 
 请为这个具体商品制定素材计划。`,
   }];
@@ -177,6 +181,7 @@ export function buildAssetGenerationPrompt(input: {
   facts: readonly ProductFact[];
   listings: readonly ListingDraftPayload[];
   previousAsset?: Pick<GeneratedAsset, 'title' | 'note' | 'kind'> | null;
+  preferences?: ShopPreferences | null;
 }): string {
   return `你是跨境电商商品摄影与视觉设计师。${input.previousAsset ? '输入图片是本轮要修改的旧图。只修改这张图，严格执行商家的新要求；保留商品身份，无须复刻旧图的背景和构图。' : '请以输入图片中的真实商品作为唯一主体，执行视觉策划 Agent 制定的单张素材任务。'}
 
@@ -186,10 +191,13 @@ export function buildAssetGenerationPrompt(input: {
 3. 只能使用下方已确认商品事实，不得添加资料没有支持的配件、功能、认证、促销或文字。
 4. 只执行下方这一张的视觉任务与验收标准，绝不同时制作同组其他图片的形式。不要自行添加这张任务未要求的人物、文字、道具或场景。若任务需要海报文字，只使用已确认的商品名称或事实，不能可靠生成时预留排版空间。
 5. 按这张图要求的媒介表达：摄影图保持真实比例和自然光影；海报、插画或信息设计应呈现清晰的设计构图、视觉层次和可用排版区域，不能只把普通场景照片当成设计成品。商品本身保持清晰。
+6. 店铺视觉偏好只在本轮没有更明确要求时使用；本轮商家要求与商品原图优先。店铺禁用词不能出现在图片文字中。
 
 商品名称：${input.productName}
 已确认商品事实：${factText(input.facts) || '以参考图可见内容为准'}
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
+店铺视觉偏好：${input.preferences?.visualStyle || '无'}
+店铺禁用词：${input.preferences?.bannedWords.join('、') || '无'}
 ${input.previousAsset ? `待修改旧图：${input.previousAsset.kind}｜${input.previousAsset.title}｜${input.previousAsset.note}` : ''}
 
 本张图片的视觉类型：${input.spec.kind}

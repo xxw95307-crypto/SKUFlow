@@ -1,6 +1,7 @@
 import { parseSuppliedFields, type ListingEvidenceSource } from './listing-evidence.ts';
 import type { ListingFieldDefinition, ListingGenerationOutput, MockListingSchema } from '../domain/listing';
 import type { ProductFact } from '../domain/product-passport';
+import { removeBannedWords, type ShopPreferences } from '../domain/shop-preferences.ts';
 
 export const LISTING_GENERATION_PROMPT_VERSION = 'listing-v4-evidence-prefill';
 
@@ -9,6 +10,7 @@ export interface ListingGenerationContext {
   evidenceSources?: ListingEvidenceSource[];
   facts: ProductFact[];
   drafts: Array<{ draftId: string; schema: MockListingSchema }>;
+  preferences?: ShopPreferences | null;
 }
 
 function unwrapJson(content: string): unknown {
@@ -60,7 +62,12 @@ export function parseListingGenerationOutput(content: string, context: ListingGe
     for (const [key, value] of Object.entries(record.fields as Record<string, unknown>)) {
       if (!allowed.has(key)) continue;
       const normalized = normalizeGeneratedValue(value);
-      if (normalized !== undefined) fields[key] = normalized;
+      if (normalized !== undefined) {
+        const field = context.drafts.find((draft) => draft.draftId === draftId)?.schema.fields.find((item) => item.key === key);
+        fields[key] = field?.source === 'AI_GENERATED' && context.preferences?.bannedWords.length
+          ? removeBannedWords(normalized, context.preferences.bannedWords)
+          : normalized;
+      }
     }
     const schema = context.drafts.find(d => d.draftId === draftId)!.schema;
     drafts.push({ draftId, fields, ...parseSuppliedFields(record.suppliedFields, schema.fields, context.evidenceSources ?? []) });
@@ -113,11 +120,12 @@ export function buildListingGenerationMessages(context: ListingGenerationContext
       '布尔值必须依据明确陈述，不根据实物外观默认运输/收税/库存策略。lookup 只能使用 options 中唯一且名称或ID与证据完全对应的选项，不选默认地点，不编造 Shopify ID。',
       'variants 只提取原文明确列出的每一行组合：[{options:颜色=粉色;尺码=M,sku,price,quantity,barcode,weight}]，不可用颜色与尺码列表生成笛卡尔积，不可将单一数值复制到所有规格。价格片段必须包含店铺币种，重量只接受原文 kg 数值。',
       '不得用原始资料覆盖档案中已确认的冲突裁决。每个平台应采用不同的中文文案。',
+      '店铺偏好只约束品牌表达与用词，不是商品事实或证据；本轮卖家的明确要求优先。禁用词不得出现在 AI 创作的标题、卖点、描述等文案中。',
       '严格遵守字段类型、数量和长度限制。输出标准 JSON，不要输出 Markdown。',
       '结构：{"drafts":[{"draftId":"draft_x","fields":{"title":"..."},"suppliedFields":{"variant_sku":{"value":"原文SKU","sourceId":"E1","quote":"SKU：原文SKU"},"variant_price":{"reason":"资料未明确币种，请确认"}}}],"notes":[]}。suppliedFields 是以目标字段 key 为键的对象，不是数组。fields 没有创作目标时返回空对象。',
     ].join('\n'),
   }, {
     role: 'user',
-    content: JSON.stringify({ productName: context.productName, facts, targets, evidenceSources: context.evidenceSources ?? [] }),
+    content: JSON.stringify({ productName: context.productName, facts, targets, evidenceSources: context.evidenceSources ?? [], shopStyle: context.preferences ? { brandVoice: context.preferences.brandVoice, bannedWords: context.preferences.bannedWords } : null }),
   }];
 }

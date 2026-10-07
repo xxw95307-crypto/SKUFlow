@@ -10,10 +10,15 @@ const richMockPlatforms = new Set<PlatformId>(['amazon', 'tiktok-shop', 'shopify
 
 const acceptedTypes = '.jpg,.jpeg,.png,.webp,.pdf,.xlsx,.xls,.csv,.txt,.docx';
 
-function initialSelections(initialTargets?: { platforms: PlatformId[]; markets: string[] }): Partial<Record<PlatformId, string[]>> {
-  if (!initialTargets || (initialTargets.platforms.length > 1 && initialTargets.markets.length > 1)) return {};
-  return Object.fromEntries(initialTargets.platforms.map((platformId) => [platformId,
-    initialTargets.markets.map(normalizeMarket).filter((market) => marketOptionsForPlatform(platformId).includes(market)),
+function initialSelections(initialTargets?: { platforms: PlatformId[]; markets: string[] }, preferredTargets: readonly PlatformTarget[] = []): Partial<Record<PlatformId, string[]>> {
+  if (initialTargets?.platforms.length) {
+    if (initialTargets.platforms.length > 1 && initialTargets.markets.length > 1) return {};
+    return Object.fromEntries(initialTargets.platforms.map((platformId) => [platformId,
+      initialTargets.markets.map(normalizeMarket).filter((market) => marketOptionsForPlatform(platformId).includes(market)),
+    ])) as Partial<Record<PlatformId, string[]>>;
+  }
+  return Object.fromEntries([...new Set(preferredTargets.map((target) => target.platformId))].map((platformId) => [platformId,
+    preferredTargets.filter((target) => target.platformId === platformId).map((target) => target.market),
   ])) as Partial<Record<PlatformId, string[]>>;
 }
 
@@ -22,15 +27,16 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], initialTargets }: {
+export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], initialTargets, preferredTargets = [] }: {
   onNext: (task: TaskSnapshot) => void;
   agentManaged?: boolean;
   initialFiles?: File[];
   initialTargets?: { platforms: PlatformId[]; markets: string[] };
+  preferredTargets?: PlatformTarget[];
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [platforms, setPlatforms] = useState<PlatformId[]>(initialTargets?.platforms ?? []);
-  const [marketSelections, setMarketSelections] = useState<Partial<Record<PlatformId, string[]>>>(() => initialSelections(initialTargets));
+  const [platforms, setPlatforms] = useState<PlatformId[]>(initialTargets?.platforms.length ? initialTargets.platforms : [...new Set(preferredTargets.map((target) => target.platformId))]);
+  const [marketSelections, setMarketSelections] = useState<Partial<Record<PlatformId, string[]>>>(() => initialSelections(initialTargets, preferredTargets));
   const [expandedMarkets, setExpandedMarkets] = useState<PlatformId[]>([]);
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [task, setTask] = useState<TaskSnapshot | null>(null);
@@ -132,6 +138,7 @@ export function TaskIntake({ onNext, agentManaged = false, initialFiles = [], in
     {!agentManaged && <div className="single-product-note"><b>一次任务对应一个商品</b><span>无需提前填写商品名称。请把该商品的图片、参数表、说明书和其他资料一起上传，模型会自动命名、合并属性并检查冲突。</span></div>}
 
     <div className="intake-fields">
+      {!initialTargets?.platforms.length && preferredTargets.length > 0 && <p className="market-selection-empty">已预选店铺常用站点；本次商品可以直接调整。</p>}
       <fieldset><legend>目标平台 <small>可多选，再分别指定站点</small></legend><div className="platform-choice-grid">{platformRegistry.map((platform) => <button type="button" className={platforms.includes(platform.id) ? 'selected' : ''} onClick={() => togglePlatform(platform.id)} key={platform.id}><b>{platform.shortName}</b><small>{platform.id === 'amazon' ? '官方静态沙箱' : platform.id === 'shopify' ? 'Dev Store 实际字段' : richMockPlatforms.has(platform.id) ? '专用 Mock Schema' : '通用 Mock Schema'}</small></button>)}</div></fieldset>
       {platforms.length === 0 ? <p className="market-selection-empty">先选择平台，再查看该平台可选的目标站点。</p> : <fieldset><legend>目标站点 <small>每个平台分别选择，不会生成无关组合</small></legend><div className="platform-market-list">{platforms.map((platformId) => {
         const profile = platformRegistry.find((item) => item.id === platformId);

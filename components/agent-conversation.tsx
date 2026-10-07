@@ -11,6 +11,7 @@ import type { CSSProperties } from 'react';
 import Image from 'next/image';
 import { ListingWorkspace } from '@/components/listing-workspace';
 import { BatchWorkspace } from '@/components/batch-workspace';
+import { ShopPreferencesDialog } from '@/components/shop-preferences-dialog';
 import { TaskIntake } from '@/components/task-intake';
 import { TaskTargetEditor } from '@/components/task-target-editor';
 import { inferConversationTargets } from '@/lib/agents/intake-targets';
@@ -19,6 +20,7 @@ import { restoreConversationAssetSnapshots, snapshotGeneratedImages } from '@/li
 import { restoreConversationVideoRounds } from '@/lib/agents/video-history';
 import { targetsFromSharedSelection } from '@/lib/platforms/market-options';
 import type { ListingDraftPayload } from '@/lib/domain/listing';
+import type { ShopPreferences } from '@/lib/domain/shop-preferences';
 import type {
   AgentModelMessage,
   AgentOrchestratorResponse,
@@ -416,6 +418,9 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const [dragActive, setDragActive] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [targetEditorOpen, setTargetEditorOpen] = useState(false);
+  const [preferences, setPreferences] = useState<ShopPreferences | null>(null);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
   const targetReturnPhase = useRef<AgentPhase>('resume');
   const threadEnd = useRef<HTMLDivElement>(null);
   const composerFileInput = useRef<HTMLInputElement>(null);
@@ -430,6 +435,16 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
   const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'image_brief' || phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
+
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/shop-preferences').then(async (response) => {
+      if (!response.ok) return null;
+      const data = await response.json() as { preferences: ShopPreferences | null };
+      return data.preferences;
+    }).then((value) => { if (active) setPreferences(value); }).catch(() => {}).finally(() => { if (active) setPreferencesLoaded(true); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const syncWorkspace = () => {
@@ -1511,9 +1526,11 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     && (messages.at(-1)?.meta === '视频生成中' || messages.at(-1)?.meta === '等待视频确认');
   const selectedVideoSources = selectedAssets.filter((id) => id.startsWith('asset_'));
 
-  const intakeCard = phase === 'intake' && <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} /></div></div>;
+  const intakeCard = phase === 'intake' && (preferencesLoaded
+    ? <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + JSON.stringify(preferences?.preferredTargets) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} preferredTargets={preferences?.preferredTargets} /></div></div>
+    : <div className="chat-action-card intake">正在读取店铺偏好…</div>);
   const imageBriefCard = phase === 'image_brief' && <div className="image-brief-card">
-    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。</p></div>
+    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>{preferences?.visualStyle ? `默认沿用店铺视觉偏好：${preferences.visualStyle}。本轮可直接覆盖。` : '告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。'}</p></div>
     <div className="image-brief-fields">
       <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>按你的需求规划图片内容；封面与顺序稍后再确认。</small></fieldset>
       <label>图片风格<input value={imageBriefStyle} onChange={(event) => setImageBriefStyle(event.target.value)} maxLength={200} placeholder="例如：自然生活感、简洁高级、户外通勤" /></label>
@@ -1564,7 +1581,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       </div>)}</div>
       <div className="agent-rail-links">
         <button type="button" title="帮助中心"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm1-4h-2v2h2v-2Zm1.9-5.6c-.3.4-.8.8-1.4 1.1-.4.2-.5.4-.5.8v.7h-2v-.9c0-1 .5-1.7 1.4-2.2.5-.3.8-.5.9-.8.2-.3.3-.6.3-1 0-.9-.7-1.6-1.6-1.6s-1.6.7-1.6 1.6H9c0-2 1.3-3.6 3-3.6s3 1.4 3 3.2c0 .7-.2 1.3-.6 1.7Z"/></svg><span>帮助中心</span></button>
-        <button type="button" title="偏好设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.7c.2-.2.3-.5.1-.7l-2-3.5c-.1-.2-.4-.3-.7-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1L14.2 2c0-.3-.3-.5-.5-.5h-4c-.2 0-.5.2-.5.5l-.4 2.7c-.6.2-1.2.5-1.7 1l-2.5-1c-.2-.1-.5 0-.7.2l-2 3.5c-.1.2-.1.5.1.7L4.1 11c0 .3-.1.7-.1 1s0 .7.1 1l-2.1 1.7c-.2.2-.3.5-.1.7l2 3.5c.1.2.4.3.7.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.7c0 .3.3.5.5.5h4c.2 0 .5-.2.5-.5l.4-2.7c.6-.2 1.2-.5 1.7-1l2.5 1c.2.1.5 0 .7-.2l2-3.5c.1-.2.1-.5-.1-.7L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg><span>偏好设置</span></button>
+        <button type="button" title="偏好设置" disabled={!preferencesLoaded} onClick={() => setPreferencesOpen(true)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.7c.2-.2.3-.5.1-.7l-2-3.5c-.1-.2-.4-.3-.7-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1L14.2 2c0-.3-.3-.5-.5-.5h-4c-.2 0-.5.2-.5.5l-.4 2.7c-.6.2-1.2.5-1.7 1l-2.5-1c-.2-.1-.5 0-.7.2l-2 3.5c-.1.2-.1.5.1.7L4.1 11c0 .3-.1.7-.1 1s0 .7.1 1l-2.1 1.7c-.2.2-.3.5-.1.7l2 3.5c.1.2.4.3.7.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.7c0 .3.3.5.5.5h4c.2 0 .5-.2.5-.5l.4-2.7c.6-.2 1.2-.5 1.7-1l2.5 1c.2.1.5 0 .7-.2l2-3.5c.1-.2.1-.5-.1-.7L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg><span>偏好设置</span></button>
         <button type="button" className="agent-rail-upgrade" title="升级计划"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.8 5.7L19.5 9l-4.6 3.4 1.7 5.6L12 14.7l-4.6 3.3 1.7-5.6L4.5 9l5.7-1.3L12 2Z"/></svg><span>升级计划</span></button>
       </div>
       <div className="agent-user"><span>{avatar}</span><div><a href="/login" title="查看账号"><b>{account.name}</b></a><small title={account.phone || account.username || account.email}>{account.phone || account.username || account.email}</small></div>{account.provider === 'local' ? <button className="agent-user-signout" type="button" onClick={() => void signOutLocal()} title="退出登录" aria-label="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm4 4-1.4 1.4L15.2 11H8v2h7.2l-2.6 2.6L14 17l5-5-5-5Z"/></svg></button> : <a className="agent-user-signout" href="/signout-with-chatgpt?return_to=/login" target="_top" title="退出登录" aria-label="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm4 4-1.4 1.4L15.2 11H8v2h7.2l-2.6 2.6L14 17l5-5-5-5Z"/></svg></a>}</div>
@@ -1607,7 +1624,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
 
     {batchOpened && <section className="agent-batch-panel" hidden={workspace !== 'batch'} aria-label="批量上新控制台">
       <div className="agent-batch-panel-head"><div><small>SKUFlow 工作区</small><b>批量上新</b></div><button type="button" aria-label="收起批量上新控制台" onClick={() => showWorkspace('agent')}>×</button></div>
-      <BatchWorkspace embedded activeConversationId={conversationId} conversationSwitchDisabled={phase === 'processing'} onOpenConversation={(id) => void openConversation(id)} />
+      <BatchWorkspace embedded preferredTargets={preferences?.preferredTargets} activeConversationId={conversationId} conversationSwitchDisabled={phase === 'processing'} onOpenConversation={(id) => void openConversation(id)} />
     </section>}
 
     <section className="agent-main" id="agent-workspace">
@@ -1722,6 +1739,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     </section>
 
     {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} localizationBusy={localizationBusy} localizationError={localizationError} onRetryLocalization={() => setLocalizationRevision((value) => value + 1)} onPublish={publish} onClose={() => setPublishOpen(false)} />}
+    {preferencesOpen && <ShopPreferencesDialog initial={preferences} onSaved={(saved) => { setPreferences(saved); setPreferencesOpen(false); }} onClose={() => setPreferencesOpen(false)} />}
     {itemMenu && (() => {
       const menuItem = conversations.find((row) => row.id === itemMenu.id);
       if (!menuItem) return null;

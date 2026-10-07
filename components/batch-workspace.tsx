@@ -11,6 +11,7 @@ import './batch-workspace.css';
 
 interface BatchListItem { id: string; name: string; sourceLabel: string; createdAt: string; itemCount: number }
 interface Target { platformId: PlatformId; market: string }
+const noPreferredTargets: Target[] = [];
 interface ReviewDraft {
   id: string; platformId: string; market: string; status: string;
   payload: { fields: Record<string, unknown>; fieldSources: Record<string, string>; confirmedInferredFields?: string[]; schema: { fields: Array<{ key: string; label: string }> } };
@@ -30,9 +31,10 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-export function BatchWorkspace({ embedded = false, onOpenConversation, activeConversationId, conversationSwitchDisabled = false }: { embedded?: boolean; onOpenConversation?: (id: string) => void; activeConversationId?: string | null; conversationSwitchDisabled?: boolean }) {
+export function BatchWorkspace({ embedded = false, preferredTargets = noPreferredTargets, onOpenConversation, activeConversationId, conversationSwitchDisabled = false }: { embedded?: boolean; preferredTargets?: Target[]; onOpenConversation?: (id: string) => void; activeConversationId?: string | null; conversationSwitchDisabled?: boolean }) {
   const folderInput = useRef<HTMLInputElement>(null);
   const stopRequested = useRef(false);
+  const targetsEdited = useRef(false);
   const [files, setFiles] = useState<File[]>([]);
   const [folderError, setFolderError] = useState('');
   const [batchName, setBatchName] = useState('');
@@ -47,6 +49,10 @@ export function BatchWorkspace({ embedded = false, onOpenConversation, activeCon
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [reviewCandidates, setReviewCandidates] = useState<ReviewCandidate[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
+
+  useEffect(() => {
+    if (!targetsEdited.current) setTargets(preferredTargets);
+  }, [preferredTargets]);
 
   const updateBatchUrl = (id?: string) => {
     const url = new URL(window.location.href);
@@ -98,6 +104,7 @@ export function BatchWorkspace({ embedded = false, onOpenConversation, activeCon
   };
 
   const togglePlatform = (platformId: PlatformId) => {
+    targetsEdited.current = true;
     setTargets((current) => {
       if (current.some((target) => target.platformId === platformId)) {
         return current.filter((target) => target.platformId !== platformId);
@@ -108,12 +115,14 @@ export function BatchWorkspace({ embedded = false, onOpenConversation, activeCon
   };
 
   const toggleMarket = (platformId: PlatformId, market: string) => {
+    targetsEdited.current = true;
     setTargets((current) => current.some((target) => target.platformId === platformId && target.market === market)
       ? current.filter((target) => target.platformId !== platformId || target.market !== market)
       : [...current, { platformId, market }]);
   };
 
   const toggleAllMarkets = (platformId: PlatformId) => {
+    targetsEdited.current = true;
     setTargets((current) => {
       const options = marketOptionsForPlatform(platformId);
       const selected = new Set(current.filter((target) => target.platformId === platformId).map((target) => target.market));

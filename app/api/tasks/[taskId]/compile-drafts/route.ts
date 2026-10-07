@@ -14,6 +14,8 @@ import { compileMockListingDraft, isListingDraftPayload, validateMockListing } f
 import { resolveMockListingSchema } from '@/lib/mock-platforms/schemas';
 import { suggestAmazonProductType } from '@/lib/platforms/amazon-us-sandbox';
 import { getProductPassport, saveCompiledDrafts } from '@/lib/server/passport-store';
+import { currentAccount } from '@/lib/server/auth';
+import { getShopPreferences } from '@/lib/server/shop-preferences-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,6 +92,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       productName,
       facts: passport.facts,
       evidenceSources,
+      preferences: await getShopPreferences(bindings.DB, (await currentAccount())!.id),
       drafts: prefillOnly ? targets.map(t => ({...t,schema:{...t.schema,fields:t.schema.fields.filter(f => f.source !== 'AI_GENERATED').map(f => ({...f,allowAiInference:false}))}})) : targets,
     });
     const generatedByDraft = new Map(modelResponse.output.drafts.map((draft) => [draft.draftId, draft]));

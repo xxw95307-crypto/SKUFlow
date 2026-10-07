@@ -237,4 +237,5 @@ export const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS sms_challenges (phone TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, sent_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS auth_rate_limits (bucket TEXT PRIMARY KEY, attempts INTEGER NOT NULL, reset_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS oauth_identities (provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(provider,subject), FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE)`,
+  `CREATE TABLE IF NOT EXISTS shop_preferences (user_id TEXT PRIMARY KEY, preferences_json TEXT NOT NULL, confirmed_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 ] as const;
