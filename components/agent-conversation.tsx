@@ -86,8 +86,14 @@ function formatBytes(bytes: number): string {
 }
 
 function RichMessageContent({ message }: { message: ChatMessage }) {
+  const imageBrief = message.role === 'user' && message.meta === '图片需求已确认'
+    ? message.text.match(/数量：(.+?)；风格：(.+?)；其他要求：(.+?)。只生成图片/)
+    : null;
+  const displayText = imageBrief
+    ? ['生成图片', imageBrief[1] === '由 Agent 决定' ? '' : imageBrief[1], imageBrief[2] === '由 Agent 决定' ? '' : imageBrief[2], imageBrief[3] === '无' ? '' : imageBrief[3]].filter(Boolean).join(' · ')
+    : message.text;
   return <>
-    {message.text && <p>{message.text}</p>}
+    {displayText && <p>{displayText}</p>}
     {message.attachments && message.attachments.length > 0 && <div className="rich-file-list">
       {message.attachments.map((file) => {
         if(file.fileId.startsWith('video_')&&file.contentType.startsWith('video/')) return <div className="chat-result-video" key={file.fileId}><video controls playsInline preload="metadata" src={`/api/tasks/${file.taskId}/videos/${file.fileId}/file`}/><a href={`/api/tasks/${file.taskId}/videos/${file.fileId}/file`} download>下载结果视频</a></div>;
@@ -103,7 +109,7 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
     {message.items && message.items.length > 0 && <div className={`rich-item-list ${message.kind ?? 'text'}`}>
       {message.items.map((item) => <article key={item.id}><div><span>{item.label}</span>{item.status && <em>{item.status}</em>}</div><b>{item.value}</b>{item.detail && <small>{item.detail}</small>}</article>)}
     </div>}
-    {message.meta && !(message.kind === 'video' && message.videoJobIds?.length) && <small>{message.meta}</small>}
+    {message.meta && message.meta !== '图片需求已确认' && !(message.kind === 'video' && message.videoJobIds?.length) && <small>{message.meta}</small>}
   </>;
 }
 
