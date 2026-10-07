@@ -333,14 +333,16 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
   onClose: () => void;
 }) {
   const approved = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED');
+  const platformNames = [...new Set(approved.map((draft) => draft.platformId))]
+    .map((id) => platformRegistry.find((item) => item.id === id)?.shortName ?? id);
   const shopifyCount = approved.filter((draft) => draft.platformId === 'shopify').length;
   const amazonCount = approved.filter((draft) => draft.platformId === 'amazon').length;
   const mockCount = approved.length - shopifyCount - amazonCount;
   const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', amazonCount ? 'Amazon 所选站点官方静态沙箱测试' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
   const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && draft.payload.localization?.status === 'READY');
   return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose} wide>
-    <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 个平台 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
-    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{approved.map((draft) => platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId).join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
+    <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 份 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
+    <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{platformNames.join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? 'Agent 正在按目标站点生成译文…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
     <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文用于测试交付</b></header>
       {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>Agent 正在为各目标市场翻译 Listing，并校验字段长度与结构…</p></div>}
       {localizationError && <div className="publish-localization-error" role="alert"><p>{localizationError}</p><button type="button" onClick={onRetryLocalization}>重新生成译文</button></div>}
@@ -352,7 +354,7 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
       })}
     </section>
     <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{amazonCount ? 'Amazon 会按所选站点调用对应区域的官方静态沙箱；预设响应不代表真实上架，媒体编排只保存在 SKUFlow；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若连接未配置，Agent 会暂停并提示所需信息。</span></div>
-    <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || localizationBusy || !localizationReady || Boolean(localizationError)} onClick={onPublish}>{busy ? '测试交付中…' : localizationBusy ? '正在准备译文…' : `确认译文并执行 ${approved.length} 个平台测试`}</button></div>
+    <div className="dialog-footer"><button className="ghost" type="button" onClick={onClose}>再检查一下</button><button className="primary" type="button" disabled={busy || localizationBusy || !localizationReady || Boolean(localizationError)} onClick={onPublish}>{busy ? '测试交付中…' : localizationBusy ? '正在准备译文…' : `确认译文并测试 ${approved.length} 份 Listing`}</button></div>
   </AgentDialog>;
 }
 
