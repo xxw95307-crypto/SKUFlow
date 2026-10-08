@@ -6,7 +6,7 @@ import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
 import { getSelectedMedia } from '../lib/server/media-candidates.ts';
 
 const state: AgentWorkflowState = {taskId:'task_test',intakePresented:true,pendingAttachmentCount:0,taskStatus:'CREATED',productName:'T恤',
- fileCount:1,parsedFileCount:1,imageCount:1,analyzedImageCount:1,factCount:3,openConflictCount:0,draftCount:1,generatedDraftCount:1,
+ fileCount:1,parsedFileCount:1,imageCount:1,analyzedImageCount:1,factCount:3,openConflictCount:0,resolvedConflictCount:0,scenePlanConfirmed:true,sceneCount:1,draftCount:1,generatedDraftCount:1,
  approvedDraftCount:1,publishedDraftCount:0,generatedAssetCount:4,selectedAssetCount:2,selectedImageCount:1,imagesConfirmed:true,videoJobCount:1,publishApproved:false,
  videoCandidates:[{id:'video_second',title:'穿搭',duration:8,ordinal:2}]};
 

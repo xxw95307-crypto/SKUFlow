@@ -8,6 +8,7 @@ export interface GeneratedAsset {
   taskId: string;
   sourceFileId: string;
   batchId: string;
+  sceneId?: string;
   kind: GeneratedAssetKind;
   title: string;
   note: string;

@@ -56,6 +56,28 @@ export async function ensureSchema(): Promise<void> {
       if (!itemColumns.includes('last_error')) {
         await DB.prepare('ALTER TABLE batch_items ADD COLUMN last_error TEXT').run();
       }
+      const draftColumns = (await DB.prepare('PRAGMA table_info(platform_drafts)').all<{ name: string }>()).results.map((column) => column.name);
+      if (!draftColumns.includes('scene_id')) {
+        await DB.batch([
+          DB.prepare(`CREATE TABLE platform_drafts_scene_migration (
+            id TEXT PRIMARY KEY, task_id TEXT NOT NULL, passport_id TEXT NOT NULL,
+            platform_id TEXT NOT NULL, market TEXT NOT NULL, locale TEXT NOT NULL,
+            scene_id TEXT NOT NULL DEFAULT 'base', category_id TEXT, status TEXT NOT NULL,
+            schema_version TEXT, payload_json TEXT NOT NULL, validation_json TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (passport_id) REFERENCES product_passports(id) ON DELETE CASCADE,
+            UNIQUE (task_id, platform_id, market, locale, scene_id))`),
+          DB.prepare(`INSERT INTO platform_drafts_scene_migration
+            (id,task_id,passport_id,platform_id,market,locale,scene_id,category_id,status,schema_version,payload_json,validation_json,created_at,updated_at)
+            SELECT id,task_id,passport_id,platform_id,market,locale,'base',category_id,status,schema_version,payload_json,validation_json,created_at,updated_at FROM platform_drafts`),
+          DB.prepare('DROP TABLE platform_drafts'),
+          DB.prepare('ALTER TABLE platform_drafts_scene_migration RENAME TO platform_drafts'),
+          DB.prepare('CREATE INDEX IF NOT EXISTS idx_drafts_task_platform ON platform_drafts(task_id, platform_id, market)'),
+        ]);
+      }
+      const assetColumns = (await DB.prepare('PRAGMA table_info(generated_assets)').all<{ name: string }>()).results.map((column) => column.name);
+      if (!assetColumns.includes('scene_id')) await DB.prepare("ALTER TABLE generated_assets ADD COLUMN scene_id TEXT NOT NULL DEFAULT 'base'").run();
       await DB.prepare('PRAGMA optimize').run();
     })().catch((error) => {
       schemaPromise = null;

@@ -6,6 +6,7 @@ import { ShopifyLookupEditor, ShopifyVariantsEditor } from '@/components/shopify
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type { ListingFieldDefinition, ListingFieldSource } from '@/lib/domain/listing';
 import type { ProductPassport } from '@/lib/domain/product-passport';
+import { sceneLabel, type ScenePlan } from '@/lib/domain/scene-plan';
 import type { TaskSnapshot } from '@/lib/domain/task';
 import { platformRegistry } from '@/lib/platforms/registry';
 import { confirmedInferredFields, isListingDraftPayload, listingFieldSources } from '@/lib/mock-platforms/listing-compiler';
@@ -61,6 +62,7 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
   conversation?: boolean;
 }) {
   const [passport, setPassport] = useState<ProductPassport | null>(null);
+  const [scenePlan, setScenePlan] = useState<ScenePlan | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState('');
   const [draftEdits, setDraftEdits] = useState<Record<string, Record<string, unknown>>>({});
   const [draftConfirmations, setDraftConfirmations] = useState<Record<string, string[]>>({});
@@ -100,6 +102,11 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
       });
     return () => controller.abort();
   }, [task, onPassportChange]);
+
+  useEffect(() => {
+    if (!task) return;
+    void fetch(`/api/tasks/${task.id}/scene-plan`).then(async (response) => await response.json() as { plan?: ScenePlan | null }).then((data) => setScenePlan(data.plan ?? null)).catch(() => setScenePlan(null));
+  }, [task]);
 
   const selectedDraft = passport?.platformDrafts.find((draft) => draft.id === selectedDraftId) ?? passport?.platformDrafts[0];
   const listing = selectedDraft && isListingDraftPayload(selectedDraft.payload) ? selectedDraft.payload : null;
@@ -238,14 +245,14 @@ export function ListingWorkspace({ task, onAssets, onPassportChange, conversatio
   if (!task) return <section className="panel listing-panel"><h2>请先创建商品任务</h2><p>完成商品资料处理后，才能生成平台 Listing。</p></section>;
 
   return <section className={conversation ? 'listing-conversation-card' : 'panel listing-panel'}>
-    {conversation ? <header className="listing-conversation-head"><span>还需确认 {Math.max(0, (passport?.platformDrafts.length ?? 0) - approvedCount)} 份</span><h3>{selectedDraft ? `${platformNames.get(selectedDraft.platformId) ?? selectedDraft.platformId} · ${selectedDraft.market}` : '确认商品内容'}</h3></header> : <>
+    {conversation ? <header className="listing-conversation-head"><span>还需确认 {Math.max(0, (passport?.platformDrafts.length ?? 0) - approvedCount)} 份</span><h3>{selectedDraft ? `${platformNames.get(selectedDraft.platformId) ?? selectedDraft.platformId} · ${selectedDraft.market}${scenePlan?.mode === 'SPLIT' ? ` · ${sceneLabel(selectedDraft.sceneId, scenePlan)}` : ''}` : '确认商品内容'}</h3></header> : <>
       <div className="section-heading"><div><span>STEP 03 · PLATFORM LISTING REVIEW</span><h2>按平台审核中文 Listing</h2><p>系统按选定平台获取字段，将商品资料映射到对应表单，并由智能体用中文补全各平台的营销内容。</p></div><button className="primary" type="button" onClick={()=>generate()} disabled={busy}>{busy ? '生成中…' : generatedCount ? '重新生成中文审校稿' : '生成各平台中文审校稿'}</button></div>
       <div className="mock-mode-note"><b>中文审校阶段</b><span>先用简体中文审核，再在交付前生成目标站点译文。Shopify 将创建 Dev Store 草稿；Amazon 会按所选站点发送审核稿映射请求至对应区域的官方静态沙箱；其他平台仍为本地 Mock。</span></div>
     </>}
     {conversation && listing && !allApproved && issueFields.length > 0 && <div className="listing-replenish"><button type="button" disabled={busy || Object.keys(draftEdits).length > 0} title="如有未保存修改，请先保存" onClick={()=>generate(true)}>从资料补全缺失项</button></div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {message && <div className="form-success" role="status">{message}</div>}
-    <div className={`platform-tabs dynamic ${conversation ? 'conversation-tabs' : ''}`} role="group" aria-label="选择要审核的站点">{passport?.platformDrafts.map((draft) => { const status = draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'; return <button className={selectedDraft?.id === draft.id ? 'active' : ''} aria-label={`${platformNames.get(draft.platformId) ?? draft.platformId} ${draft.market}，${status}`} aria-pressed={selectedDraft?.id === draft.id} onClick={() => { setSelectedDraftId(draft.id); setLocatedField(null); setDetailsOpen(false); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market}{conversation ? status === '已确认' ? ' · ✓' : '' : ` · ${status}`}</small></button>; })}</div>
+    <div className={`platform-tabs dynamic ${conversation ? 'conversation-tabs' : ''}`} role="group" aria-label="选择要审核的站点">{passport?.platformDrafts.map((draft) => { const status = draft.status === 'APPROVED' || draft.status === 'DRAFT_CREATED' ? '已确认' : isListingDraftPayload(draft.payload) ? '待确认' : '待生成'; const scene = scenePlan?.mode === 'SPLIT' ? sceneLabel(draft.sceneId, scenePlan) : ''; return <button className={selectedDraft?.id === draft.id ? 'active' : ''} aria-label={`${platformNames.get(draft.platformId) ?? draft.platformId} ${draft.market}${scene ? ` ${scene}` : ''}，${status}`} aria-pressed={selectedDraft?.id === draft.id} onClick={() => { setSelectedDraftId(draft.id); setLocatedField(null); setDetailsOpen(false); setError(''); setMessage(''); }} key={draft.id}><b>{platformNames.get(draft.platformId) ?? draft.platformId}</b><small>{draft.market}{scene ? ` · ${scene}` : ''}{conversation ? status === '已确认' ? ' · ✓' : '' : ` · ${status}`}</small></button>; })}</div>
 
     {!listing || !selectedDraft ? <div className="listing-empty"><span>◎</span><h3>尚未生成平台 Listing</h3><p>点击“生成各平台中文审校稿”，系统将获取平台字段（Shopify 使用真实接口），并让百炼用中文填写每个平台的营销字段。</p></div> : <>
       {!conversation && <div className="listing-schema-bar"><div><b>{listing.schema.platformName} · 中文审校稿</b><span>目标市场：{listing.schema.market} · 发布前由 Agent 转换为 {listing.schema.locale} 并展示译文 · {listing.schema.categoryLabel}</span></div><code>{listing.schema.schemaVersion}</code></div>}

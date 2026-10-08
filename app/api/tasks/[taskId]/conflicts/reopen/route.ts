@@ -1,5 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
+import { resetPlannedDrafts } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,7 @@ async function handlePUT(_request: Request, context: { params: Promise<{ taskId:
     ).bind(now, passport.id).run();
 
     // 事实被重新裁决后旧审校稿不再可信，作废未发布草稿。
-    await DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
+    await resetPlannedDrafts(DB, taskId);
 
     return Response.json({
       reopened: result.meta?.changes ?? 0,

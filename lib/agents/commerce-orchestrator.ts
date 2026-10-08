@@ -40,6 +40,7 @@ const TOOL_DESCRIPTIONS: Record<AgentToolName, string> = {
   parse_product_sources: '解析当前任务中的图片、PDF、表格和文本资料，形成统一内容块。',
   analyze_product_images: '调用当前百炼多模态模型读取全部商品实物图，提取可见属性和视觉证据。',
   merge_product_facts: '调用商品事实 Agent 合并文档与图片证据，生成统一商品属性并识别图文冲突。',
+  open_scene_plan: '在生成 Listing 之前询问商家：常规上新，还是为同一商品制作多套不同场景的图片与文案；商家选择裂变套数后才继续。',
   open_target_selection: '打开当前任务的平台与站点选择卡，让商家重新选择。保留商品资料和事实；保存新目标后作废旧 Listing 审校稿。',
   update_task_targets: '更新当前商品任务的目标平台和目标市场/站点。仅在任务存在且尚未发布任何草稿时可调用。必须用户提供完整的平台列表和目标市场列表后才调用；不完整时先用自然语言询问。更新会作废旧的 Listing 审校稿，后续按新目标重新生成；图文冲突与商品事实不受影响。',
   reparse_sources: '强制重新解析当前任务的全部资料（图片、PDF、表格、文本），覆盖旧的解析结果。仅当用户明确要求重新解析，或说明资料有问题（如识别错漏、文件内容更新）时调用；任务存在且有资料、未发布即可调用。完成后应按需继续重新理解图片、重新合并事实；旧审校稿已作废。',
@@ -98,7 +99,8 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
   if (parsingReady && !visionReady) names.push('analyze_product_images');
   if (parsingReady && visionReady && state.publishedDraftCount === 0) names.push('merge_product_facts');
   if (state.openConflictCount > 0) names.push('open_conflict_review');
-  if (state.factCount > 0 && state.openConflictCount === 0 && state.draftCount > 0 && state.generatedDraftCount < state.draftCount && state.publishedDraftCount === 0) {
+  if (state.factCount > 0 && state.openConflictCount === 0 && state.draftCount > 0 && !state.scenePlanConfirmed && state.generatedDraftCount === 0 && state.publishedDraftCount === 0) names.push('open_scene_plan');
+  if (state.factCount > 0 && state.openConflictCount === 0 && state.draftCount > 0 && state.scenePlanConfirmed && state.generatedDraftCount < state.draftCount && state.publishedDraftCount === 0) {
     names.push('generate_platform_listings');
   }
   if (state.draftCount > 0 && state.generatedDraftCount === state.draftCount && !allDraftsApproved) names.push('open_listing_review');
@@ -110,7 +112,7 @@ export function availableAgentTools(state: AgentWorkflowState): AgentToolDefinit
     names.push('revise_media_order');
     names.push('open_publish_confirmation');
   }
-  if (allDraftsApproved && state.publishedDraftCount === 0 && state.imagesConfirmed && selectedImageCount > 0 && state.videoStageComplete && state.publishApproved) {
+  if (allDraftsApproved && state.publishedDraftCount < state.draftCount && state.imagesConfirmed && selectedImageCount > 0 && state.videoStageComplete && state.publishApproved) {
     names.push('publish_mock_drafts');
   }
   if (allDraftsApproved && state.publishedDraftCount === 0 && !state.publishApproved && state.videoCandidates?.length) names.push('trim_product_video');
@@ -148,7 +150,7 @@ export function buildCommerceOrchestratorPrompt(state: AgentWorkflowState): stri
    - 用户明确要上新，但平台或目标市场/站点任一没有说清楚：调用 start_listing_workflow 展示选择卡。即使附件已经齐全，也绝不能默认替卖家选择。
    - 普通咨询且无需读取附件：直接回答，不调用工具，不展示卡片。
 1. 只要还有可执行的内部步骤，就调用工具，不要只描述“将要执行”。
-2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 生成平台 Listing → 人工审核 → 询问商家图片张数、风格和其他要求 → 生成图片 → 商家修改并确认图片 → 再生成视频 → 商家选择视频或跳过 → 人工确认发布 → 创建平台测试草稿。
+2. 工具之间有依赖，必须串行：解析资料 → 图片分析（若有图片）→ 合并商品事实 → 处理冲突 → 询问是否为同一商品制作多套场景、各要几套 → 按场景生成独立的平台 Listing → 人工审核 → 询问图片要求 → 为每套场景生成匹配图片 → 商家确认图片 → 视频可选 → 人工确认交付。
 3. 商品事实必须来自原始资料或图片证据。营销标题、卖点等平台字段可以由 Agent 创作，但要标记来源。
 4. 发现图文冲突时只能调用 open_conflict_review，在对话中逐项询问商家，绝不能替商家选择，也不要使用弹窗打断对话。
 5. Listing 必须由商家审核；素材必须由商家选择；发布必须得到本轮明确授权。不要绕过人工门禁。
@@ -182,6 +184,7 @@ export function shouldOpenTargetSelection(text: string, taskId: string | null, p
 
 export function requiredListingStageTool(state: AgentWorkflowState): AgentToolName | null {
   if (!state.taskId || state.publishedDraftCount > 0 || state.factCount === 0 || state.openConflictCount > 0 || state.draftCount === 0) return null;
+  if (!state.scenePlanConfirmed && state.generatedDraftCount === 0) return 'open_scene_plan';
   if (state.generatedDraftCount < state.draftCount) return 'generate_platform_listings';
   if (state.approvedDraftCount < state.draftCount) return 'open_listing_review';
   return null;

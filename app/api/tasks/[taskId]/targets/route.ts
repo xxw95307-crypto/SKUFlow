@@ -5,6 +5,7 @@ import type { PlatformId } from '@/lib/domain/platform';
 import type { TaskSnapshot } from '@/lib/domain/task';
 import { targetsFromSharedSelection, validatePlatformTargets, type PlatformTarget } from '@/lib/platforms/market-options';
 import { ensureProductPassport } from '@/lib/server/passport-store';
+import { getScenePlan } from '@/lib/server/scene-plan-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,15 +90,17 @@ async function handlePUT(request: Request, context: { params: Promise<{ taskId: 
     await ensureProductPassport(DB, taskId);
     const passport = await DB.prepare('SELECT id FROM product_passports WHERE task_id = ? ORDER BY version DESC LIMIT 1').bind(taskId).first<{ id: string }>();
     if (!passport) throw new Error('商品档案不存在');
+    const scenePlan = await getScenePlan(DB, taskId);
+    const sceneIds = scenePlan?.mode === 'SPLIT' ? scenePlan.scenes.map((scene) => scene.id) : ['base'];
     // Invalidate old reviews and recreate only the selected platform-market pairs.
     await DB.batch([
       DB.prepare('UPDATE tasks SET markets_json = ?, platforms_json = ?, updated_at = ? WHERE id = ?')
         .bind(JSON.stringify(markets), JSON.stringify(platforms), now, taskId),
       DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId),
-      ...targets.map((target) => DB.prepare(`INSERT INTO platform_drafts
-        (id,task_id,passport_id,platform_id,market,locale,category_id,status,schema_version,payload_json,validation_json,created_at,updated_at)
-        VALUES (?,?,?,?,?,'und',NULL,'PLANNED',NULL,'{}','[]',?,?)`)
-        .bind(`draft_${crypto.randomUUID()}`, taskId, passport.id, target.platformId, target.market, now, now)),
+      ...sceneIds.flatMap((sceneId) => targets.map((target) => DB.prepare(`INSERT INTO platform_drafts
+        (id,task_id,passport_id,platform_id,market,locale,scene_id,category_id,status,schema_version,payload_json,validation_json,created_at,updated_at)
+        VALUES (?,?,?,?,?,'und',?,NULL,'PLANNED',NULL,'{}','[]',?,?)`)
+        .bind(`draft_${crypto.randomUUID()}`, taskId, passport.id, target.platformId, target.market, sceneId, now, now))),
     ]);
 
     return Response.json({ task: await getTask(taskId), invalidatedDrafts: true });

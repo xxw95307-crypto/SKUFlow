@@ -6,6 +6,7 @@ import { createFailedParseResult, parseSourceFile } from '@/lib/parsers/source-f
 import { getParseResultForFile, getParseResults, prepareParseResultWrite } from '@/lib/server/parse-store';
 import { getTaskSnapshot, prepareTaskTransition } from '@/lib/server/task-store';
 import { assertTransition } from '@/lib/workflow/task-machine';
+import { resetPlannedDrafts } from '@/lib/server/passport-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,7 +76,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }
     if (options.force) {
       // 强制重解析意味着后续事实与 Listing 需要重算：作废未发布的旧审校稿。
-      await DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
+      await resetPlannedDrafts(DB, taskId);
     }
 
     let workingStatus = task.status;

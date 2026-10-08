@@ -5,6 +5,7 @@ interface GeneratedAssetRow {
   task_id: string;
   source_file_id: string;
   batch_id: string;
+  scene_id: string;
   asset_kind: GeneratedAssetKind;
   title: string;
   note: string;
@@ -17,7 +18,7 @@ interface GeneratedAssetRow {
   completed_at: string | null;
 }
 
-const columns = `id, task_id, source_file_id, batch_id, asset_kind, title, note, model,
+const columns = `id, task_id, source_file_id, batch_id, scene_id, asset_kind, title, note, model,
   status, width, height, error, created_at, completed_at`;
 
 function mapAsset(row: GeneratedAssetRow): GeneratedAsset {
@@ -26,6 +27,7 @@ function mapAsset(row: GeneratedAssetRow): GeneratedAsset {
     taskId: row.task_id,
     sourceFileId: row.source_file_id,
     batchId: row.batch_id,
+    sceneId: row.scene_id,
     kind: row.asset_kind,
     title: row.title,
     note: row.note,
@@ -88,6 +90,7 @@ export function prepareGeneratedAssetInsert(
     taskId: string;
     sourceFileId: string;
     batchId: string;
+    sceneId?: string;
     kind: GeneratedAssetKind;
     title: string;
     note: string;
@@ -105,11 +108,11 @@ export function prepareGeneratedAssetInsert(
 ): D1PreparedStatement {
   return DB.prepare(
     `INSERT INTO generated_assets
-     (id, task_id, source_file_id, batch_id, asset_kind, title, note, prompt, object_key,
+     (id, task_id, source_file_id, batch_id, scene_id, asset_kind, title, note, prompt, object_key,
       content_type, provider, model, status, width, height, error, created_at, completed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BAILIAN', ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BAILIAN', ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
-    input.id, input.taskId, input.sourceFileId, input.batchId, input.kind, input.title, input.note,
+    input.id, input.taskId, input.sourceFileId, input.batchId, input.sceneId ?? 'base', input.kind, input.title, input.note,
     input.prompt, input.objectKey, input.contentType, input.model, input.status, input.width,
     input.height, input.error?.slice(0, 500) ?? null, input.createdAt, input.completedAt,
   );

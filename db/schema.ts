@@ -105,6 +105,7 @@ export const schemaStatements = [
     platform_id TEXT NOT NULL,
     market TEXT NOT NULL,
     locale TEXT NOT NULL,
+    scene_id TEXT NOT NULL DEFAULT 'base',
     category_id TEXT,
     status TEXT NOT NULL,
     schema_version TEXT,
@@ -114,7 +115,13 @@ export const schemaStatements = [
     updated_at TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
     FOREIGN KEY (passport_id) REFERENCES product_passports(id) ON DELETE CASCADE,
-    UNIQUE (task_id, platform_id, market, locale)
+    UNIQUE (task_id, platform_id, market, locale, scene_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS task_scene_plans (
+    task_id TEXT PRIMARY KEY,
+    plan_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS file_parse_results (
     id TEXT PRIMARY KEY,
@@ -186,6 +193,7 @@ export const schemaStatements = [
     task_id TEXT NOT NULL,
     source_file_id TEXT NOT NULL,
     batch_id TEXT NOT NULL,
+    scene_id TEXT NOT NULL DEFAULT 'base',
     asset_kind TEXT NOT NULL,
     title TEXT NOT NULL,
     note TEXT NOT NULL,

@@ -16,6 +16,7 @@ import { suggestAmazonProductType } from '@/lib/platforms/amazon-us-sandbox';
 import { getProductPassport, saveCompiledDrafts } from '@/lib/server/passport-store';
 import { currentAccount } from '@/lib/server/auth';
 import { getShopPreferences } from '@/lib/server/shop-preferences-store';
+import { getScenePlan } from '@/lib/server/scene-plan-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,8 +62,10 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const productName = typeof productNameFact?.value === 'string' ? productNameFact.value : task.product_name;
     const editableDrafts = selectListingDraftBatch(passport.platformDrafts, body.draftIds as string[] | undefined);
     if (!editableDrafts.length) return Response.json({error:'没有待生成的 Listing 草稿。'},{status:409});
+    const scenePlan = await getScenePlan(bindings.DB, taskId);
     const targets = await Promise.all(editableDrafts.map(async (draft) => ({
       draftId: draft.id,
+      scene: scenePlan?.scenes.find((scene) => scene.id === draft.sceneId) ?? null,
       schema: draft.platformId === 'shopify' ? await fetchShopifyListingSchema(loadShopifyDevConfig(bindings), { market: draft.market, categoryLabel }) : resolveMockListingSchema({
         platformId: draft.platformId,
         market: draft.market,

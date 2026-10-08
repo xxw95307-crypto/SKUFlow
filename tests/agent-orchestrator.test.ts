@@ -8,7 +8,7 @@ function state(overrides: Partial<AgentWorkflowState> = {}): AgentWorkflowState 
   return {
     taskId: 'task_demo', intakePresented: true, pendingAttachmentCount: 0, taskStatus: 'CREATED', productName: null,
     fileCount: 2, parsedFileCount: 0, imageCount: 1, analyzedImageCount: 0,
-    factCount: 0, openConflictCount: 0, resolvedConflictCount: 0, draftCount: 2, generatedDraftCount: 0,
+    factCount: 0, openConflictCount: 0, resolvedConflictCount: 0, scenePlanConfirmed: true, sceneCount: 1, draftCount: 2, generatedDraftCount: 0,
     approvedDraftCount: 0, publishedDraftCount: 0, generatedAssetCount: 0, selectedAssetCount: 0,
     publishApproved: false,
     ...overrides,

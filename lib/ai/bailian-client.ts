@@ -3,6 +3,9 @@ import { buildVisionAnalysisPrompt, parseVisionAnalysisOutput } from '../agents/
 import { buildListingGenerationMessages, parseListingGenerationOutput, type ListingGenerationContext } from '../agents/listing-generation.ts';
 import { buildListingLocalizationMessages, ListingLocalizationLengthError, parseListingLocalizationOutput, type ListingLocalizationContext } from '../agents/listing-localization.ts';
 import { buildAssetPlanningMessages, parseAssetPlan, parseVisualToolDecision, type AssetGenerationSpec, type AssetPlanningContext, type VisualToolDecision } from '../agents/asset-generation.ts';
+import { buildScenePlanningMessages, parseScenePlanningOutput } from '../agents/scene-planning.ts';
+import type { ProductFact } from '../domain/product-passport.ts';
+import type { SceneVariant } from '../domain/scene-plan.ts';
 import type { BailianConfig, BailianImageConfig } from '../config/bailian.ts';
 import type { FactExtractionOutput } from '../domain/fact-extraction';
 import type { VisionAnalysisOutput } from '../domain/vision-analysis';
@@ -44,6 +47,33 @@ export interface BailianAssetPlanningResponse {
   model: string;
   usage: Record<string, number> | null;
   requestId: string | null;
+}
+
+export async function callBailianScenePlanning(
+  config: BailianConfig,
+  input: { productName: string; facts: ProductFact[]; count: number; directions: string[] },
+  fetchImpl: typeof fetch = fetch,
+): Promise<SceneVariant[]> {
+  const apiKey = config.apiKey.trim();
+  const model = config.model.trim();
+  if (!apiKey || !model) throw new Error('场景策划模型尚未配置');
+  const messages = buildScenePlanningMessages(input);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetchImpl(`${normalizeBaseUrl(config.baseUrl)}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages, response_format: { type: 'json_object' }, enable_thinking: false, temperature: 0.55, max_completion_tokens: 1800, stream: false }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) throw new Error(`场景策划暂时不可用（HTTP ${response.status}）`);
+    const payload = await response.json() as ChatCompletionResponse;
+    try { return parseScenePlanningOutput(responseText(payload.choices?.[0]?.message?.content), input.count); }
+    catch (error) {
+      if (attempt === 1) throw error;
+      messages.push({ role: 'user', content: `上一版方案有误：${error instanceof Error ? error.message : '格式错误'}。请返回 ${input.count} 套互不重复的场景方案。` });
+    }
+  }
+  throw new Error('场景策划未完成');
 }
 
 interface ChatCompletionResponse {
@@ -560,7 +590,7 @@ export async function callBailianAssetPlanning(
       const content = responseText(payload.choices?.[0]?.message?.content);
       if (!content) throw new Error('百炼视觉策划返回内容为空');
       try {
-        const assets = parseAssetPlan(content, context.requestedCount, context.targetIndices);
+        const assets = parseAssetPlan(content, context.requestedCount, context.targetIndices, context.scenes);
         if (context.userGuidance?.trim()) {
           const review = await fetchImpl(`${baseUrl}/chat/completions`, {
             method: 'POST',

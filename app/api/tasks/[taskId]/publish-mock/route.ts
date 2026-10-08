@@ -12,12 +12,16 @@ import { getProductPassport } from '@/lib/server/passport-store';
 import { localizedPublicationPayload } from '@/lib/agents/listing-localization';
 import { buildAmazonSandboxListingRequest, submitAmazonSandboxListing } from '@/lib/platforms/amazon-us-sandbox';
 import { requireAmazonMarket } from '@/lib/platforms/amazon-markets';
+import { getScenePlan } from '@/lib/server/scene-plan-store';
+import { mediaIdsForScene } from '@/lib/agents/scene-media';
+import type { StoredMediaCandidate } from '@/lib/server/media-candidates';
 
 export const dynamic = 'force-dynamic';
 
 interface DeliveryResult {
   platformId: string;
   market: string;
+  sceneId: string;
   draftId: string;
   status: 'DRAFT_CREATED';
   mode: 'SHOPIFY_DEV' | 'AMAZON_SANDBOX' | 'MOCK';
@@ -52,10 +56,13 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     if(body.draftId !== undefined && typeof body.draftId !== 'string') return Response.json({error:'Listing 草稿 ID 格式无效'},{status:400});
     const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
     if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 项媒体'},{status:400});
-    const media: ShopifyMediaInput[] = [];
+    const mediaById = new Map<string, ShopifyMediaInput>();
+    let selectedCandidates: StoredMediaCandidate[] = [];
     let orderedMediaIds: string[] = [];
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
+    const scenePlan = await getScenePlan(DB, taskId);
+    const split = scenePlan?.mode === 'SPLIT';
     const publishable = passport.platformDrafts.filter((draft) => draft.status === 'APPROVED' && isListingDraftPayload(draft.payload)
       && (body.draftId === undefined || draft.id === body.draftId));
     if (publishable.length === 0) return Response.json({ error: '至少确认一个平台 Listing 后才能创建测试草稿' }, { status: 409 });
@@ -70,13 +77,14 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       const latest=await DB.prepare('SELECT id FROM media_order_plans WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(taskId).first<{id:string}>();
       if(latest?.id!==body.mediaPlanId)throw new Error('媒体编排已有新版，请确认最新版');
       const candidates=await getSelectedMedia(DB,taskId,selectedIds);
+      selectedCandidates = candidates;
       const plan=parseMediaOrderPlan(JSON.parse(row.plan_json),candidates);
       if(!sameMediaSelection(plan,selectedIds))throw new Error('选中的媒体已改变，请重新编排并确认');
       orderedMediaIds = plan.items.map(item => item.id);
       if(hasShopify) for(const item of plan.items) {
         const c=candidates.find(c=>c.id===item.id)!;
         const object=await bindings.UPLOADS.get(c.objectKey);if(!object)throw new Error('找不到选中的媒体文件');
-        media.push({name:`${c.id}.${c.type==='VIDEO'?(c.contentType==='video/webm'?'webm':'mp4'):'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
+        mediaById.set(c.id, {name:`${c.id}.${c.type==='VIDEO'?(c.contentType==='video/webm'?'webm':'mp4'):'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
       }
     }
     const shopifyConfig = hasShopify ? loadShopifyDevConfig(bindings) : null;
@@ -84,9 +92,11 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
 
     for (const draft of publishable) {
       const now = new Date().toISOString();
+      const draftMediaIds = mediaIdsForScene(orderedMediaIds, selectedCandidates, draft.sceneId, split);
       const currentPayload = draft.payload as unknown as ListingDraftPayload;
       const publicationPayload = localizedPublicationPayload(currentPayload);
       if (draft.platformId === 'shopify' && shopifyConfig) {
+        const media = draftMediaIds.map((id) => mediaById.get(id)).filter((item): item is ShopifyMediaInput => Boolean(item));
         if (!media.length) throw new Error('请选择要同步到 Shopify 的商品图片');
         const liveSchema = await fetchShopifyListingSchema(shopifyConfig, { market: draft.market });
         if (currentPayload.schema.mode !== 'SHOPIFY_API') throw new Error('这份 Shopify 审核稿使用旧版 Mock 字段，请重新生成并确认实际接口审核稿后发布。');
@@ -97,6 +107,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
           payload: publicationPayload,
           draftId: draft.id,
           media,
+          uniqueHandleForScene: split,
           onCreated: async(productId) => { await DB.prepare('UPDATE platform_drafts SET payload_json=? WHERE id=? AND task_id=?').bind(JSON.stringify({...currentPayload, pendingShopifyProductId:productId}),draft.id,taskId).run(); },
         });
         const payload: ListingDraftPayload = { ...currentPayload, testPublication: publication };
@@ -104,6 +115,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
         results.push({
           platformId: draft.platformId,
           market: draft.market,
+          sceneId: draft.sceneId,
           draftId: publication.productId,
           status: 'DRAFT_CREATED',
           mode: 'SHOPIFY_DEV',
@@ -129,12 +141,12 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
           sandboxPublication: {
             provider: 'AMAZON_STATIC_SANDBOX', createdAt: now,
             request: tested.request, response: tested.response,
-            mediaPlanId: body.mediaPlanId!, mediaAssetIds: orderedMediaIds,
+            mediaPlanId: body.mediaPlanId!, mediaAssetIds: draftMediaIds,
           },
         };
         await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
         results.push({
-          platformId: draft.platformId, market: draft.market, draftId: draft.id,
+          platformId: draft.platformId, market: draft.market, sceneId: draft.sceneId, draftId: draft.id,
           status: 'DRAFT_CREATED', mode: 'AMAZON_SANDBOX',
           sandboxStatus: tested.response.status, sandboxIssueCodes: tested.response.issueCodes,
           targetLocale: currentPayload.localization?.targetLocale,
@@ -147,10 +159,10 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       const mockDraftId = `mock_${draft.platformId.replace(/-/g, '_')}_${crypto.randomUUID()}`;
       const payload: ListingDraftPayload = {
         ...currentPayload,
-        mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now, ...(needsMediaPlan ? { mediaPlanId: body.mediaPlanId!, mediaAssetIds: orderedMediaIds } : {}) },
+        mockPublication: { draftId: mockDraftId, status: 'DRAFT_CREATED', createdAt: now, ...(needsMediaPlan ? { mediaPlanId: body.mediaPlanId!, mediaAssetIds: draftMediaIds } : {}) },
       };
       await saveCreatedDraft(DB, { taskId, draftId: draft.id, payload, now });
-      results.push({ platformId: draft.platformId, market: draft.market, draftId: mockDraftId, status: 'DRAFT_CREATED', mode: 'MOCK', targetLocale: currentPayload.localization?.targetLocale, targetLanguage: currentPayload.localization?.targetLanguage });
+      results.push({ platformId: draft.platformId, market: draft.market, sceneId: draft.sceneId, draftId: mockDraftId, status: 'DRAFT_CREATED', mode: 'MOCK', targetLocale: currentPayload.localization?.targetLocale, targetLanguage: currentPayload.localization?.targetLanguage });
     }
 
     const realCount = results.filter((item) => item.mode === 'SHOPIFY_DEV').length;

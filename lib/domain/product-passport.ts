@@ -127,6 +127,7 @@ export interface PlatformDraft {
   platformId: PlatformId;
   market: string;
   locale: string;
+  sceneId: string;
   categoryId: string | null;
   status: PlatformDraftStatus;
   schemaVersion: string | null;
@@ -181,6 +182,7 @@ export function createInitialProductPassport(input: InitialPassportInput): Produ
       platformId,
       market,
       locale: 'und',
+      sceneId: 'base',
       categoryId: null,
       status: 'PLANNED' as const,
       schemaVersion: null,

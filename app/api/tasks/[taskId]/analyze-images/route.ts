@@ -5,7 +5,7 @@ import { callBailianVisionAnalysis, hashVisionInput } from '@/lib/ai/bailian-cli
 import { loadBailianConfig, missingBailianConfig } from '@/lib/config/bailian';
 import { PENDING_PRODUCT_NAME, type TaskStatus } from '@/lib/domain/task';
 import type { VisionAgentRun } from '@/lib/domain/vision-analysis';
-import { getProductPassport } from '@/lib/server/passport-store';
+import { getProductPassport, resetPlannedDrafts } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 import {
   getLatestVisionRunForFile,
@@ -101,7 +101,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (files.length === 0) return Response.json({ error: '当前任务没有图片文件' }, { status: 409 });
     if (force) {
       // 强制重分析意味着可见属性证据会更新：作废未发布的旧审校稿，由编排器引导重新生成。
-      await bindings.DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
+      await resetPlannedDrafts(bindings.DB, taskId);
     }
 
     for (const file of files.slice(0, 12)) {

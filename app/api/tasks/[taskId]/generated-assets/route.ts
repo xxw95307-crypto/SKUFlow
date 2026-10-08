@@ -9,6 +9,7 @@ import { listGeneratedAssetHistory, listLatestGeneratedAssets, prepareGeneratedA
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 import { getShopPreferences } from '@/lib/server/shop-preferences-store';
+import { getScenePlan } from '@/lib/server/scene-plan-store';
 import { generateVerifiedImage } from '@/lib/server/verified-image';
 
 export const dynamic = 'force-dynamic';
@@ -77,6 +78,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     ]);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
+    const scenePlan = await getScenePlan(bindings.DB, taskId);
+    const splitScenes = scenePlan?.mode === 'SPLIT' ? scenePlan.scenes : [];
     const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
     if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0 && existing.every((asset) => asset.status === 'COMPLETED')) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
@@ -102,11 +105,14 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     if (!source) return Response.json({ error: '对象存储中未找到原始商品图' }, { status: 404 });
     const bytes = new Uint8Array(await source.arrayBuffer());
     const listings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [draft.payload] : []);
-    const requestedCount = decision.targetIndices.length ? null : decision.count;
+    const sceneListings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [{ sceneId: draft.sceneId, listing: draft.payload }] : []);
+    const requestedCount = decision.targetIndices.length ? null : splitScenes.length || decision.count;
     const plan = await callBailianAssetPlanning(planningConfig, {
       productName: task.productName,
       facts: passport.facts,
       listings,
+      scenes: splitScenes,
+      sceneListings,
       platforms: task.platforms,
       markets: task.markets,
       sourceImageCount: images.results.length,
@@ -118,6 +124,15 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       targetIndices: decision.targetIndices,
       preferences,
     });
+    if (decision.targetIndices.length) plan.assets.forEach((spec, index) => { spec.sceneId = priorImages[decision.targetIndices[index] - 1]?.sceneId ?? 'base'; });
+    if (splitScenes.length && !decision.targetIndices.length) plan.assets.forEach((spec) => {
+      const scene = splitScenes.find((item) => item.id === spec.sceneId);
+      if (scene) spec.title = `${scene.name} · ${spec.title}`;
+    });
+    const sceneFor = (sceneId?: string) => splitScenes.find((scene) => scene.id === sceneId) ?? null;
+    const listingsFor = (sceneId?: string) => sceneId && sceneId !== 'base'
+      ? sceneListings.filter((entry) => entry.sceneId === sceneId).map((entry) => entry.listing)
+      : listings;
     const batchId = `asset_dynamic_${ASSET_PLAN_VERSION}_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
 
@@ -135,7 +150,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           if (!oldImage) throw new Error(`第 ${targetIndex} 张旧图文件不存在`);
           reference = { bytes: new Uint8Array(await oldImage.arrayBuffer()), contentType: oldRow.content_type, sourceFileId: oldAsset.sourceFileId };
         }
-        const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, previousAsset: spec.sourceMode === 'CURRENT' ? oldAsset : null, preferences });
+        const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), previousAsset: spec.sourceMode === 'CURRENT' ? oldAsset : null, preferences });
         const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, {
           bytes: reference.bytes, contentType: reference.contentType,
         }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
@@ -153,7 +168,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
         const replacement = replacements.get(index);
         if (replacement) return prepareGeneratedAssetInsert(bindings.DB, {
-          id: replacement.id, taskId, sourceFileId: replacement.sourceFileId, batchId,
+          id: replacement.id, taskId, sourceFileId: replacement.sourceFileId, batchId, sceneId: replacement.spec.sceneId,
           kind: replacement.spec.kind, title: replacement.spec.title, note: replacement.spec.note,
           prompt: replacement.prompt, objectKey: replacement.objectKey, contentType: replacement.contentType,
           model: replacement.model, status: 'COMPLETED', width: replacement.width, height: replacement.height,
@@ -169,7 +184,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }
 
     const prepared = await Promise.allSettled(plan.assets.map(async (spec, position) => {
-      const prompt = buildAssetGenerationPrompt({ spec, productName: task.productName, facts: passport.facts, listings, preferences });
+      const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), preferences });
       const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
       return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
     }));
@@ -183,7 +198,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       if (result.status === 'rejected') {
         const reason = result.reason instanceof Error ? result.reason.message : '图片生成失败';
         return prepareGeneratedAssetInsert(bindings.DB, {
-          id: `asset_${crypto.randomUUID()}`, taskId, sourceFileId: image.id, batchId,
+          id: `asset_${crypto.randomUUID()}`, taskId, sourceFileId: image.id, batchId, sceneId: spec.sceneId,
           kind: spec.kind, title: spec.title, note: spec.note,
           prompt: '', objectKey: null, contentType: null, model: config.model, status: 'FAILED',
           width: null, height: null, error: reason, createdAt: timestamp, completedAt: timestamp,
@@ -196,7 +211,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         customMetadata: { taskId, sourceFileId: image.id, model: generated.model, kind: spec.kind, planVersion: ASSET_PLAN_VERSION },
       });
       return prepareGeneratedAssetInsert(bindings.DB, {
-        id, taskId, sourceFileId: image.id, batchId, kind: spec.kind, title: spec.title, note: spec.note,
+        id, taskId, sourceFileId: image.id, batchId, sceneId: spec.sceneId, kind: spec.kind, title: spec.title, note: spec.note,
         prompt, objectKey, contentType: generated.contentType, model: generated.model, status: 'COMPLETED',
         width: generated.width, height: generated.height, error: reviewWarning, createdAt: timestamp, completedAt: timestamp,
       });

@@ -37,13 +37,14 @@ import type {
 } from '@/lib/domain/conversation';
 import type { FactConflict, FactValue, ProductPassport } from '@/lib/domain/product-passport';
 import type { GeneratedAsset } from '@/lib/domain/generated-asset';
+import { sceneLabel, type ScenePlan } from '@/lib/domain/scene-plan';
 import { PENDING_PRODUCT_NAME, type TaskSnapshot } from '@/lib/domain/task';
 import { isListingDraftPayload } from '@/lib/mock-platforms/listing-compiler';
 import { hasCompleteListingLocalization } from '@/lib/agents/listing-localization';
 import { marketLocale } from '@/lib/localization/market-locales';
 import { platformRegistry } from '@/lib/platforms/registry';
 
-type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'listing' | 'image_brief' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
+type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'scene_plan' | 'listing' | 'image_brief' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
 
 interface ImageBrief { count: number | null; style: string; notes: string }
 
@@ -277,12 +278,13 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, readOnly = false }: {
+function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, splitMode = false, readOnly = false }: {
   assets: DisplayAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
   onSkipVideo: () => void;
+  splitMode?: boolean;
   readOnly?: boolean;
 }) {
   const rejectedCount = assets.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && asset.imageUrl && asset.error).length;
@@ -329,7 +331,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
       {asset.error && <span className="image-picker-review-badge">未通过验收</span>}
     </div>)}</div>
     {!readOnly && (failed.length > 0 || rejectedCount > 0) && <details className="image-picker-failure-details"><summary>{failed.length + rejectedCount} 张图片未加入可选结果</summary>{failed.map((asset) => <p key={asset.id}>{asset.title}：{asset.error || '生成失败'}</p>)}{rejectedCount > 0 && <p>{rejectedCount} 张旧图未通过验收。</p>}</details>}
-    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></footer>}
+    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span>{splitMode ? <button className="primary" type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>确认各场景图片，继续</button> : <><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></>}</footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
       <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
         <header><span>{previewIndex! + 1} / {completed.length}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
@@ -351,9 +353,10 @@ function localizationPreviewValue(value: unknown): string {
   return typeof value === 'string' ? value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : String(value ?? '');
 }
 
-function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy, localizationError, onRetryLocalization, onPublish, onClose }: {
+function PublishDialog({ task, passport, scenePlan, selectedAssets, busy, localizationBusy, localizationError, onRetryLocalization, onPublish, onClose }: {
   task: TaskSnapshot;
   passport: ProductPassport;
+  scenePlan: ScenePlan | null;
   selectedAssets: string[];
   busy: boolean;
   localizationBusy: boolean;
@@ -371,7 +374,7 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
   const deliveryMode = [shopifyCount ? 'Shopify Dev Store 测试草稿' : '', amazonCount ? 'Amazon 所选站点官方静态沙箱测试' : '', mockCount ? '其他平台本地 Mock' : ''].filter(Boolean).join(' + ');
   const localizationReady = approved.length > 0 && approved.every((draft) => isListingDraftPayload(draft.payload) && hasCompleteListingLocalization(draft.payload, marketLocale(draft.market).locale));
   return <AgentDialog eyebrow="FINAL CHECKPOINT · DELIVERY" title="确认发布这个商品？" onClose={onClose} wide>
-    <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{approved.length} 份 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
+    <div className="publish-confirm-product"><span>↗</span><div><b>{task.productName}</b><small>{scenePlan?.mode === 'SPLIT' ? `${scenePlan.scenes.length} 套场景 · ` : ''}${approved.length} 份 Listing · {selectedAssets.length} 个视觉方案</small></div></div>
     <dl className="publish-confirm-list"><div><dt>目标平台</dt><dd>{platformNames.join('、')}</dd></div><div><dt>目标市场</dt><dd>{[...new Set(approved.map((draft) => draft.market))].join('、')}</dd></div><div><dt>审核版本</dt><dd>简体中文审校稿（已锁定）</dd></div><div><dt>发布语言</dt><dd>{localizationBusy ? '正在准备各站点的语言版本…' : localizationReady ? approved.map((draft) => isListingDraftPayload(draft.payload) ? `${draft.market}：${draft.payload.localization?.targetLanguage}（${draft.payload.localization?.targetLocale}）` : draft.market).join('；') : '等待生成'}</dd></div><div><dt>发布模式</dt><dd>{deliveryMode || '测试草稿'}</dd></div></dl>
     <section className="publish-localizations"><header><span>站点本地化预览</span><b>以下译文用于测试交付</b></header>
       {localizationBusy && <div className="publish-localization-loading"><span className="agent-spinner"/><p>正在准备各站点的商品文案。完成后请先检查译文，再决定是否继续。</p></div>}
@@ -387,7 +390,7 @@ function PublishDialog({ task, passport, selectedAssets, busy, localizationBusy,
             ? localization.fields[field.key] : payload.fields[field.key];
           return [[field.key, field.label, value] as const];
         });
-        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}</b><span>{localization.targetLanguage} · {localization.targetLocale}</span></div><dl>{entries.map(([key, label, value]) => <div key={key}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl><small>文案及描述性属性已本地化；SKU、价格、库存及品牌专名等经营字段保持原值。</small></article>;
+        return <article key={draft.id}><div><b>{platformRegistry.find((item) => item.id === draft.platformId)?.shortName ?? draft.platformId} · {draft.market}{scenePlan?.mode === 'SPLIT' ? ` · ${sceneLabel(draft.sceneId, scenePlan)}` : ''}</b><span>{localization.targetLanguage} · {localization.targetLocale}</span></div><dl>{entries.map(([key, label, value]) => <div key={key}><dt>{label}</dt><dd>{localizationPreviewValue(value)}</dd></div>)}</dl><small>文案及描述性属性已本地化；SKU、价格、库存及品牌专名等经营字段保持原值。</small></article>;
       })}
     </section>
     <div className="publish-warning"><b>安全测试模式</b><span>{shopifyCount ? 'Shopify 将调用官方 Dev Store 接口，只创建 DRAFT 商品，不会公开上架；' : ''}{amazonCount ? 'Amazon 会按所选站点调用对应区域的官方静态沙箱；预设响应不代表真实上架，媒体编排只保存在 SKUFlow；' : ''}{mockCount ? '其他平台仍只创建本地 Mock 草稿；' : ''}若连接未配置，Agent 会暂停并提示所需信息。</span></div>
@@ -444,6 +447,10 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const [mediaPlanReady,setMediaPlanReady] = useState(false);
   const [videoRevision,setVideoRevision] = useState(0);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
+  const [scenePlan, setScenePlan] = useState<ScenePlan | null>(null);
+  const [sceneMode, setSceneMode] = useState<'SINGLE' | 'SPLIT'>('SINGLE');
+  const [sceneCount, setSceneCount] = useState(2);
+  const [sceneDirections, setSceneDirections] = useState<string[]>(Array(6).fill(''));
   const [imageBriefCount, setImageBriefCount] = useState<number | null>(null);
   const [imageBriefStyle, setImageBriefStyle] = useState('');
   const [imageBriefNotes, setImageBriefNotes] = useState('');
@@ -480,7 +487,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const railResizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const platformNames = useMemo(() => new Map(platformRegistry.map((item) => [item.id, item.shortName])), []);
-  const currentStep = phase === 'conflict' ? 1 : phase === 'listing' ? 2 : phase === 'image_brief' || phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
+  const currentStep = phase === 'conflict' ? 1 : phase === 'scene_plan' || phase === 'listing' ? 2 : phase === 'image_brief' || phase === 'assets' || phase === 'video' ? 3 : phase === 'publish' || phase === 'complete' ? 4 : phase === 'processing' ? progressStep : 0;
 
   useEffect(() => {
     let active = true;
@@ -571,7 +578,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const fetchGeneratedAssets = async (taskId: string): Promise<GeneratedAsset[]> => {
     const payload = await responseJson<{ assets: GeneratedAsset[] }>(await fetch(`/api/tasks/${taskId}/generated-assets`), '视觉素材读取失败');
     const videos=await responseJson<{jobs:any[]}>(await fetch(`/api/tasks/${taskId}/videos`),'视频素材读取失败');
-    return [...payload.assets,...videos.jobs.filter(j=>j.status==='SUCCEEDED').map(j=>({id:j.id,taskId,sourceFileId:j.plan.sourceFileId,batchId:'video',kind:'VIDEO' as const,title:j.plan.title,note:j.plan.shots.join('；'),model:'wan2.7-i2v',status:'COMPLETED' as const,width:null,height:null,error:null,createdAt:'',completedAt:null,imageUrl:j.videoUrl}))];
+    return [...payload.assets,...videos.jobs.filter(j=>j.status==='SUCCEEDED').map(j=>({id:j.id,taskId,sourceFileId:j.plan.sourceFileId,batchId:'video',sceneId:'base',kind:'VIDEO' as const,title:j.plan.title,note:j.plan.shots.join('；'),model:'wan2.7-i2v',status:'COMPLETED' as const,width:null,height:null,error:null,createdAt:'',completedAt:null,imageUrl:j.videoUrl}))];
   };
 
   const fetchGeneratedAssetHistory = async (taskId: string): Promise<GeneratedAsset[][]> => {
@@ -612,19 +619,20 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     updateConversationList(conversation);
     if (!conversation.taskId) {
       const intakeStarted = conversation.toolRuns.some((run) => run.name === 'start_listing_workflow' && run.status === 'COMPLETED');
-      setTask(null); setPassport(null); setGeneratedAssets([]); setPhase(intakeStarted ? 'intake' : 'idle'); setProgressStep(0);
+      setTask(null); setPassport(null); setGeneratedAssets([]); setScenePlan(null); setPhase(intakeStarted ? 'intake' : 'idle'); setProgressStep(0);
       if (removedInternalLogs) await persistConversation(null, conversation.status);
       return;
     }
     const needsAssetHistory = messagesRef.current.some((message) => message.kind === 'assets' && !message.assets?.length);
-    const [loadedTask, loadedPassport, loadedAssets, assetHistory, videoHistory] = await Promise.all([
+    const [loadedTask, loadedPassport, loadedAssets, loadedScenePlan, assetHistory, videoHistory] = await Promise.all([
       fetchTask(conversation.taskId), fetchPassport(conversation.taskId), fetchGeneratedAssets(conversation.taskId),
+      fetch(`/api/tasks/${conversation.taskId}/scene-plan`).then((response) => responseJson<{ plan: ScenePlan | null }>(response, '场景方案读取失败')).then((data) => data.plan),
       needsAssetHistory ? fetchGeneratedAssetHistory(conversation.taskId).catch(() => []) : Promise.resolve([]),
       fetch(`/api/tasks/${conversation.taskId}/videos`)
         .then((response) => responseJson<{ jobs: Array<{ id: string; status: string }> }>(response, '历史视频读取失败'))
         .catch(() => ({ jobs: [] })),
     ]);
-    setTask(loadedTask); setPassport(loadedPassport); setGeneratedAssets(loadedAssets);
+    setTask(loadedTask); setPassport(loadedPassport); setGeneratedAssets(loadedAssets); setScenePlan(loadedScenePlan);
     let conversationUpgraded = removedInternalLogs;
     if (needsAssetHistory && assetHistory.length) {
       const recovered = restoreConversationAssetSnapshots(messagesRef.current, assetHistory);
@@ -663,7 +671,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     const imageSelected = validSelections.some((id) => loadedAssets.some((asset) => asset.id === id && asset.kind !== 'VIDEO'));
     const imagesConfirmed = imagesConfirmedFromMessages(messagesRef.current);
     const videoDone = videoStageCompleteFromMessages(messagesRef.current);
-    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (imageSelected && imagesConfirmed ? videoDone ? 'publish' : 'video' : loadedAssets.some((asset) => asset.kind !== 'VIDEO') ? 'assets' : 'image_brief') : generated ? 'listing' : 'resume');
+    setPhase(published ? 'complete' : openConflicts ? 'conflict' : allApproved ? (imageSelected && imagesConfirmed ? videoDone ? 'publish' : 'video' : loadedAssets.some((asset) => asset.kind !== 'VIDEO') ? 'assets' : 'image_brief') : generated ? 'listing' : !loadedScenePlan && loadedPassport.facts.length > 0 ? 'scene_plan' : 'resume');
     if (conversationUpgraded) await persistConversation(loadedTask.id, conversation.status);
   };
 
@@ -803,8 +811,9 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
 
   const phaseFromState = (state: AgentWorkflowState) => {
     if (!state.taskId) return setPhase(state.intakePresented ? 'intake' : 'idle');
-    if (state.publishedDraftCount > 0) return setPhase('complete');
+    if (state.draftCount > 0 && state.publishedDraftCount === state.draftCount) return setPhase('complete');
     if (state.openConflictCount > 0) return setPhase('conflict');
+    if (state.factCount > 0 && !state.scenePlanConfirmed && state.generatedDraftCount === 0) return setPhase('scene_plan');
     if (state.draftCount > 0 && state.generatedDraftCount === state.draftCount && state.approvedDraftCount < state.draftCount) return setPhase('listing');
     if (state.draftCount > 0 && state.approvedDraftCount >= state.draftCount) {
       return setPhase((state.selectedImageCount ?? state.selectedAssetCount) > 0 && state.imagesConfirmed ? state.videoStageComplete ? 'publish' : 'video' : state.generatedAssetCount > 0 ? 'assets' : 'image_brief');
@@ -939,6 +948,12 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: false };
       }
+      if (name === 'open_scene_plan') {
+        setPhase('scene_plan');
+        append('agent', '商品信息已整理好。你想按一套方案上新，还是为同一件商品做几套不同场景的图片和文案？', '等待选择场景方案');
+        markToolRun(call, 'COMPLETED');
+        return { result: { ok: true, awaitingSelection: true }, checkpoint: true };
+      }
       if (name === 'update_task_targets') {
         if (!currentTask) throw new Error('当前还没有创建商品任务');
         let args: Record<string, unknown> = {};
@@ -1024,13 +1039,13 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       if (name === 'open_listing_review') {
         const refreshed = await refreshTaskState(currentTask.id);
         setPhase('listing');
-        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份平台中文审校稿。接下来我会在对话中逐个平台请你确认。`, '等待 Listing 审核', {
+        append('agent', `我已经生成 ${refreshed.passport.platformDrafts.length} 份中文审校稿。接下来请逐份确认${scenePlan?.mode === 'SPLIT' ? '每套场景的文案' : ''}。`, '等待 Listing 审核', {
           kind: 'listing',
           items: refreshed.passport.platformDrafts.map((draft) => {
             const payload = isListingDraftPayload(draft.payload) ? draft.payload : null;
             return {
               id: draft.id,
-              label: platformNames.get(draft.platformId) ?? draft.platformId,
+              label: `${platformNames.get(draft.platformId) ?? draft.platformId}${scenePlan?.mode === 'SPLIT' ? ` · ${sceneLabel(draft.sceneId, scenePlan)}` : ''}`,
               value: payload ? listingTitle(payload) : '等待生成',
               detail: `${draft.market} · 中文审校稿`,
               status: draft.status === 'APPROVED' ? '已确认' : '待审核',
@@ -1116,7 +1131,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         if (completed.length === 0) throw new Error('没有通过验收的图片，请重新生成');
         setGeneratedAssets(assets);
         setPhase('assets');
-        append('agent', '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(assets) });
+        append('agent', scenePlan?.mode === 'SPLIT' ? '各套场景图片已生成。请逐张检查，并为每套场景至少选一张；确认后进入交付检查。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, presented: true }, checkpoint: true };
       }
@@ -1241,7 +1256,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         if (!call) {
           modelHistory.current = history;
           phaseFromState(payload.state);
-          await persistConversation(activeTask?.id ?? null, payload.state.publishedDraftCount > 0 ? 'COMPLETED' : 'ACTIVE');
+          await persistConversation(activeTask?.id ?? null, payload.state.draftCount > 0 && payload.state.publishedDraftCount === payload.state.draftCount ? 'COMPLETED' : 'ACTIVE');
           return;
         }
         modelHistory.current = history;
@@ -1365,6 +1380,25 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     finally { setActionBusy(false); }
   };
 
+  const confirmScenePlan = async () => {
+    if (!task || actionBusy) return;
+    setActionBusy(true); setError('');
+    setPhase('processing'); setBusyLabel('正在安排不同场景…'); setBusyHint('每套场景都会有自己的图片和文案方向');
+    try {
+      const payload = await responseJson<{ plan: ScenePlan; passport: ProductPassport }>(await fetch(`/api/tasks/${task.id}/scene-plan`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: sceneMode, count: sceneMode === 'SINGLE' ? 1 : sceneCount, directions: sceneDirections.slice(0, sceneCount) }),
+      }), '场景方案保存失败');
+      setScenePlan(payload.plan); setPassport(payload.passport);
+      const summary = payload.plan.mode === 'SINGLE' ? '按一套方案上新' : `制作 ${payload.plan.scenes.length} 套场景：${payload.plan.scenes.map((scene) => scene.name).join('、')}`;
+      append('user', summary, '场景方案已确认');
+      await runAgentTurn(task, `我已确认${summary}。请为每套场景分别准备与图片方向匹配的 Listing 文案。`, { appendUser: false });
+    } catch (caught) {
+      setPhase('scene_plan');
+      setError(caught instanceof Error ? caught.message : '场景方案保存失败');
+    } finally { setActionBusy(false); }
+  };
+
   const refreshAfterListing = async () => {
     if (!task) return false;
     try {
@@ -1384,7 +1418,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       if (available.some((asset) => asset.kind !== 'VIDEO')) { setPhase('assets'); return; }
       setPhase('image_brief');
       if (messagesRef.current.at(-1)?.meta !== '等待图片需求') {
-        append('agent', 'Listing 已确认。生成图片前，你希望要几张？想要什么风格或场景？也可以交给我根据商品和平台规划。', '等待图片需求');
+        append('agent', scenePlan?.mode === 'SPLIT' ? `各套 Listing 已确认。接下来为 ${scenePlan.scenes.length} 套场景分别生成对应图片；你也可以补充共同的视觉风格。` : 'Listing 已确认。生成图片前，你希望要几张？想要什么风格或场景？也可以交给我根据商品和平台规划。', '等待图片需求');
         await persistConversation(task.id);
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : '图片生成准备失败'); }
@@ -1392,7 +1426,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
 
   const submitImageBrief = async (notesOverride?: string, countOverride?: number | null) => {
     if (!task || phase === 'processing') return;
-    const brief: ImageBrief = { count: countOverride === undefined ? imageBriefCount : countOverride, style: imageBriefStyle.trim(), notes: (notesOverride ?? imageBriefNotes).trim() };
+    const brief: ImageBrief = { count: scenePlan?.mode === 'SPLIT' ? scenePlan.scenes.length : countOverride === undefined ? imageBriefCount : countOverride, style: imageBriefStyle.trim(), notes: (notesOverride ?? imageBriefNotes).trim() };
     imageBriefRef.current = brief;
     const request = `我已确认图片生成需求，请生成图片。数量：${brief.count == null ? '由 Agent 决定' : `${brief.count} 张`}；风格：${brief.style || '由 Agent 决定'}；其他要求：${brief.notes || '无'}。只生成图片，等我确认图片后再生成视频。`;
     append('user', request, '图片需求已确认');
@@ -1400,10 +1434,15 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   };
 
   const confirmAssets = async (skipVideo = false) => {
+    if (scenePlan?.mode === 'SPLIT') skipVideo = true;
     const available=task?await fetchGeneratedAssets(task.id):generatedAssets;
     setGeneratedAssets(available);
     const chosen = available.filter((asset) => asset.kind !== 'VIDEO' && asset.status === 'COMPLETED' && !asset.error && selectedAssetsRef.current.includes(asset.id));
     if (!chosen.length) throw new Error('请先选择至少一张图片');
+    if (scenePlan?.mode === 'SPLIT') {
+      const missing = scenePlan.scenes.filter((scene) => !chosen.some((asset) => asset.sceneId === scene.id));
+      if (missing.length) throw new Error(`请为这些场景各选至少一张图片：${missing.map((scene) => scene.name).join('、')}`);
+    }
     selectedAssetsRef.current = chosen.map((asset) => asset.id);
     setSelectedAssets(selectedAssetsRef.current);
     append('user', skipVideo ? `已确认 ${chosen.length} 张图片，本次不生成视频` : `已确认 ${chosen.length} 张图片，准备视频创意`, skipVideo ? '视频阶段已完成' : '图片已确认', {
@@ -1579,19 +1618,28 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     && (messages.at(-1)?.meta === '视频生成中' || messages.at(-1)?.meta === '等待视频确认');
   const selectedVideoSources = selectedAssets.filter((id) => id.startsWith('asset_'));
 
+  const scenePlanCard = phase === 'scene_plan' && <div className="scene-plan-card">
+    <div className="scene-plan-heading"><span>上新方式</span><h3>这件商品要做几套场景？</h3><p>同一件商品可以用不同使用场景展示。每套会分别准备图片和相呼应的文案，商品事实保持一致。</p></div>
+    <div className="scene-plan-modes" role="group" aria-label="选择上新方式">
+      <button type="button" className={sceneMode === 'SINGLE' ? 'selected' : ''} aria-pressed={sceneMode === 'SINGLE'} onClick={() => setSceneMode('SINGLE')}><b>常规上新</b><small>每个站点一套内容</small></button>
+      <button type="button" className={sceneMode === 'SPLIT' ? 'selected' : ''} aria-pressed={sceneMode === 'SPLIT'} onClick={() => setSceneMode('SPLIT')}><b>场景裂变</b><small>每个站点多套图文方案</small></button>
+    </div>
+    {sceneMode === 'SPLIT' && <div className="scene-plan-options"><label>做几套场景<select value={sceneCount} onChange={(event) => setSceneCount(Number(event.target.value))}>{[2, 3, 4, 5, 6].map((count) => <option key={count} value={count}>{count} 套</option>)}</select></label><p>可以写下你想测试的方向；留空的场景由智能体规划。</p><div className="scene-plan-directions">{Array.from({ length: sceneCount }, (_, index) => <label key={index}>场景 {index + 1}<input value={sceneDirections[index] ?? ''} onChange={(event) => setSceneDirections((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} maxLength={300} placeholder="例如：办公室通勤；留空由智能体规划" /></label>)}</div></div>}
+    <footer><span>{sceneMode === 'SPLIT' ? `预计生成 ${sceneCount} 套 × 每个已选站点的独立文案` : '沿用当前单套流程'}</span><button type="button" disabled={actionBusy} onClick={() => void confirmScenePlan()}>{actionBusy ? '正在安排…' : '确认并继续'}</button></footer>
+  </div>;
   const intakeCard = phase === 'intake' && (preferencesLoaded
     ? <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + JSON.stringify(preferences?.preferredTargets) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} preferredTargets={preferences?.preferredTargets} /></div></div>
     : <div className="chat-action-card intake">正在读取店铺偏好…</div>);
   const imageBriefCard = phase === 'image_brief' && <div className="image-brief-card">
-    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>{preferences?.visualStyle ? `默认沿用店铺视觉偏好：${preferences.visualStyle}。本轮可直接覆盖。` : '告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。'}</p></div>
+    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>{scenePlan?.mode === 'SPLIT' ? `将为 ${scenePlan.scenes.map((scene) => scene.name).join('、')} 各生成一张对应图片；可以补充共同的视觉风格。` : preferences?.visualStyle ? `默认沿用店铺视觉偏好：${preferences.visualStyle}。本轮可直接覆盖。` : '告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。'}</p></div>
     <div className="image-brief-fields">
-      <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>按你的需求规划图片内容；封面与顺序稍后再确认。</small></fieldset>
+      {scenePlan?.mode === 'SPLIT' ? <p className="scene-image-count">每套场景 1 张，共 {scenePlan.scenes.length} 张。每张图会和该套 Listing 文案对应。</p> : <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>按你的需求规划图片内容；封面与顺序稍后再确认。</small></fieldset>}
       <label>图片风格<input value={imageBriefStyle} onChange={(event) => setImageBriefStyle(event.target.value)} maxLength={200} placeholder="例如：自然生活感、简洁高级、户外通勤" /></label>
       <label>其他要求<textarea rows={3} value={imageBriefNotes} onChange={(event) => setImageBriefNotes(event.target.value)} maxLength={500} placeholder="例如：不要细节图；希望有一张真人穿搭图" /></label>
     </div>
-    <footer><span>先生成并确认图片，再开始视频</span><button type="button" onClick={() => void submitImageBrief()}>{imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
+    <footer><span>{scenePlan?.mode === 'SPLIT' ? '每套图文方案会独立用于对应草稿' : '先生成并确认图片，再开始视频'}</span><button type="button" onClick={() => void submitImageBrief()}>{imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
   </div>;
-  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} />;
+  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} splitMode={scenePlan?.mode === 'SPLIT'} />;
   const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} jobIds={messages.at(-1)?.videoJobIds} onJobCreated={recordVideoJob} /><footer><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认并继续</button></footer></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
@@ -1723,11 +1771,11 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
             <div className={`welcome-composer ${pendingFiles.length ? 'has-files' : ''} ${dragActive ? 'drag-active' : ''}`} {...composerDropHandlers}>
               <input ref={composerFileInput} className="visually-hidden" type="file" multiple accept={COMPOSER_FILE_ACCEPT} onChange={(event) => { if (event.target.files) addComposerFiles(event.target.files); event.currentTarget.value = ''; }} />
               {composerAttachments}
-              <textarea rows={4} className="agent-composer-input" value={composer} disabled={phase === 'processing'} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={composerPlaceholder} />
+              <textarea rows={4} className="agent-composer-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={composerPlaceholder} />
               <div className="welcome-composer-toolbar">
                 <div><span className="composer-mode">◇ 智能规划</span><button type="button" title="可一次选择多个文件，也可以直接拖进对话框" onClick={() => composerFileInput.current?.click()}>＋ 添加资料</button><button type="button" title="可一次选择多张图片，也可以直接拖进对话框" onClick={() => composerFileInput.current?.click()}>▧ 上传图片</button><button type="button" disabled title="即将支持">⌁ 语音消息</button></div>
                 <small>{composer.length}/2000</small>
-                <button className="send" type="button" aria-label="发送消息" onClick={() => void sendMessage()} disabled={(!composer.trim() && pendingFiles.length === 0) || phase === 'processing'}>↑</button>
+                <button className="send" type="button" aria-label="发送消息" onClick={() => void sendMessage()} disabled={!composer.trim() && pendingFiles.length === 0}>↑</button>
               </div>
             </div>
             <div className="ready-prompt-title">从常用任务开始</div>
@@ -1752,6 +1800,8 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
             : <button type="button" className="agent-pause-button" title="不会打断正在执行的一步，当前步骤完成后暂停" onClick={() => { pauseRequestedRef.current = true; setPauseRequested(true); }}>⏸ 暂停</button>}</div>}
 
           {phase === 'conflict' && passport && <ConflictConversationCard passport={passport} busy={actionBusy} manualValue={manualConflictValue} onManualValue={setManualConflictValue} onResolve={resolveConflict} />}
+
+          {phase === 'scene_plan' && <article className="chat-message agent scene-plan-conversation"><span className="chat-avatar">AI</span>{scenePlanCard}</article>}
 
           {phase === 'listing' && task && <article className="chat-message agent listing-conversation"><span className="chat-avatar">AI</span><ListingWorkspace task={task} onAssets={proceedToAssets} onPassportChange={setPassport} conversation /></article>}
 
@@ -1791,7 +1841,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       </footer>}
     </section>
 
-    {publishOpen && task && passport && <PublishDialog task={task} passport={passport} selectedAssets={selectedAssets} busy={actionBusy} localizationBusy={localizationBusy} localizationError={localizationError} onRetryLocalization={() => setLocalizationRevision((value) => value + 1)} onPublish={publish} onClose={() => setPublishOpen(false)} />}
+    {publishOpen && task && passport && <PublishDialog task={task} passport={passport} scenePlan={scenePlan} selectedAssets={selectedAssets} busy={actionBusy} localizationBusy={localizationBusy} localizationError={localizationError} onRetryLocalization={() => setLocalizationRevision((value) => value + 1)} onPublish={publish} onClose={() => setPublishOpen(false)} />}
     {preferencesOpen && <ShopPreferencesDialog initial={preferences} onSaved={(saved) => { setPreferences(saved); setPreferencesOpen(false); }} onClose={() => setPreferencesOpen(false)} />}
     {itemMenu && (() => {
       const menuItem = conversations.find((row) => row.id === itemMenu.id);

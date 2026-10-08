@@ -11,6 +11,7 @@ import {
 } from '@/lib/domain/agent-orchestrator';
 import { PENDING_PRODUCT_NAME } from '@/lib/domain/task';
 import { getProductPassport } from '@/lib/server/passport-store';
+import { getScenePlan } from '@/lib/server/scene-plan-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 import { getLatestCompletedVisionRuns } from '@/lib/server/vision-analysis-store';
 import { listLatestGeneratedAssets } from '@/lib/server/generated-asset-store';
@@ -84,7 +85,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     : 0;
   const empty: AgentWorkflowState = {
     taskId: null, intakePresented: body.intakePresented === true, pendingAttachmentCount, taskStatus: null, productName: null, fileCount: 0, parsedFileCount: 0,
-    imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0, resolvedConflictCount: 0,
+    imageCount: 0, analyzedImageCount: 0, factCount: 0, openConflictCount: 0, resolvedConflictCount: 0, scenePlanConfirmed: false, sceneCount: 1,
     draftCount: 0, generatedDraftCount: 0, approvedDraftCount: 0, publishedDraftCount: 0,
     generatedAssetCount: 0,
     imageBriefConfirmed: body.imageBriefConfirmed === true,
@@ -97,6 +98,7 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
   if (!task) throw new Error('Task not found');
   const passport = await getProductPassport(DB, taskId);
   if (!passport) throw new Error('Product passport not found');
+  const scenePlan = await getScenePlan(DB, taskId);
   const parsed = await DB.prepare(
     `SELECT COUNT(*) AS count FROM file_parse_results
      WHERE task_id = ? AND status IN ('COMPLETED', 'PARTIAL')`,
@@ -121,6 +123,8 @@ async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState>
     factCount: passport.facts.filter((fact) => fact.status !== 'MISSING').length,
     openConflictCount: passport.conflicts.filter((conflict) => conflict.status === 'OPEN').length,
     resolvedConflictCount: passport.conflicts.filter((conflict) => conflict.status !== 'OPEN').length,
+    scenePlanConfirmed: scenePlan !== null || passport.platformDrafts.some((draft) => draft.status !== 'PLANNED'),
+    sceneCount: scenePlan?.scenes.length ?? 1,
     draftCount: passport.platformDrafts.length,
     generatedDraftCount: generatedDrafts.length,
     approvedDraftCount: approvedDrafts.length,

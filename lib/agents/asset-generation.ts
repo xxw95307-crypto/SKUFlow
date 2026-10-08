@@ -3,11 +3,13 @@ import { GENERATED_ASSET_KINDS, type GeneratedAsset, type GeneratedAssetKind } f
 import type { PlatformId } from '../domain/platform.ts';
 import type { ProductFact } from '../domain/product-passport.ts';
 import type { ShopPreferences } from '../domain/shop-preferences.ts';
+import type { SceneVariant } from '../domain/scene-plan.ts';
 
 export const ASSET_PLAN_VERSION = 'dynamic-v3';
 const ALLOWED_SIZES = ['1024*1024', '1024*1280', '1280*1024'] as const;
 
 export interface AssetGenerationSpec {
+  sceneId?: string;
   kind: GeneratedAssetKind;
   title: string;
   note: string;
@@ -22,6 +24,8 @@ export interface AssetPlanningContext {
   productName: string;
   facts: readonly ProductFact[];
   listings: readonly ListingDraftPayload[];
+  scenes?: readonly SceneVariant[];
+  sceneListings?: readonly { sceneId: string; listing: ListingDraftPayload }[];
   platforms: readonly PlatformId[];
   markets: readonly string[];
   sourceImageCount: number;
@@ -102,12 +106,14 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 4. size 只能是 1024*1024、1024*1280 或 1280*1024。
 4a. sourceMode 决定生成参考图：ORIGINAL 使用商家上传的原始商品图，CURRENT 使用要修改的现有成图。整组新图以及人物、主体、构图或画面形式需要明显改变时使用 ORIGINAL，避免把旧图中的错误模特、文字或背景带入；只有明确的小范围局部调整且要保留当前构图时使用 CURRENT。
 5. 商品身份、外形、颜色、结构、材质和真实标识必须与原图及已确认事实一致；不得虚构功能、配件、认证、促销或价格。海报文字仅可使用已确认事实，难以可靠生成时预留排版空间。
-6. title、note、instruction、acceptance 使用简体中文。`,
+6. title、note、instruction、acceptance 使用简体中文。
+7. 如果输入包含场景裂变方案，每张图片对象额外填写 sceneId；每套场景各生成一张与该场景文案呼应的图，不能让一个场景的图片匹配另一场景文案。`,
   }, {
     role: 'user',
     content: `商品名称：${context.productName}
 已确认商品事实：${factText(context.facts) || '仅以原图可见内容为准'}
 已审核 Listing：${listingText(context.listings) || '无'}
+${context.scenes?.length ? `场景方案：${JSON.stringify(context.scenes)}\n场景与审校文案对应关系：${JSON.stringify(context.sceneListings?.map((entry) => ({ sceneId: entry.sceneId, fields: entry.listing.fields })) ?? [])}` : ''}
 目标平台：${context.platforms.join('、') || '未指定'}
 目标市场：${context.markets.join('、') || '未指定'}
 可用原始商品图：${context.sourceImageCount} 张；可用原图ID：${(context.sourceImageIds ?? []).join("、")}
@@ -123,7 +129,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
   }];
 }
 
-export function parseAssetPlan(value: string, requestedCount?: number | null, targetIndices?: readonly number[]): AssetGenerationSpec[] {
+export function parseAssetPlan(value: string, requestedCount?: number | null, targetIndices?: readonly number[], scenes?: readonly SceneVariant[]): AssetGenerationSpec[] {
   let raw: unknown;
   try {
     raw = JSON.parse(value);
@@ -144,10 +150,11 @@ export function parseAssetPlan(value: string, requestedCount?: number | null, ta
     const acceptance = plainText(record.acceptance).slice(0, 500);
     const negativePrompt = plainText(record.negativePrompt).slice(0, 300);
     const sourceMode = record.sourceMode === 'CURRENT' ? 'CURRENT' : 'ORIGINAL';
+    const sceneId = plainText(record.sceneId);
     const size = plainText(record.size);
     if (!GENERATED_ASSET_KINDS.includes(kind as (typeof GENERATED_ASSET_KINDS)[number]) || !title || !note || !instruction || !acceptance) continue;
     if (!ALLOWED_SIZES.includes(size as AssetGenerationSpec['size'])) continue;
-    assets.push({ kind: kind as GeneratedAssetKind, title, note, instruction, acceptance, negativePrompt, sourceMode, size: size as AssetGenerationSpec['size'] });
+    assets.push({ sceneId: sceneId || undefined, kind: kind as GeneratedAssetKind, title, note, instruction, acceptance, negativePrompt, sourceMode, size: size as AssetGenerationSpec['size'] });
   }
   if (targetIndices?.length) {
     if (assets.length !== targetIndices.length || candidates.length !== targetIndices.length) throw new Error(`视觉策划 Agent 必须只规划指定的 ${targetIndices.length} 张图片`);
@@ -157,6 +164,9 @@ export function parseAssetPlan(value: string, requestedCount?: number | null, ta
     if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 6) throw new Error('图片数量需为 1–6 张');
     if (assets.length !== requestedCount || candidates.length !== requestedCount) throw new Error(`视觉策划 Agent 必须按商家要求规划 ${requestedCount} 张图片`);
   } else if (assets.length < 1 || assets.length > 6) throw new Error('视觉策划 Agent 应根据商家要求规划 1–6 张图片');
+  if (scenes?.length && !targetIndices?.length && (assets.length !== scenes.length || scenes.some((scene) => assets.filter((asset) => asset.sceneId === scene.id).length !== 1))) {
+    throw new Error('每套场景都必须有且仅有一张对应图片');
+  }
   return assets;
 }
 
@@ -177,6 +187,7 @@ export function selectConfirmedVideoImages(latestAssets: readonly GeneratedAsset
 
 export function buildAssetGenerationPrompt(input: {
   spec: AssetGenerationSpec;
+  scene?: SceneVariant | null;
   productName: string;
   facts: readonly ProductFact[];
   listings: readonly ListingDraftPayload[];
@@ -194,6 +205,7 @@ export function buildAssetGenerationPrompt(input: {
 6. 店铺视觉偏好只在本轮没有更明确要求时使用；本轮商家要求与商品原图优先。店铺禁用词不能出现在图片文字中。
 
 商品名称：${input.productName}
+${input.scene ? `本张图片专属场景：${input.scene.name}。画面方向：${input.scene.visualBrief}。与之对应的文案角度：${input.scene.copyBrief}。不要借用其他场景的诉求。` : ''}
 已确认商品事实：${factText(input.facts) || '以参考图可见内容为准'}
 已审核 Listing 语义参考：${listingText(input.listings) || '无'}
 店铺视觉偏好：${input.preferences?.visualStyle || '无'}

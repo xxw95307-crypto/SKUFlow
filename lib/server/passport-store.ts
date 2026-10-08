@@ -78,6 +78,7 @@ interface DraftRow {
   platform_id: PlatformId;
   market: string;
   locale: string;
+  scene_id: string;
   category_id: string | null;
   status: PlatformDraftStatus;
   schema_version: string | null;
@@ -141,8 +142,8 @@ export function prepareInitialPassportWrites(
     ).bind(fact.id, evidenceId))),
     ...passport.platformDrafts.map((draft) => DB.prepare(
       `INSERT INTO platform_drafts
-       (id, task_id, passport_id, platform_id, market, locale, category_id, status, schema_version, payload_json, validation_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, task_id, passport_id, platform_id, market, locale, scene_id, category_id, status, schema_version, payload_json, validation_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       draft.id,
       draft.taskId,
@@ -150,6 +151,7 @@ export function prepareInitialPassportWrites(
       draft.platformId,
       draft.market,
       draft.locale,
+      draft.sceneId,
       draft.categoryId,
       draft.status,
       draft.schemaVersion,
@@ -213,9 +215,9 @@ export async function getProductPassport(DB: D1Database, taskId: string): Promis
        FROM fact_conflicts WHERE passport_id = ? ORDER BY created_at ASC`,
     ).bind(passport.id).all<ConflictRow>(),
     DB.prepare(
-      `SELECT id, task_id, passport_id, platform_id, market, locale, category_id, status, schema_version,
+      `SELECT id, task_id, passport_id, platform_id, market, locale, scene_id, category_id, status, schema_version,
               payload_json, validation_json, created_at, updated_at
-       FROM platform_drafts WHERE passport_id = ? ORDER BY platform_id, market`,
+       FROM platform_drafts WHERE passport_id = ? ORDER BY scene_id, platform_id, market`,
     ).bind(passport.id).all<DraftRow>(),
   ]);
 
@@ -274,6 +276,7 @@ export async function getProductPassport(DB: D1Database, taskId: string): Promis
     platformId: draft.platform_id,
     market: draft.market,
     locale: draft.locale,
+    sceneId: draft.scene_id,
     categoryId: draft.category_id,
     status: draft.status,
     schemaVersion: draft.schema_version,
@@ -327,4 +330,20 @@ export async function saveCompiledDrafts(
     draft.draftId,
     passportId,
   )));
+}
+
+export async function resetPlannedDrafts(DB: D1Database, taskId: string): Promise<void> {
+  const rows = await DB.prepare(`SELECT passport_id,platform_id,market,locale,scene_id,category_id
+    FROM platform_drafts WHERE task_id=? AND status!='DRAFT_CREATED'`).bind(taskId).all<{
+    passport_id: string; platform_id: string; market: string; locale: string; scene_id: string; category_id: string | null;
+  }>();
+  if (!rows.results.length) return;
+  const now = new Date().toISOString();
+  await DB.batch([
+    DB.prepare("DELETE FROM platform_drafts WHERE task_id=? AND status!='DRAFT_CREATED'").bind(taskId),
+    ...rows.results.map((draft) => DB.prepare(`INSERT INTO platform_drafts
+      (id,task_id,passport_id,platform_id,market,locale,scene_id,category_id,status,schema_version,payload_json,validation_json,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'PLANNED',NULL,'{}','[]',?,?)`)
+      .bind(`draft_${crypto.randomUUID()}`, taskId, draft.passport_id, draft.platform_id, draft.market, draft.locale, draft.scene_id, draft.category_id, now, now)),
+  ]);
 }

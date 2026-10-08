@@ -5,6 +5,7 @@ export const AGENT_TOOL_NAMES = [
   'parse_product_sources',
   'analyze_product_images',
   'merge_product_facts',
+  'open_scene_plan',
   'open_target_selection',
   'update_task_targets',
   'reparse_sources',
@@ -52,6 +53,8 @@ export interface AgentWorkflowState {
   factCount: number;
   openConflictCount: number;
   resolvedConflictCount: number;
+  scenePlanConfirmed: boolean;
+  sceneCount: number;
   draftCount: number;
   generatedDraftCount: number;
   approvedDraftCount: number;

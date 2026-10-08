@@ -12,7 +12,7 @@ import {
   prepareAgentRunStart,
 } from '@/lib/server/fact-extraction-store';
 import { getParseResults } from '@/lib/server/parse-store';
-import { getProductPassport } from '@/lib/server/passport-store';
+import { getProductPassport, resetPlannedDrafts } from '@/lib/server/passport-store';
 import { getTaskSnapshot, prepareTaskTransition } from '@/lib/server/task-store';
 import { getLatestCompletedVisionRuns } from '@/lib/server/vision-analysis-store';
 import { assertTransition } from '@/lib/workflow/task-machine';
@@ -127,7 +127,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     let currentStatus = task.status;
     if (currentStatus !== 'FILES_PARSED' && currentStatus !== 'FACTS_EXTRACTED') {
       // 从更晚阶段重新合并事实：作废旧审校稿（事实已变，旧稿不可信）。
-      await DB.prepare('DELETE FROM platform_drafts WHERE task_id = ?').bind(taskId).run();
+      await resetPlannedDrafts(DB, taskId);
     }
     if (currentStatus === 'FILES_PARSED') {
       assertTransition(currentStatus, 'FACTS_EXTRACTED');

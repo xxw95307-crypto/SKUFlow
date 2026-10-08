@@ -5,11 +5,12 @@ import type { ListingDraftPayload } from '../domain/listing.ts';
 export interface ShopifyVariantRow { options: string; sku: string; price: string | number; quantity?: string | number; barcode?: string; weight?: string | number }
 export interface ShopifyMediaInput { name: string; contentType: string; bytes: ArrayBuffer; alt: string }
 type Verification = NonNullable<ShopifyDevPublication['verification']>;
-export function buildIntegratedProduct(payload: ListingDraftPayload, draftId: string, files: unknown[] = []) {
+export function buildIntegratedProduct(payload: ListingDraftPayload, draftId: string, files: unknown[] = [], uniqueHandleForScene = false) {
   const f = {...payload.fields, variants: normalizeSaleVariants(payload.fields.variants)} as Record<string, any>;
   const errors=validateShopifyFields(f); if(errors.length) throw new Error(errors.join('；'));
   const product = buildShopifyProductInput(payload,draftId);
   for(const [key,target] of Object.entries({category_id:'category',handle:'handle',template_suffix:'templateSuffix',collection_ids:'collections'})) if(present(f[key])) product[target]=f[key];
+  if (uniqueHandleForScene && present(f.handle)) product.handle = `${String(f.handle).slice(0, 180)}-${draftId.slice(-8)}`;
   const rows: ShopifyVariantRow[] = f.variants?.length ? f.variants : [{options:'Title=Default Title',sku:f.variant_sku,price:f.variant_price,quantity:f.inventory_quantity,barcode:f.barcode,weight:f.shipping_weight}];
   const opts=rows.map(r=>parseOptions(r.options));
   product.productOptions=Object.keys(opts[0]).map((name,i)=>({name,position:i+1,values:[...new Set(opts.map(o=>o[name]))].map(name=>({name}))}));
@@ -54,9 +55,9 @@ async function uploadMedia(config: ShopifyDevConfig, token:string, media:Shopify
   }
   return files;
 }
-export async function publishIntegratedShopify(input:{config:ShopifyDevConfig;payload:ListingDraftPayload;draftId:string;media:ShopifyMediaInput[];onCreated?:(productId:string)=>Promise<void>},fetchImpl:typeof fetch=fetch):Promise<ShopifyDevPublication> {
+export async function publishIntegratedShopify(input:{config:ShopifyDevConfig;payload:ListingDraftPayload;draftId:string;media:ShopifyMediaInput[];uniqueHandleForScene?:boolean;onCreated?:(productId:string)=>Promise<void>},fetchImpl:typeof fetch=fetch):Promise<ShopifyDevPublication> {
   const {config,payload,draftId}=input;
-  const expected=buildIntegratedProduct(payload,draftId);
+  const expected=buildIntegratedProduct(payload,draftId,[],input.uniqueHandleForScene === true);
   const token=await exchangeAccessToken(config,fetchImpl);
   const access=await shopifyGraphql<any>(config,token,'{currentAppInstallation{accessScopes{handle}}}',{},fetchImpl);
   const scopes=access.currentAppInstallation.accessScopes.map((s:any)=>s.handle);
