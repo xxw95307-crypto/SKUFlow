@@ -1651,6 +1651,8 @@ body {
 .agent-shell-v2 .joined-action-bubble:has(.video-result) > .video-stage-card { max-width: 100%; }
 .agent-shell-v2 .joined-action-bubble:has(.video-result) > .joined-message-copy { display: none; }
 .agent-shell-v2 .joined-action-bubble:has(.video-result) > .video-stage-card { border-top: 0; }
+.agent-shell-v2 .joined-action-bubble:has(> .video-stage-card) > .joined-message-copy { display: none; }
+.agent-shell-v2 .joined-action-bubble > .video-stage-card { border-top: 0; }
 
 .agent-shell-v2 .video-results-card { display: grid; gap: 16px; }
 .agent-shell-v2 .chat-message.video-round-message:not(.joined-action) > div.rich-message-bubble {
@@ -1676,8 +1678,8 @@ body {
   }
 }
 .agent-shell-v2 .video-prompt-choice h3 { margin: 0 0 15px; font-size: 18px; color: #233b32; }
-.agent-shell-v2 .video-prompt-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.agent-shell-v2 .video-prompt-options button { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 12px 14px; border: 1px solid #d9e4df; border-radius: 10px; background: #fff; color: #365046; text-align: left; cursor: pointer; }
+.agent-shell-v2 .video-prompt-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.agent-shell-v2 .video-prompt-options button { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; border: 1px solid #d9e4df; border-radius: 8px; background: #fff; color: #365046; text-align: left; cursor: pointer; }
 .agent-shell-v2 .video-prompt-options button.selected { border-color: #438262; background: #e9f3ed; }
 .agent-shell-v2 .video-prompt-options button b { white-space: nowrap; font-size: 14px; }
 .agent-shell-v2 .video-prompt-options button span { color: #6b7e77; font-size: 12px; }
@@ -1687,7 +1689,7 @@ body {
 .agent-shell-v2 .video-prompt-choice textarea:focus,
 .agent-shell-v2 .video-draft-review textarea:focus { border-color: #438262; outline: 3px solid #dfeee5; }
 .agent-shell-v2 .video-prompt-choice footer,
-.agent-shell-v2 .video-draft-review footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.agent-shell-v2 .video-draft-review footer { display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .agent-shell-v2 .video-prompt-choice footer small,
 .agent-shell-v2 .video-draft-review footer small { color: #6b7e77; font-size: 12px; }
 .agent-shell-v2 .video-prompt-choice footer button,
@@ -1707,7 +1709,6 @@ body {
 .agent-shell-v2 .video-audio-options input { accent-color: #3c7e5b; }
 .agent-shell-v2 .video-narration-label { display: block; margin-top: 16px; color: #283c34; font-size: 14px; font-weight: 650; }
 .agent-shell-v2 .video-narration-label small { display: block; margin-top: 5px; color: #6b7e77; font-size: 12px; font-weight: 400; }
-.agent-shell-v2 .video-narration-preview-note { margin: 9px 0 0; color: #627b6e; font-size: 13px; line-height: 1.5; }
 .agent-shell-v2 .video-progress-row { display: flex; align-items: center; gap: 10px; padding: 16px; border-radius: 10px; background: #f3f7f4; color: #365046; }
 .agent-shell-v2 .video-progress-row button { margin-left: auto; }
 .agent-shell-v2 .video-result { width: fit-content; max-width: 100%; overflow: hidden; border-radius: 10px; background: #f7faf8; }

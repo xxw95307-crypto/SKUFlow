@@ -27,15 +27,15 @@ function VideoDraft({ job, configured, busy, onStart, onTranslate }: {
   const [audioMode, setAudioMode] = useState<AudioMode>(job.plan.audioMode ?? 'ambient');
   const [narrationText, setNarrationText] = useState(job.plan.narrationText ?? job.plan.narrationSuggestion ?? '');
   return <section className="video-draft-review">
-    <div className="video-card-heading"><span>生成前确认</span><b>视频提示词</b>{job.plan.title !== '自定义商品视频' && !isChineseVideoPrompt(prompt) && <button type="button" disabled={busy} onClick={() => void onTranslate(job.id, prompt)}>转为中文</button>}</div>
+    <div className="video-card-heading"><b>视频提示词</b>{job.plan.title !== '自定义商品视频' && !isChineseVideoPrompt(prompt) && <button type="button" disabled={busy} onClick={() => void onTranslate(job.id, prompt)}>转为中文</button>}</div>
     <textarea aria-label="视频生成提示词" value={prompt} maxLength={4000} rows={7} onChange={(event) => setPrompt(event.target.value)} />
     <fieldset className="video-audio-choice"><legend>声音</legend><div className="video-audio-options">
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'ambient'} onChange={() => setAudioMode('ambient')} />自然音效</label>
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'music'} onChange={() => setAudioMode('music')} />背景音乐</label>
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'narration'} onChange={() => setAudioMode('narration')} />解说配音</label>
     </div></fieldset>
-    {audioMode === 'narration' && <label className="video-narration-label">{job.plan.narrationSuggestion ? 'AI 拟写的解说文案（可修改）' : '解说文案（生成前可修改）'}<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="用一句话介绍商品已确认的卖点" /><small>视频会按配音实际时长自动匹配为 2–15 秒；太短或太长时请修改文案。</small></label>}
-    <footer><small>{audioMode === 'narration' ? '按配音时长生成' : `${job.plan.duration} 秒`} · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim() || (audioMode === 'narration' && !narrationText.trim())} onClick={() => void onStart(job.id, prompt, audioMode, narrationText)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
+    {audioMode === 'narration' && <label className="video-narration-label">解说文案<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="请输入解说文案" /></label>}
+    <footer><button type="button" disabled={!configured || busy || !prompt.trim() || (audioMode === 'narration' && !narrationText.trim())} onClick={() => void onStart(job.id, prompt, audioMode, narrationText)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
   </section>;
 }
 
@@ -123,10 +123,10 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
   return <div className="asset-conversation-card video-results-card">
     {error && <p className="video-inline-error" role="alert">{error}</p>}
     {showPlanner && <section className="video-prompt-choice">
-      <h3>你想怎样生成视频？</h3>
+      <h3>视频提示词</h3>
       <div className="video-prompt-options" role="group" aria-label="视频提示词方式">
-        <button type="button" className={mode === 'ai' ? 'selected' : ''} aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}><b>AI 拟稿</b><span>先生成可编辑的提示词</span></button>
-        <button type="button" className={mode === 'custom' ? 'selected' : ''} aria-pressed={mode === 'custom'} onClick={() => setMode('custom')}><b>自己填写</b><span>直接使用你的创意</span></button>
+        <button type="button" className={mode === 'ai' ? 'selected' : ''} aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}><b>AI 拟稿</b></button>
+        <button type="button" className={mode === 'custom' ? 'selected' : ''} aria-pressed={mode === 'custom'} onClick={() => setMode('custom')}><b>自己填写</b></button>
       </div>
       {mode === 'ai' ? <label>补充想法（可选）<textarea rows={2} maxLength={1000} value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="例如：镜头缓慢移动，突出面料质感" /></label>
         : <label>视频生成提示词<textarea rows={5} maxLength={4000} value={customPrompt} onChange={(event) => setCustomPrompt(event.target.value)} placeholder="描述希望出现的画面、镜头和动作" /></label>}
@@ -135,8 +135,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
         <label><input type="radio" name={`plan-audio-${sceneId ?? 'base'}`} checked={audioMode === 'music'} onChange={() => setAudioMode('music')} />背景音乐</label>
         <label><input type="radio" name={`plan-audio-${sceneId ?? 'base'}`} checked={audioMode === 'narration'} onChange={() => setAudioMode('narration')} />解说配音</label>
       </div></fieldset>
-      {audioMode === 'narration' && <p className="video-narration-preview-note">{mode === 'ai' ? '下一步会生成一段可修改的解说文案，确认后再制作配音和视频。' : '下一步可以填写或修改解说文案，确认后再制作配音和视频。'}</p>}
-      <footer><small>下一步可编辑提示词{audioMode === 'narration' ? '和解说文案' : ''}；确认后才会调用视频模型</small><button type="button" disabled={busy || (mode === 'custom' && !customPrompt.trim())} onClick={() => void createPlan()}>{busy ? '正在准备…' : mode === 'ai' ? '生成可编辑提示词' : '保存提示词并继续'}</button></footer>
+      <footer><button type="button" disabled={busy || (mode === 'custom' && !customPrompt.trim())} onClick={() => void createPlan()}>{busy ? '正在准备…' : mode === 'ai' ? '生成提示词' : '下一步'}</button></footer>
     </section>}
     {draft && showSuggestion && <VideoDraft key={`${draft.id}:${draft.plan.prompt}`} job={draft} configured={configured} busy={busy} onStart={(id, prompt, audioMode, narrationText) => action(id, 'start', prompt, audioMode, narrationText)} onTranslate={(id, prompt) => action(id, 'translate_prompt', prompt)} />}
     {inProgress && <div className="video-progress-row" role="status"><span className="agent-spinner" /><span>{labels[visibleJobs.find((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job))?.status ?? ''] || '视频生成中'}</span>{visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status)) && <button type="button" disabled={busy} onClick={() => void action(visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status))!.id, 'refresh')}>刷新状态</button>}</div>}
