@@ -1,6 +1,6 @@
 import { withAuthentication } from '@/lib/server/auth';
 import {getSelectedMedia} from '@/lib/server/media-candidates';
-import {parseMediaOrderPlan,sameMediaSelection} from '@/lib/agents/media-ordering';
+import {parseTargetMediaOrderPlan,sameTargetMediaSelection,mediaOrderTargetKey,type TargetMediaOrderGroup} from '@/lib/agents/media-ordering';
 import { publishIntegratedShopify, type ShopifyMediaInput } from '@/lib/platforms/shopify-integrated';
 import { fetchShopifyListingSchema } from '@/lib/platforms/shopify-schema';
 import { ensureSchema, getBindings } from '@/db/client';
@@ -13,8 +13,6 @@ import { localizedPublicationPayload } from '@/lib/agents/listing-localization';
 import { buildAmazonSandboxListingRequest, submitAmazonSandboxListing } from '@/lib/platforms/amazon-us-sandbox';
 import { requireAmazonMarket } from '@/lib/platforms/amazon-markets';
 import { getScenePlan } from '@/lib/server/scene-plan-store';
-import { mediaIdsForScene } from '@/lib/agents/scene-media';
-import type { StoredMediaCandidate } from '@/lib/server/media-candidates';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,9 +54,8 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     if(body.draftId !== undefined && typeof body.draftId !== 'string') return Response.json({error:'Listing 草稿 ID 格式无效'},{status:400});
     const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
     if(selectedIds.length>36) return Response.json({error:'单次最多选择 36 项媒体'},{status:400});
-    const mediaById = new Map<string, ShopifyMediaInput>();
-    let selectedCandidates: StoredMediaCandidate[] = [];
-    let orderedMediaIds: string[] = [];
+    const mediaById = new Map<string, Omit<ShopifyMediaInput,'alt'>>();
+    let mediaGroups: TargetMediaOrderGroup[] = [];
     const passport = await getProductPassport(DB, taskId);
     if (!passport) return Response.json({ error: 'Task not found' }, { status: 404 });
     const scenePlan = await getScenePlan(DB, taskId);
@@ -77,14 +74,13 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
       const latest=await DB.prepare('SELECT id FROM media_order_plans WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(taskId).first<{id:string}>();
       if(latest?.id!==body.mediaPlanId)throw new Error('媒体编排已有新版，请确认最新版');
       const candidates=await getSelectedMedia(DB,taskId,selectedIds);
-      selectedCandidates = candidates;
-      const plan=parseMediaOrderPlan(JSON.parse(row.plan_json),candidates);
-      if(!sameMediaSelection(plan,selectedIds))throw new Error('选中的媒体已改变，请重新编排并确认');
-      orderedMediaIds = plan.items.map(item => item.id);
-      if(hasShopify) for(const item of plan.items) {
-        const c=candidates.find(c=>c.id===item.id)!;
+      const targets=passport.platformDrafts.map(draft=>({platformId:draft.platformId,market:draft.market,sceneId:draft.sceneId}));
+      const plan=parseTargetMediaOrderPlan(JSON.parse(row.plan_json),candidates,targets,split);
+      if(!sameTargetMediaSelection(plan,selectedIds))throw new Error('选中的媒体已改变，请重新编排并确认');
+      mediaGroups=plan.groups;
+      if(hasShopify) for(const c of candidates) {
         const object=await bindings.UPLOADS.get(c.objectKey);if(!object)throw new Error('找不到选中的媒体文件');
-        mediaById.set(c.id, {name:`${c.id}.${c.type==='VIDEO'?(c.contentType==='video/webm'?'webm':'mp4'):'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer(),alt:`${item.alt} · ${c.id}`});
+        mediaById.set(c.id, {name:`${c.id}.${c.type==='VIDEO'?(c.contentType==='video/webm'?'webm':'mp4'):'png'}`,contentType:c.contentType,bytes:await object.arrayBuffer()});
       }
     }
     const shopifyConfig = hasShopify ? loadShopifyDevConfig(bindings) : null;
@@ -92,11 +88,13 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
 
     for (const draft of publishable) {
       const now = new Date().toISOString();
-      const draftMediaIds = mediaIdsForScene(orderedMediaIds, selectedCandidates, draft.sceneId, split);
+      const group=mediaGroups.find(item=>mediaOrderTargetKey(item)===mediaOrderTargetKey(draft));
+      if(needsMediaPlan&&!group)throw new Error('缺少该站点场景的图片方案');
+      const draftMediaIds=group?.items.map(item=>item.id)??[];
       const currentPayload = draft.payload as unknown as ListingDraftPayload;
       const publicationPayload = localizedPublicationPayload(currentPayload);
       if (draft.platformId === 'shopify' && shopifyConfig) {
-        const media = draftMediaIds.map((id) => mediaById.get(id)).filter((item): item is ShopifyMediaInput => Boolean(item));
+        const media = group!.items.map(item=>{const file=mediaById.get(item.id);return file?{...file,alt:`${item.alt} · ${item.id}`}:null;}).filter((item):item is ShopifyMediaInput=>Boolean(item));
         if (!media.length) throw new Error('请选择要同步到 Shopify 的商品图片');
         const liveSchema = await fetchShopifyListingSchema(shopifyConfig, { market: draft.market });
         if (currentPayload.schema.mode !== 'SHOPIFY_API') throw new Error('这份 Shopify 审核稿使用旧版 Mock 字段，请重新生成并确认实际接口审核稿后发布。');

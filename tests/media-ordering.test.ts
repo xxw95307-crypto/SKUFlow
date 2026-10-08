@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseMediaOrderPlan,sameMediaSelection,planMediaOrder,completeMediaOrderPlan} from '../lib/agents/media-ordering.ts';
+import {parseMediaOrderPlan,sameMediaSelection,planMediaOrder,completeMediaOrderPlan,parseTargetMediaOrderPlan,mediaCandidatesForTarget,sameTargetMediaSelection} from '../lib/agents/media-ordering.ts';
 import {compareIntegratedProduct,reorderShopifyMedia,refreshMediaOrderStatus,publishIntegratedShopify} from '../lib/platforms/shopify-integrated.ts';
 const candidates=[{id:'detail',type:'IMAGE' as const,title:'细节',purpose:'DETAIL'},{id:'hero',type:'IMAGE' as const,title:'全貌',purpose:'HERO'},{id:'video',type:'VIDEO' as const,title:'展示',purpose:'场景'}];
 const raw={items:[{id:'hero',role:'COVER',alt:'商品全貌',reason:'商品清晰可见'},{id:'video',role:'VIDEO',alt:'商品展示视频',reason:'随后观看动作'},{id:'detail',role:'GALLERY',alt:'商品细节',reason:'最后核对细节'}]};
@@ -29,6 +29,22 @@ test('nine selected scene images remain unique and complete when the ordering mo
  assert.deepEqual(new Set(plan.items.map(item=>item.id)),new Set(images.map(image=>image.id)));
  assert.equal(sameMediaSelection(plan,images.map(image=>image.id)),true);
  assert.equal(completeMediaOrderPlan({items:[]},images).items.length,9);
+});
+test('each site and split scene has its own cover and only its three selected images',()=>{
+ const images=Array.from({length:9},(_,index)=>({id:`image_${index+1}`,type:'IMAGE' as const,title:`图 ${index+1}`,purpose:'商品展示',sceneId:`scene_${Math.floor(index/3)+1}`}));
+ const targets=['美国','日本'].flatMap(market=>[1,2,3].map(number=>({platformId:'shopify',market,sceneId:`scene_${number}`})));
+ const groups=targets.map(target=>{
+  const own=mediaCandidatesForTarget(images,target,true);
+  const arranged=target.market==='美国'?[own[1],own[0],own[2]]:own;
+  return {...target,items:arranged.map((item,index)=>({id:item.id,role:index===0?'COVER':'GALLERY',alt:item.title,reason:'场景展示'}))};
+ });
+ const plan=parseTargetMediaOrderPlan({groups},images,targets,true);
+ assert.equal(plan.groups.length,6);
+ assert.deepEqual(plan.groups[0].items.map(item=>item.id),['image_2','image_1','image_3']);
+ assert.deepEqual(plan.groups[3].items.map(item=>item.id),['image_1','image_2','image_3']);
+ assert.equal(sameTargetMediaSelection(plan,images.map(image=>image.id)),true);
+ assert.throws(()=>parseTargetMediaOrderPlan({groups:[{...groups[0],items:[...groups[0].items,groups[1].items[0]]},...groups.slice(1)]},images,targets,true),/重复|未知|素材/);
+ assert.throws(()=>parseTargetMediaOrderPlan({groups:groups.slice(1)},images,targets,true),/每个站点/);
 });
 const expected={title:'t',variants:[],files:[{alt:'hero',contentType:'IMAGE'},{alt:'video',contentType:'VIDEO'},{alt:'detail',contentType:'IMAGE'}]};
 const actual={title:'t',collections:{nodes:[]},variants:{nodes:[]},featuredMedia:{alt:'hero'},media:{nodes:[{id:'h',alt:'hero',mediaContentType:'IMAGE',status:'READY'},{id:'v',alt:'video',mediaContentType:'VIDEO',status:'PROCESSING'},{id:'d',alt:'detail',mediaContentType:'IMAGE',status:'READY'}]}};
