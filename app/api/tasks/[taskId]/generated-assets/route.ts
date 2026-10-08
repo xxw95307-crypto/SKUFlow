@@ -89,6 +89,9 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       await saveScenePlan(bindings.DB, taskId, scenePlan);
     }
     const splitScenes = scenePlan?.mode === 'SPLIT' ? scenePlan.scenes : [];
+    const isSceneBriefRetry = splitScenes.length > 0 && options.guidance?.startsWith('我已确认图片生成需求，请生成图片') === true;
+    const sharedNotes = options.notes ?? (isSceneBriefRetry ? options.guidance?.match(/；其他要求：(.+?)。只生成图片/)?.[1]?.trim() : null) ?? null;
+    const sharedStyle = options.style ?? (isSceneBriefRetry ? options.guidance?.match(/；风格：(.+?)；其他要求：/)?.[1]?.trim() : null) ?? null;
     const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
     if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0 && existing.every((asset) => asset.status === 'COMPLETED')) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
@@ -98,8 +101,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return Response.json({ error: '请先完成所有平台 Listing 审核，再生成视觉素材' }, { status: 409 });
     }
     const priorImages = existing.filter((asset) => asset.status === 'COMPLETED' && asset.kind !== 'VIDEO');
-    const decision = options.confirmedBrief
-      ? { scope: 'FULL_SET' as const, count: options.count, style: options.style, targetIndices: [] as number[] }
+    const decision = options.confirmedBrief || isSceneBriefRetry
+      ? { scope: 'FULL_SET' as const, count: options.count, style: sharedStyle, targetIndices: [] as number[] }
       : await callBailianVisualIntent(planningConfig, {
           request: options.guidance || '请根据当前商品生成图片',
           existingAssets: priorImages.map(({ kind, title, note }) => ({ kind, title, note })),
@@ -135,7 +138,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           scenes: [scene],
           sceneListings: sceneListings.filter((entry) => entry.sceneId === scene.id),
           requestedCount: scene.imageCount ?? 1,
-          userGuidance: `只为「${scene.name}」生成 ${scene.imageCount ?? 1} 张不同图片。${options.confirmedBrief ? options.notes || '' : options.guidance || ''}`,
+          userGuidance: `只为「${scene.name}」生成 ${scene.imageCount ?? 1} 张不同图片。${options.confirmedBrief || isSceneBriefRetry ? sharedNotes || '' : options.guidance || ''}`,
         })); return Promise.all(scenePlans).then((parts) => ({ assets: parts.flatMap((part) => part.assets), model: parts[0].model })); })()
       : callBailianAssetPlanning(planningConfig, {
           ...planningContext, scenes: splitScenes, sceneListings, userGuidance: options.guidance,
@@ -210,7 +213,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       const batch = await Promise.allSettled(resolvedPlan.assets.slice(start, start + 6).map(async (spec, offset) => {
         const position = start + offset;
         const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), preferences });
-        const sceneGuidance = options.confirmedBrief && splitScenes.length ? `本张属于「${sceneFor(spec.sceneId)?.name ?? spec.sceneId}」场景。${options.notes ?? ''}` : options.guidance;
+        const sceneGuidance = (options.confirmedBrief || isSceneBriefRetry) && splitScenes.length ? `本张属于「${sceneFor(spec.sceneId)?.name ?? spec.sceneId}」场景。${sharedNotes ?? ''}` : options.guidance;
         const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, sceneGuidance, { bytes, contentType: image.content_type }, resolvedPlan.assets.filter((item) => item !== spec && item.sceneId === spec.sceneId).map((item) => `${item.kind}｜${item.title}`));
         return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
       }));
