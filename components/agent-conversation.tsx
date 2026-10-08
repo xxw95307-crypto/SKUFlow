@@ -562,8 +562,9 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const recordVideoJob = (jobId: string) => {
     const current = messagesRef.current;
     const last = current.at(-1);
-    if (last?.role === 'agent' && last.meta === '等待视频确认' && !last.videoJobIds?.length) {
-      const next = [...current.slice(0, -1), { ...last, kind: 'video' as const, videoJobIds: [jobId] }];
+    if (last?.role === 'agent' && last.meta === '等待视频确认' && (scenePlan?.mode === 'SPLIT' || !last.videoJobIds?.length)) {
+      const videoJobIds = [...new Set([...(last.videoJobIds ?? []), jobId])];
+      const next = [...current.slice(0, -1), { ...last, kind: 'video' as const, videoJobIds }];
       messagesRef.current = next;
       setMessages(next);
     } else {
@@ -1770,6 +1771,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
             const joinsImageBrief = joinImageBriefToLastAgentReply && index === messages.length - 1;
             const joinsAssets = joinAssetsToLastAgentReply && index === messages.length - 1;
             const joinsVideo = joinVideoToLastAgentReply && index === messages.length - 1;
+            if (phase === 'video' && message.role === 'agent' && message.kind === 'video' && !joinsVideo) return null;
             const joinsAction = joinsIntake || joinsImageBrief || joinsAssets || joinsVideo;
             const richClass = message.kind && message.kind !== 'text' ? 'rich-message-bubble' : '';
             const displayedMessage = currentListingMessage(message, passport);
