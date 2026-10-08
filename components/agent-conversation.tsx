@@ -278,12 +278,13 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, scenePlan = null, splitMode = false, readOnly = false }: {
+function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, onAdjustCounts, scenePlan = null, splitMode = false, readOnly = false }: {
   assets: DisplayAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
   onSkipVideo: () => void;
+  onAdjustCounts?: () => void;
   scenePlan?: ScenePlan | null;
   splitMode?: boolean;
   readOnly?: boolean;
@@ -336,7 +337,7 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
     <h3 className="visually-hidden">选择商品图片</h3>
     {scenePlan?.mode === 'SPLIT' && !readOnly ? scenePlan.scenes.map((scene) => { const sceneAssets = completed.filter((asset) => asset.sceneId === scene.id); return <section className="scene-image-pick-group" key={scene.id}><header><b>{scene.name}</b><span>已选 {sceneAssets.filter((asset) => selected.includes(asset.id)).length}/{sceneAssets.length} 张</span></header><div className="agent-asset-grid">{sceneAssets.map(renderTile)}</div>{sceneAssets.length === 0 && <small>这套场景暂无通过验收的图片，可在对话中要求重试。</small>}</section>; }) : <div className="agent-asset-grid">{completed.map(renderTile)}</div>}
     {!readOnly && (failed.length > 0 || rejectedCount > 0) && <details className="image-picker-failure-details"><summary>{failed.length + rejectedCount} 张图片未加入可选结果</summary>{failed.map((asset) => <p key={asset.id}>{asset.title}：{asset.error || '生成失败'}</p>)}{rejectedCount > 0 && <p>{rejectedCount} 张旧图未通过验收。</p>}</details>}
-    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span>{splitMode ? <button className="primary" type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>确认各场景图片，继续</button> : <><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></>}</footer>}
+    {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span>{splitMode ? <>{onAdjustCounts && <button type="button" onClick={onAdjustCounts}>调整各场景张数</button>}<button className="primary" type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>确认各场景图片，继续</button></> : <><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></>}</footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
       <section className="asset-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览图片 ${previewIndex! + 1}：${previewAsset.title}`}>
         <header><span>{previewIndex! + 1} / {completed.length}</span><button type="button" ref={closeButton} aria-label="关闭图片预览" onClick={closePreview}>×</button></header>
@@ -1127,7 +1128,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         setPhase('assets');
         append('agent', payload.summary.failed > 0
           ? `${payload.summary.completed} 张图片已通过验收，${payload.summary.failed} 张未通过：${payload.assets.filter((asset) => asset.status === 'FAILED').map((asset) => asset.title).join('、')}。已通过的图片可以继续使用；如还需要缺失的图片，请调整要求后重新生成。`
-          : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
+          : targetIndices.length ? '指定图片已更新，其余图片保持不变。请检查结果。' : scenePlan?.mode === 'SPLIT' ? '各场景图片已生成。请分别检查和挑选，确认后进入交付检查。' : '图片已生成。请先检查并修改图片；确认最终图片后，才会开始生成视频。', '等待素材选择', { kind: 'assets', assets: snapshotGeneratedImages(payload.assets) });
         markToolRun(call, 'COMPLETED');
         return { result: { ok: true, summary: payload.summary }, checkpoint: true };
       }
@@ -1648,7 +1649,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     </div>
     <footer><span>{scenePlan?.mode === 'SPLIT' ? '每套图文方案会独立用于对应草稿' : '先生成并确认图片，再开始视频'}</span><button type="button" onClick={() => void submitImageBrief()}>{scenePlan?.mode === 'SPLIT' ? '按各场景张数生成图片' : imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
   </div>;
-  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} scenePlan={scenePlan} splitMode={scenePlan?.mode === 'SPLIT'} />;
+  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onAdjustCounts={scenePlan?.mode === 'SPLIT' ? () => { setPhase('image_brief'); append('agent', '可以重新选择每套场景的图片张数。确认后会按新张数重新生成。', '等待图片需求'); } : undefined} scenePlan={scenePlan} splitMode={scenePlan?.mode === 'SPLIT'} />;
   const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} jobIds={messages.at(-1)?.videoJobIds} onJobCreated={recordVideoJob} /><footer><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认并继续</button></footer></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;
