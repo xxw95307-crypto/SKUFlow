@@ -9,7 +9,7 @@ import { listGeneratedAssetHistory, listLatestGeneratedAssets, prepareGeneratedA
 import { getProductPassport } from '@/lib/server/passport-store';
 import { getTaskSnapshot } from '@/lib/server/task-store';
 import { getShopPreferences } from '@/lib/server/shop-preferences-store';
-import { getScenePlan } from '@/lib/server/scene-plan-store';
+import { getScenePlan, saveScenePlan } from '@/lib/server/scene-plan-store';
 import { generateVerifiedImage } from '@/lib/server/verified-image';
 
 export const dynamic = 'force-dynamic';
@@ -28,17 +28,20 @@ function summarize(assets: readonly GeneratedAsset[]): GeneratedAssetSummary {
   };
 }
 
-async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null; confirmedBrief: boolean }> {
+async function requestOptions(request: Request): Promise<{ force: boolean; guidance: string | null; count: number | null; style: string | null; notes: string | null; sceneCounts: Record<string, number> | null; confirmedBrief: boolean }> {
   const raw = await request.text();
-  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null, confirmedBrief: false };
+  if (!raw.trim()) return { force: false, guidance: null, count: null, style: null, notes: null, sceneCounts: null, confirmedBrief: false };
   try {
-    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown; confirmedBrief?: unknown };
+    const value = JSON.parse(raw) as { force?: unknown; guidance?: unknown; count?: unknown; style?: unknown; notes?: unknown; sceneCounts?: unknown; confirmedBrief?: unknown };
     if (value.count != null && (!Number.isInteger(value.count) || (value.count as number) < 1 || (value.count as number) > 6)) {
       throw new Error('图片数量需为 1–6 张');
     }
     const guidance = typeof value.guidance === 'string' ? value.guidance.trim().slice(0, 500) : '';
     const style = typeof value.style === 'string' ? value.style.trim().slice(0, 200) : '';
-    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null, confirmedBrief: value.confirmedBrief === true };
+    const notes = typeof value.notes === 'string' ? value.notes.trim().slice(0, 500) : '';
+    const sceneCounts = value.sceneCounts && typeof value.sceneCounts === 'object' && !Array.isArray(value.sceneCounts) ? value.sceneCounts as Record<string, number> : null;
+    if (sceneCounts && Object.values(sceneCounts).some((count) => !Number.isInteger(count) || count < 1 || count > 6)) throw new Error('每套场景需选择 1–6 张图片');
+    return { force: value.force === true, guidance: guidance || null, count: value.count == null ? null : value.count as number, style: style || null, notes: notes || null, sceneCounts, confirmedBrief: value.confirmedBrief === true };
   } catch {
     throw new Error('图片生成参数无效，请检查张数');
   }
@@ -78,7 +81,13 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     ]);
     if (!task) return Response.json({ error: 'Task not found' }, { status: 404 });
     if (!passport) return Response.json({ error: 'Product passport not found' }, { status: 404 });
-    const scenePlan = await getScenePlan(bindings.DB, taskId);
+    let scenePlan = await getScenePlan(bindings.DB, taskId);
+    if (options.confirmedBrief && options.sceneCounts) {
+      if (!scenePlan || scenePlan.mode !== 'SPLIT' || Object.keys(options.sceneCounts).length !== scenePlan.scenes.length
+        || scenePlan.scenes.some((scene) => !Number.isInteger(options.sceneCounts?.[scene.id]))) throw new Error('场景图片数量与当前场景方案不匹配');
+      scenePlan = { ...scenePlan, scenes: scenePlan.scenes.map((scene) => ({ ...scene, imageCount: options.sceneCounts![scene.id] })) };
+      await saveScenePlan(bindings.DB, taskId, scenePlan);
+    }
     const splitScenes = scenePlan?.mode === 'SPLIT' ? scenePlan.scenes : [];
     const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
@@ -106,26 +115,35 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const bytes = new Uint8Array(await source.arrayBuffer());
     const listings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [draft.payload] : []);
     const sceneListings = approved.flatMap((draft) => isListingDraftPayload(draft.payload) ? [{ sceneId: draft.sceneId, listing: draft.payload }] : []);
-    const requestedCount = decision.targetIndices.length ? null : splitScenes.length || decision.count;
-    const plan = await callBailianAssetPlanning(planningConfig, {
+    const planningContext = {
       productName: task.productName,
       facts: passport.facts,
       listings,
-      scenes: splitScenes,
-      sceneListings,
       platforms: task.platforms,
       markets: task.markets,
       sourceImageCount: images.results.length,
       sourceImageIds: images.results.map(image=>image.id),
-      userGuidance: options.guidance,
-      requestedCount,
       styleGuidance: decision.style,
       existingAssets: decision.targetIndices.length ? priorImages : [],
       targetIndices: decision.targetIndices,
       preferences,
-    });
-    if (decision.targetIndices.length) plan.assets.forEach((spec, index) => { spec.sceneId = priorImages[decision.targetIndices[index] - 1]?.sceneId ?? 'base'; });
-    if (splitScenes.length && !decision.targetIndices.length) plan.assets.forEach((spec) => {
+    };
+    const plan = splitScenes.length && !decision.targetIndices.length
+      ? (() => { const scenePlans = splitScenes.map((scene) => callBailianAssetPlanning(planningConfig, {
+          ...planningContext,
+          listings: sceneListings.filter((entry) => entry.sceneId === scene.id).map((entry) => entry.listing),
+          scenes: [scene],
+          sceneListings: sceneListings.filter((entry) => entry.sceneId === scene.id),
+          requestedCount: scene.imageCount ?? 1,
+          userGuidance: `只为「${scene.name}」生成 ${scene.imageCount ?? 1} 张不同图片。${options.confirmedBrief ? options.notes || '' : options.guidance || ''}`,
+        })); return Promise.all(scenePlans).then((parts) => ({ assets: parts.flatMap((part) => part.assets), model: parts[0].model })); })()
+      : callBailianAssetPlanning(planningConfig, {
+          ...planningContext, scenes: splitScenes, sceneListings, userGuidance: options.guidance,
+          requestedCount: decision.targetIndices.length ? null : decision.count,
+        });
+    const resolvedPlan = await plan;
+    if (decision.targetIndices.length) resolvedPlan.assets.forEach((spec, index) => { spec.sceneId = priorImages[decision.targetIndices[index] - 1]?.sceneId ?? 'base'; });
+    if (splitScenes.length && !decision.targetIndices.length) resolvedPlan.assets.forEach((spec) => {
       const scene = splitScenes.find((item) => item.id === spec.sceneId);
       if (scene) spec.title = `${scene.name} · ${spec.title}`;
     });
@@ -137,9 +155,9 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const createdAt = new Date().toISOString();
 
     if (decision.targetIndices.length) {
-      const replacements = new Map<number, { id: string; spec: typeof plan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string; reviewWarning: string | null }>();
+      const replacements = new Map<number, { id: string; spec: typeof resolvedPlan.assets[number]; prompt: string; objectKey: string; contentType: string; model: string; width: number | null; height: number | null; sourceFileId: string; reviewWarning: string | null }>();
       for (const [position, targetIndex] of decision.targetIndices.entries()) {
-        const spec = plan.assets[position];
+        const spec = resolvedPlan.assets[position];
         const oldAsset = priorImages[targetIndex - 1];
         let reference = { bytes, contentType: image.content_type, sourceFileId: image.id };
         if (spec.sourceMode === 'CURRENT') {
@@ -153,7 +171,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), previousAsset: spec.sourceMode === 'CURRENT' ? oldAsset : null, preferences });
         const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, {
           bytes: reference.bytes, contentType: reference.contentType,
-        }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
+        }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, resolvedPlan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
         const id = `asset_${crypto.randomUUID()}`;
         const objectKey = `generated/${taskId}/${batchId}/${id}.png`;
         await bindings.UPLOADS.put(objectKey, generated.bytes, {
@@ -180,20 +198,30 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       });
       await bindings.DB.batch(writes);
       const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
-      return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: plan.assets, plannerModel: plan.model, decision });
+      return Response.json({ assets, summary: summarize(assets), reused: false, retainedAssetIds, plan: resolvedPlan.assets, plannerModel: resolvedPlan.model, decision });
     }
 
-    const prepared = await Promise.allSettled(plan.assets.map(async (spec, position) => {
-      const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), preferences });
-      const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, options.guidance, { bytes, contentType: image.content_type }, plan.assets.filter((_, index) => index !== position).map((item) => `${item.kind}｜${item.title}`));
-      return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
-    }));
+    const prepared: PromiseSettledResult<{
+      spec: typeof resolvedPlan.assets[number]; prompt: string;
+      generated: Awaited<ReturnType<typeof generateVerifiedImage>>['generated']; reviewWarning: string | null;
+      id: string; position: number;
+    }>[] = [];
+    for (let start = 0; start < resolvedPlan.assets.length; start += 6) {
+      const batch = await Promise.allSettled(resolvedPlan.assets.slice(start, start + 6).map(async (spec, offset) => {
+        const position = start + offset;
+        const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), preferences });
+        const sceneGuidance = options.confirmedBrief && splitScenes.length ? `本张属于「${sceneFor(spec.sceneId)?.name ?? spec.sceneId}」场景。${options.notes ?? ''}` : options.guidance;
+        const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, sceneGuidance, { bytes, contentType: image.content_type }, resolvedPlan.assets.filter((item) => item !== spec && item.sceneId === spec.sceneId).map((item) => `${item.kind}｜${item.title}`));
+        return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
+      }));
+      prepared.push(...batch);
+    }
     if (!prepared.some((result) => result.status === 'fulfilled')) {
       const failure = prepared[0].status === 'rejected' ? prepared[0].reason : null;
       throw failure instanceof Error ? failure : new Error('本轮图片都未通过验收，已有图片保持不变');
     }
     const writes = await Promise.all(prepared.map(async (result, position) => {
-      const spec = plan.assets[position];
+      const spec = resolvedPlan.assets[position];
       const timestamp = new Date(Date.parse(createdAt) + position).toISOString();
       if (result.status === 'rejected') {
         const reason = result.reason instanceof Error ? result.reason.message : '图片生成失败';
@@ -218,7 +246,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     }));
     await bindings.DB.batch(writes);
     const assets = await listLatestGeneratedAssets(bindings.DB, taskId);
-    return Response.json({ assets, summary: summarize(assets), reused: false, plan: plan.assets, plannerModel: plan.model, decision });
+    return Response.json({ assets, summary: summarize(assets), reused: false, plan: resolvedPlan.assets, plannerModel: resolvedPlan.model, decision });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视觉素材生成失败';
     return Response.json({ error: message }, { status: message.startsWith('图片生成参数无效') ? 400 : /百炼|素材生成|图片/.test(message) ? 502 : 500 });

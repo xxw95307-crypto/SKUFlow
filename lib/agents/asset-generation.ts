@@ -107,7 +107,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
 4a. sourceMode 决定生成参考图：ORIGINAL 使用商家上传的原始商品图，CURRENT 使用要修改的现有成图。整组新图以及人物、主体、构图或画面形式需要明显改变时使用 ORIGINAL，避免把旧图中的错误模特、文字或背景带入；只有明确的小范围局部调整且要保留当前构图时使用 CURRENT。
 5. 商品身份、外形、颜色、结构、材质和真实标识必须与原图及已确认事实一致；不得虚构功能、配件、认证、促销或价格。海报文字仅可使用已确认事实，难以可靠生成时预留排版空间。
 6. title、note、instruction、acceptance 使用简体中文。
-7. 如果输入包含场景裂变方案，每张图片对象额外填写 sceneId；每套场景各生成一张与该场景文案呼应的图，不能让一个场景的图片匹配另一场景文案。`,
+7. 如果输入包含场景裂变方案，每张图片对象额外填写对应的 sceneId；按该场景指定张数规划不同画面，所有图片都要与该场景文案呼应，不能混用其他场景的诉求。`,
   }, {
     role: 'user',
     content: `商品名称：${context.productName}
@@ -164,8 +164,8 @@ export function parseAssetPlan(value: string, requestedCount?: number | null, ta
     if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 6) throw new Error('图片数量需为 1–6 张');
     if (assets.length !== requestedCount || candidates.length !== requestedCount) throw new Error(`视觉策划 Agent 必须按商家要求规划 ${requestedCount} 张图片`);
   } else if (assets.length < 1 || assets.length > 6) throw new Error('视觉策划 Agent 应根据商家要求规划 1–6 张图片');
-  if (scenes?.length && !targetIndices?.length && (assets.length !== scenes.length || scenes.some((scene) => assets.filter((asset) => asset.sceneId === scene.id).length !== 1))) {
-    throw new Error('每套场景都必须有且仅有一张对应图片');
+  if (scenes?.length && !targetIndices?.length && (assets.length !== scenes.reduce((total, scene) => total + (scene.imageCount ?? 1), 0) || scenes.some((scene) => assets.filter((asset) => asset.sceneId === scene.id).length !== (scene.imageCount ?? 1)))) {
+    throw new Error('每套场景的图片数量必须与商家选择一致');
   }
   return assets;
 }

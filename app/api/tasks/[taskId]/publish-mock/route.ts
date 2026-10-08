@@ -55,7 +55,7 @@ async function handlePOST(_request: Request, context: { params: Promise<{ taskId
     const body = await _request.json().catch(()=>({})) as {selectedAssetIds?:unknown;mediaPlanId?:string;draftId?:unknown};
     if(body.draftId !== undefined && typeof body.draftId !== 'string') return Response.json({error:'Listing 草稿 ID 格式无效'},{status:400});
     const selectedIds: string[] = Array.isArray(body.selectedAssetIds) ? [...new Set(body.selectedAssetIds.filter((id:unknown):id is string=>typeof id==='string'))] : [];
-    if(selectedIds.length>20) return Response.json({error:'单次最多选择 20 项媒体'},{status:400});
+    if(selectedIds.length>36) return Response.json({error:'单次最多选择 36 项媒体'},{status:400});
     const mediaById = new Map<string, ShopifyMediaInput>();
     let selectedCandidates: StoredMediaCandidate[] = [];
     let orderedMediaIds: string[] = [];

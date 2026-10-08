@@ -52,7 +52,7 @@ function parseMessages(value: unknown): ConversationMessage[] {
         ...(typeof rich.status === 'string' ? { status: rich.status.slice(0, 100) } : {}),
       };
     }) : undefined;
-    const assets = Array.isArray(row.assets) ? row.assets.slice(0, 20).map((raw): ConversationAssetSnapshot => {
+    const assets = Array.isArray(row.assets) ? row.assets.slice(0, 36).map((raw): ConversationAssetSnapshot => {
       if (!raw || typeof raw !== 'object') throw new Error('图片结果格式无效');
       const asset = raw as Record<string, unknown>;
       if (typeof asset.id !== 'string' || !/^asset_[\w-]+$/.test(asset.id)
@@ -143,7 +143,7 @@ async function handlePATCH(request: Request, context: { params: Promise<{ conver
     }
     if (typeof body.title === 'string' && body.title.trim()) title = body.title.trim().slice(0, 120);
     const selectedAssetIds = Array.isArray(body.selectedAssetIds)
-      ? [...new Set(body.selectedAssetIds.filter((item): item is string => typeof item === 'string').map((item) => item.slice(0, 100)))].slice(0, 20)
+      ? [...new Set(body.selectedAssetIds.filter((item): item is string => typeof item === 'string').map((item) => item.slice(0, 100)))].slice(0, 36)
       : current.selectedAssetIds;
     const status = body.status === 'COMPLETED' ? 'COMPLETED' : 'ACTIVE';
     const conversation = await updateConversation(DB, conversationId, {

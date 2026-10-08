@@ -46,11 +46,11 @@ import { platformRegistry } from '@/lib/platforms/registry';
 
 type AgentPhase = 'loading' | 'idle' | 'intake' | 'resume' | 'processing' | 'conflict' | 'scene_plan' | 'listing' | 'image_brief' | 'assets' | 'video' | 'publish' | 'complete' | 'error';
 
-interface ImageBrief { count: number | null; style: string; notes: string }
+interface ImageBrief { count: number | null; sceneCounts: Record<string, number> | null; style: string; notes: string }
 
 type ChatMessage = ConversationMessage;
 
-type DisplayAsset = Pick<GeneratedAsset, 'id' | 'kind' | 'title' | 'status' | 'width' | 'height' | 'error' | 'imageUrl'>;
+type DisplayAsset = Pick<GeneratedAsset, 'id' | 'kind' | 'title' | 'status' | 'width' | 'height' | 'error' | 'imageUrl'> & { sceneId?: string };
 
 function displaySnapshots(assets: readonly ConversationAssetSnapshot[]): DisplayAsset[] {
   return assets.map((asset) => ({
@@ -278,12 +278,13 @@ function ConflictConversationCard({ passport, busy, manualValue, onManualValue, 
   </article>;
 }
 
-function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, splitMode = false, readOnly = false }: {
+function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVideo, scenePlan = null, splitMode = false, readOnly = false }: {
   assets: DisplayAsset[];
   selected: string[];
   onToggle: (id: string) => void;
   onConfirm: () => void;
   onSkipVideo: () => void;
+  scenePlan?: ScenePlan | null;
   splitMode?: boolean;
   readOnly?: boolean;
 }) {
@@ -321,15 +322,19 @@ function AssetConversationCard({ assets, selected, onToggle, onConfirm, onSkipVi
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewIndex, completed.length]);
   const previewAsset = previewIndex === null ? null : completed[previewIndex] ?? null;
-  return <div className="asset-conversation-card image-picker-card">
-    <h3 className="visually-hidden">选择商品图片</h3>
-    <div className="agent-asset-grid">{completed.map((asset, index) => <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
+  const renderTile = (asset: DisplayAsset) => {
+    const index = completed.findIndex((item) => item.id === asset.id);
+    return <div className={`image-picker-tile ${selected.includes(asset.id) ? 'selected' : ''}`} key={asset.id}>
       <button type="button" className="image-picker-preview-trigger" ref={(element) => { previewButtons.current[index] = element; }} aria-label={`预览图片 ${index + 1}：${asset.title}`} onClick={() => { setPreviewIndex(index); setZoomed(false); }}>
         <span className="agent-asset-preview"><Image src={asset.imageUrl!} alt={asset.title} width={asset.width ?? 512} height={asset.height ?? 512} unoptimized /></span>
       </button>
       {!readOnly && <button type="button" className="image-picker-select-toggle" aria-label={`${selected.includes(asset.id) ? '取消选择' : '选择'}图片 ${index + 1}`} aria-pressed={selected.includes(asset.id)} onClick={() => onToggle(asset.id)}>{selected.includes(asset.id) ? '✓' : '+'}</button>}
       {asset.error && <span className="image-picker-review-badge">未通过验收</span>}
-    </div>)}</div>
+    </div>;
+  };
+  return <div className="asset-conversation-card image-picker-card">
+    <h3 className="visually-hidden">选择商品图片</h3>
+    {scenePlan?.mode === 'SPLIT' && !readOnly ? scenePlan.scenes.map((scene) => { const sceneAssets = completed.filter((asset) => asset.sceneId === scene.id); return <section className="scene-image-pick-group" key={scene.id}><header><b>{scene.name}</b><span>已选 {sceneAssets.filter((asset) => selected.includes(asset.id)).length}/{sceneAssets.length} 张</span></header><div className="agent-asset-grid">{sceneAssets.map(renderTile)}</div>{sceneAssets.length === 0 && <small>这套场景暂无通过验收的图片，可在对话中要求重试。</small>}</section>; }) : <div className="agent-asset-grid">{completed.map(renderTile)}</div>}
     {!readOnly && (failed.length > 0 || rejectedCount > 0) && <details className="image-picker-failure-details"><summary>{failed.length + rejectedCount} 张图片未加入可选结果</summary>{failed.map((asset) => <p key={asset.id}>{asset.title}：{asset.error || '生成失败'}</p>)}{rejectedCount > 0 && <p>{rejectedCount} 张旧图未通过验收。</p>}</details>}
     {!readOnly && <footer><span>已选 {selectedCount}/{completed.length} 张</span>{splitMode ? <button className="primary" type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>确认各场景图片，继续</button> : <><button type="button" disabled={selectedCount === 0} onClick={onSkipVideo}>只用图片继续</button><button className="primary" type="button" disabled={selectedCount === 0} onClick={onConfirm}>确认图片，设置视频</button></>}</footer>}
     {previewAsset && typeof document !== 'undefined' && createPortal(<div className="asset-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
@@ -452,6 +457,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
   const [sceneCount, setSceneCount] = useState(2);
   const [sceneDirections, setSceneDirections] = useState<string[]>(Array(6).fill(''));
   const [imageBriefCount, setImageBriefCount] = useState<number | null>(null);
+  const [sceneImageCounts, setSceneImageCounts] = useState<Record<string, number>>({});
   const [imageBriefStyle, setImageBriefStyle] = useState('');
   const [imageBriefNotes, setImageBriefNotes] = useState('');
   const imageBriefRef = useRef<ImageBrief | null>(null);
@@ -609,7 +615,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     toolRunsRef.current = conversation.toolRuns;
     mediaPlanRef.current=null;setMediaPlanReady(false);setMediaGuidance('');
     imageBriefRef.current = null;
-    setImageBriefCount(null); setImageBriefStyle(''); setImageBriefNotes('');
+    setImageBriefCount(null); setSceneImageCounts({}); setImageBriefStyle(''); setImageBriefNotes('');
     selectedAssetsRef.current = conversation.selectedAssetIds;
     setSelectedAssets(conversation.selectedAssetIds);
     setPendingFiles([]);
@@ -1107,7 +1113,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         }>(await fetch(`/api/tasks/${currentTask.id}/generated-assets`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force: true, guidance: requestText, confirmedBrief: Boolean(initialBrief), count: initialBrief?.count ?? null, style: initialBrief?.style ?? null }),
+          body: JSON.stringify({ force: true, guidance: requestText, confirmedBrief: Boolean(initialBrief), count: initialBrief?.sceneCounts ? null : initialBrief?.count ?? null, sceneCounts: initialBrief?.sceneCounts ?? null, style: initialBrief?.style ?? null, notes: initialBrief?.notes ?? null }),
         }), '视觉素材生成失败');
         const targetIndices = payload.decision.targetIndices;
         setGeneratedAssets(payload.assets);
@@ -1418,7 +1424,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
       if (available.some((asset) => asset.kind !== 'VIDEO')) { setPhase('assets'); return; }
       setPhase('image_brief');
       if (messagesRef.current.at(-1)?.meta !== '等待图片需求') {
-        append('agent', scenePlan?.mode === 'SPLIT' ? `各套 Listing 已确认。接下来为 ${scenePlan.scenes.length} 套场景分别生成对应图片；你也可以补充共同的视觉风格。` : 'Listing 已确认。生成图片前，你希望要几张？想要什么风格或场景？也可以交给我根据商品和平台规划。', '等待图片需求');
+        append('agent', scenePlan?.mode === 'SPLIT' ? `各套 Listing 已确认。请为每套场景选择要生成几张图片，也可以补充共同的视觉风格。` : 'Listing 已确认。生成图片前，你希望要几张？想要什么风格或场景？也可以交给我根据商品和平台规划。', '等待图片需求');
         await persistConversation(task.id);
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : '图片生成准备失败'); }
@@ -1426,9 +1432,12 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
 
   const submitImageBrief = async (notesOverride?: string, countOverride?: number | null) => {
     if (!task || phase === 'processing') return;
-    const brief: ImageBrief = { count: scenePlan?.mode === 'SPLIT' ? scenePlan.scenes.length : countOverride === undefined ? imageBriefCount : countOverride, style: imageBriefStyle.trim(), notes: (notesOverride ?? imageBriefNotes).trim() };
+    const sceneCounts = scenePlan?.mode === 'SPLIT' ? Object.fromEntries(scenePlan.scenes.map((scene) => [scene.id, sceneImageCounts[scene.id] ?? scene.imageCount ?? 1])) : null;
+    const brief: ImageBrief = { count: sceneCounts ? Object.values(sceneCounts).reduce((total, count) => total + count, 0) : countOverride === undefined ? imageBriefCount : countOverride, sceneCounts, style: imageBriefStyle.trim(), notes: (notesOverride ?? imageBriefNotes).trim() };
+    if (sceneCounts && scenePlan) setScenePlan({ ...scenePlan, scenes: scenePlan.scenes.map((scene) => ({ ...scene, imageCount: sceneCounts[scene.id] })) });
     imageBriefRef.current = brief;
-    const request = `我已确认图片生成需求，请生成图片。数量：${brief.count == null ? '由 Agent 决定' : `${brief.count} 张`}；风格：${brief.style || '由 Agent 决定'}；其他要求：${brief.notes || '无'}。只生成图片，等我确认图片后再生成视频。`;
+    const sceneSummary = sceneCounts && scenePlan?.mode === 'SPLIT' ? `各场景张数：${scenePlan.scenes.map((scene) => `${scene.name} ${sceneCounts[scene.id]} 张`).join('、')}；` : '';
+    const request = `我已确认图片生成需求，请生成图片。${sceneSummary}数量：${brief.count == null ? '由 Agent 决定' : `${brief.count} 张`}；风格：${brief.style || '由 Agent 决定'}；其他要求：${brief.notes || '无'}。只生成图片，等我确认图片后再生成视频。`;
     append('user', request, '图片需求已确认');
     await runAgentTurn(task, request, { appendUser: false });
   };
@@ -1588,7 +1597,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     mediaPlanRef.current = null; setMediaPlanReady(false);
     selectedAssetsRef.current = []; setSelectedAssets([]);
     imageBriefRef.current = null;
-    setImageBriefCount(null); setImageBriefStyle(''); setImageBriefNotes('');
+    setImageBriefCount(null); setSceneImageCounts({}); setImageBriefStyle(''); setImageBriefNotes('');
     setTargetEditorOpen(false);
     setPhase('resume');
     append('agent', `已更新为 ${refreshed.passport.platformDrafts.map((draft) => `${platformNames.get(draft.platformId) ?? draft.platformId} ${draft.market}`).join('、')}。请继续生成新平台的 Listing。`, '目标已更新');
@@ -1631,15 +1640,15 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
     ? <div className="chat-action-card intake"><div className="action-card-head"><span>补充必要信息</span><b>只需确认尚未提供的信息</b><p>也可以直接在对话中补充，已有资料会继续使用。</p></div><div className="embedded-intake"><TaskIntake key={JSON.stringify(inferConversationTargets(modelHistory.current)) + JSON.stringify(preferences?.preferredTargets) + pendingFiles.map((file) => file.name + file.size).join()} onNext={handleIntakeComplete} agentManaged initialFiles={pendingFiles} initialTargets={inferConversationTargets(modelHistory.current)} preferredTargets={preferences?.preferredTargets} /></div></div>
     : <div className="chat-action-card intake">正在读取店铺偏好…</div>);
   const imageBriefCard = phase === 'image_brief' && <div className="image-brief-card">
-    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>{scenePlan?.mode === 'SPLIT' ? `将为 ${scenePlan.scenes.map((scene) => scene.name).join('、')} 各生成一张对应图片；可以补充共同的视觉风格。` : preferences?.visualStyle ? `默认沿用店铺视觉偏好：${preferences.visualStyle}。本轮可直接覆盖。` : '告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。'}</p></div>
+    <div className="image-brief-heading"><span>图片生成需求</span><h3>先确定图片方向</h3><p>{scenePlan?.mode === 'SPLIT' ? '每套场景可单独选择图片张数，图片会按对应文案规划。' : preferences?.visualStyle ? `默认沿用店铺视觉偏好：${preferences.visualStyle}。本轮可直接覆盖。` : '告诉我需要几张，以及希望呈现的风格或场景。留空的部分由 Agent 根据商品与平台规划。'}</p></div>
     <div className="image-brief-fields">
-      {scenePlan?.mode === 'SPLIT' ? <p className="scene-image-count">每套场景 1 张，共 {scenePlan.scenes.length} 张。每张图会和该套 Listing 文案对应。</p> : <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>按你的需求规划图片内容；封面与顺序稍后再确认。</small></fieldset>}
+      {scenePlan?.mode === 'SPLIT' ? <fieldset className="scene-image-counts"><legend>每套场景生成几张图片</legend>{scenePlan.scenes.map((scene) => <div className="scene-image-count-row" key={scene.id}><div><b>{scene.name}</b><small>{scene.visualBrief}</small></div><div className="image-brief-counts" role="group" aria-label={`${scene.name}图片张数`}>{[1, 2, 3, 4, 5, 6].map((count) => <button key={count} type="button" className={(sceneImageCounts[scene.id] ?? scene.imageCount ?? 1) === count ? 'selected' : ''} aria-pressed={(sceneImageCounts[scene.id] ?? scene.imageCount ?? 1) === count} onClick={() => setSceneImageCounts((current) => ({ ...current, [scene.id]: count }))}>{count} 张</button>)}</div></div>)}<small>共 {scenePlan.scenes.reduce((total, scene) => total + (sceneImageCounts[scene.id] ?? scene.imageCount ?? 1), 0)} 张；每套场景分别生成，并在下一步挑选。</small></fieldset> : <fieldset><legend>生成几张图片</legend><div className="image-brief-counts">{[null, 1, 2, 3, 4, 5, 6].map((count) => <button key={count ?? 'auto'} type="button" className={imageBriefCount === count ? 'selected' : ''} aria-pressed={imageBriefCount === count} onClick={() => setImageBriefCount(count)}>{count == null ? '智能决定' : `${count} 张`}</button>)}</div><small>按你的需求规划图片内容；封面与顺序稍后再确认。</small></fieldset>}
       <label>图片风格<input value={imageBriefStyle} onChange={(event) => setImageBriefStyle(event.target.value)} maxLength={200} placeholder="例如：自然生活感、简洁高级、户外通勤" /></label>
       <label>其他要求<textarea rows={3} value={imageBriefNotes} onChange={(event) => setImageBriefNotes(event.target.value)} maxLength={500} placeholder="例如：不要细节图；希望有一张真人穿搭图" /></label>
     </div>
-    <footer><span>{scenePlan?.mode === 'SPLIT' ? '每套图文方案会独立用于对应草稿' : '先生成并确认图片，再开始视频'}</span><button type="button" onClick={() => void submitImageBrief()}>{imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
+    <footer><span>{scenePlan?.mode === 'SPLIT' ? '每套图文方案会独立用于对应草稿' : '先生成并确认图片，再开始视频'}</span><button type="button" onClick={() => void submitImageBrief()}>{scenePlan?.mode === 'SPLIT' ? '按各场景张数生成图片' : imageBriefCount == null && !imageBriefStyle.trim() && !imageBriefNotes.trim() ? '交给 Agent 规划图片' : '按这些要求生成图片'}</button></footer>
   </div>;
-  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} splitMode={scenePlan?.mode === 'SPLIT'} />;
+  const assetCard = phase === 'assets' && <AssetConversationCard assets={generatedAssets} selected={selectedAssets} onToggle={toggleAsset} onConfirm={() => void confirmAssets().catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} onSkipVideo={() => void confirmAssets(true).catch((caught) => setError(caught instanceof Error ? caught.message : '图片确认失败'))} scenePlan={scenePlan} splitMode={scenePlan?.mode === 'SPLIT'} />;
   const videoCard = phase === 'video' && task && <div className="video-stage-card"><VideoConversation taskId={task.id} revision={videoRevision} selected={selectedAssets} onToggle={toggleAsset} selectable showSuggestion sourceImageIds={selectedVideoSources} jobIds={messages.at(-1)?.videoJobIds} onJobCreated={recordVideoJob} /><footer><button type="button" onClick={() => void confirmVideo(true).catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>只用图片继续</button><button className="primary" type="button" disabled={!selectedAssets.some((id) => id.startsWith('video_'))} onClick={() => void confirmVideo().catch((caught) => setError(caught instanceof Error ? caught.message : '视频确认失败'))}>确认并继续</button></footer></div>;
 
   const composerAttachments = pendingFiles.length > 0 && <div className="composer-attachments" aria-label="待上传附件">{pendingFiles.map((file, index) => <div className="composer-attachment" key={`${file.name}:${file.size}`}><span>{file.name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'}</span><div><b>{file.name}</b><small>{formatBytes(file.size)}</small></div><button type="button" aria-label={`移除附件：${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>;

@@ -2,7 +2,7 @@ import {videoMediaType} from '../domain/video-trim.ts';
 import type {MediaCandidate} from '../agents/media-ordering.ts';
 export interface StoredMediaCandidate extends MediaCandidate {objectKey:string;contentType:string;sceneId:string}
 export async function getSelectedMedia(DB:D1Database,taskId:string,ids:string[]):Promise<StoredMediaCandidate[]> {
- if(!ids.length||ids.length>20||new Set(ids).size!==ids.length)throw new Error('请选择1–20项不重复的图片或视频');
+ if(!ids.length||ids.length>36||new Set(ids).size!==ids.length)throw new Error('请选择1–36项不重复的图片或视频');
  const results:StoredMediaCandidate[]=[];
  for(const id of ids) {
   if(id.startsWith('video_')) {

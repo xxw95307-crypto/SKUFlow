@@ -3,6 +3,7 @@ export interface SceneVariant {
   name: string;
   visualBrief: string;
   copyBrief: string;
+  imageCount?: number;
 }
 
 export interface ScenePlan {
@@ -23,7 +24,8 @@ export function parseScenePlan(raw: string | null): ScenePlan | null {
     const plan = JSON.parse(raw) as ScenePlan;
     if ((plan.mode !== 'SINGLE' && plan.mode !== 'SPLIT') || !Array.isArray(plan.scenes)) return null;
     if (!plan.scenes.every((scene) => typeof scene.id === 'string' && typeof scene.name === 'string'
-      && typeof scene.visualBrief === 'string' && typeof scene.copyBrief === 'string')) return null;
+      && typeof scene.visualBrief === 'string' && typeof scene.copyBrief === 'string'
+      && (scene.imageCount === undefined || (Number.isInteger(scene.imageCount) && scene.imageCount >= 1 && scene.imageCount <= 6)))) return null;
     return plan;
   } catch { return null; }
 }

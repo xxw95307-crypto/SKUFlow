@@ -1506,6 +1506,46 @@ body {
   font-weight: 700;
 }
 
+.agent-shell-v2 .scene-image-counts {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-shell-v2 .scene-image-count-row {
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid #dfe9e2;
+  border-radius: 10px;
+  background: #f9fbf9;
+}
+
+.agent-shell-v2 .scene-image-count-row > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-shell-v2 .scene-image-count-row b { font-size: 14px; color: #284734; }
+.agent-shell-v2 .scene-image-count-row .image-brief-counts { margin-bottom: 0; }
+
+.agent-shell-v2 .scene-image-pick-group + .scene-image-pick-group {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e9e3;
+}
+
+.agent-shell-v2 .scene-image-pick-group > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #284734;
+  font-size: 14px;
+}
+
+.agent-shell-v2 .scene-image-pick-group > header span,
+.agent-shell-v2 .scene-image-pick-group > small { color: #71847a; font-size: 12px; }
+
 .agent-shell-v2 .image-brief-fields input,
 .agent-shell-v2 .image-brief-fields textarea {
   display: block;

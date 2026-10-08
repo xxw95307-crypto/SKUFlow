@@ -78,7 +78,7 @@ function parseMessages(value: unknown): AgentModelMessage[] {
 async function loadWorkflowState(body: RequestBody): Promise<AgentWorkflowState> {
   const taskId = typeof body.taskId === 'string' && /^task_[a-zA-Z0-9-]+$/.test(body.taskId) ? body.taskId : null;
   const selectedAssetIds = new Set(Array.isArray(body.selectedAssetIds)
-    ? body.selectedAssetIds.filter((item): item is string => typeof item === 'string').slice(0, 20)
+    ? body.selectedAssetIds.filter((item): item is string => typeof item === 'string').slice(0, 36)
     : []);
   const pendingAttachmentCount = typeof body.pendingAttachmentCount === 'number' && Number.isInteger(body.pendingAttachmentCount)
     ? Math.min(12, Math.max(0, body.pendingAttachmentCount))

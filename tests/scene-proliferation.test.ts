@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildScenePlanningMessages, parseScenePlanningOutput } from '../lib/agents/scene-planning.ts';
 import { parseAssetPlan } from '../lib/agents/asset-generation.ts';
+import { parseScenePlan } from '../lib/domain/scene-plan.ts';
 import { mediaIdsForScene } from '../lib/agents/scene-media.ts';
 import { availableAgentTools, requiredListingStageTool } from '../lib/agents/commerce-orchestrator.ts';
 import type { AgentWorkflowState } from '../lib/domain/agent-orchestrator.ts';
@@ -36,10 +37,12 @@ test('listing generation pauses for a scene decision before creating drafts', ()
 
 const asset = (sceneId: string, title: string) => ({ sceneId, kind: 'LIFESTYLE', title, note: `${title}展示`, size: '1024*1024', instruction: `${title}场景展示真实商品`, acceptance: `画面呈现${title}`, sourceMode: 'ORIGINAL' });
 
-test('every split scene needs its own image, and delivery keeps images separated', () => {
-  const planned = parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤'), asset('scene_2', '周末')] }), 2, undefined, scenes);
-  assert.deepEqual(planned.map((item) => item.sceneId), ['scene_1', 'scene_2']);
-  assert.throws(() => parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤'), asset('scene_1', '周末')] }), 2, undefined, scenes), /每套场景/);
+test('each split scene receives its chosen image count, and delivery keeps images separated', () => {
+  const countedScenes = [{ ...scenes[0], imageCount: 2 }, { ...scenes[1], imageCount: 3 }];
+  assert.deepEqual(parseScenePlan(JSON.stringify({ mode: 'SPLIT', scenes: countedScenes, confirmedAt: '2026-10-08T00:00:00.000Z' }))?.scenes.map((scene) => scene.imageCount), [2, 3]);
+  const planned = parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤全身'), asset('scene_1', '通勤细节'), asset('scene_2', '周末咖啡馆'), asset('scene_2', '周末街拍'), asset('scene_2', '周末特写')] }), 5, undefined, countedScenes);
+  assert.deepEqual(planned.map((item) => item.sceneId), ['scene_1', 'scene_1', 'scene_2', 'scene_2', 'scene_2']);
+  assert.throws(() => parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤'), asset('scene_1', '通勤二'), asset('scene_1', '通勤三'), asset('scene_2', '周末'), asset('scene_2', '周末二')] }), 5, undefined, countedScenes), /每套场景/);
   const candidates = [
     { id: 'image_1', sceneId: 'scene_1', type: 'IMAGE' as const },
     { id: 'image_2', sceneId: 'scene_2', type: 'IMAGE' as const },
