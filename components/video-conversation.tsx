@@ -34,7 +34,7 @@ function VideoDraft({ job, configured, busy, onStart, onTranslate }: {
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'music'} onChange={() => setAudioMode('music')} />背景音乐</label>
       <label><input type="radio" name={`audio-${job.id}`} checked={audioMode === 'narration'} onChange={() => setAudioMode('narration')} />解说配音</label>
     </div></fieldset>
-    {audioMode === 'narration' && <label className="video-narration-label">解说文案（生成前可修改）<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="用一句话介绍商品已确认的卖点" /><small>视频会按配音实际时长自动匹配为 2–15 秒；太短或太长时请修改文案。</small></label>}
+    {audioMode === 'narration' && <label className="video-narration-label">{job.plan.narrationSuggestion ? 'AI 拟写的解说文案（可修改）' : '解说文案（生成前可修改）'}<textarea aria-label="解说文案" value={narrationText} maxLength={60} rows={2} onChange={(event) => setNarrationText(event.target.value)} placeholder="用一句话介绍商品已确认的卖点" /><small>视频会按配音实际时长自动匹配为 2–15 秒；太短或太长时请修改文案。</small></label>}
     <footer><small>{audioMode === 'narration' ? '按配音时长生成' : `${job.plan.duration} 秒`} · {job.plan.resolution} · 可直接修改提示词</small><button type="button" disabled={!configured || busy || !prompt.trim() || (audioMode === 'narration' && !narrationText.trim())} onClick={() => void onStart(job.id, prompt, audioMode, narrationText)}>{busy ? '正在提交…' : '确认并开始生成'}</button></footer>
   </section>;
 }
@@ -48,6 +48,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'ai' | 'custom'>('ai');
+  const [audioMode, setAudioMode] = useState<AudioMode>('ambient');
   const [guidance, setGuidance] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
 
@@ -101,7 +102,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
     try {
       const response = await fetch(`/api/tasks/${taskId}/videos`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mode, guidance: guidance.trim(), prompt: customPrompt.trim(), selectedImageIds: sourceImageIds, sceneId, purpose: 'revision' }),
+        body: JSON.stringify({ mode, guidance: guidance.trim(), prompt: customPrompt.trim(), audioMode, selectedImageIds: sourceImageIds, sceneId, purpose: 'revision' }),
       });
       const data = await response.json() as { error?: string; job?: Job };
       if (!response.ok) throw new Error(data.error || '视频提示词准备失败');
@@ -129,7 +130,13 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
       </div>
       {mode === 'ai' ? <label>补充想法（可选）<textarea rows={2} maxLength={1000} value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="例如：镜头缓慢移动，突出面料质感" /></label>
         : <label>视频生成提示词<textarea rows={5} maxLength={4000} value={customPrompt} onChange={(event) => setCustomPrompt(event.target.value)} placeholder="描述希望出现的画面、镜头和动作" /></label>}
-      <footer><small>确认提示词后才会调用视频模型</small><button type="button" disabled={busy || (mode === 'custom' && !customPrompt.trim())} onClick={() => void createPlan()}>{busy ? '正在准备…' : mode === 'ai' ? '生成可编辑提示词' : '保存提示词'}</button></footer>
+      <fieldset className="video-audio-choice"><legend>声音</legend><div className="video-audio-options">
+        <label><input type="radio" name={`plan-audio-${sceneId ?? 'base'}`} checked={audioMode === 'ambient'} onChange={() => setAudioMode('ambient')} />自然音效</label>
+        <label><input type="radio" name={`plan-audio-${sceneId ?? 'base'}`} checked={audioMode === 'music'} onChange={() => setAudioMode('music')} />背景音乐</label>
+        <label><input type="radio" name={`plan-audio-${sceneId ?? 'base'}`} checked={audioMode === 'narration'} onChange={() => setAudioMode('narration')} />解说配音</label>
+      </div></fieldset>
+      {audioMode === 'narration' && <p className="video-narration-preview-note">{mode === 'ai' ? '下一步会生成一段可修改的解说文案，确认后再制作配音和视频。' : '下一步可以填写或修改解说文案，确认后再制作配音和视频。'}</p>}
+      <footer><small>下一步可编辑提示词{audioMode === 'narration' ? '和解说文案' : ''}；确认后才会调用视频模型</small><button type="button" disabled={busy || (mode === 'custom' && !customPrompt.trim())} onClick={() => void createPlan()}>{busy ? '正在准备…' : mode === 'ai' ? '生成可编辑提示词' : '保存提示词并继续'}</button></footer>
     </section>}
     {draft && showSuggestion && <VideoDraft key={`${draft.id}:${draft.plan.prompt}`} job={draft} configured={configured} busy={busy} onStart={(id, prompt, audioMode, narrationText) => action(id, 'start', prompt, audioMode, narrationText)} onTranslate={(id, prompt) => action(id, 'translate_prompt', prompt)} />}
     {inProgress && <div className="video-progress-row" role="status"><span className="agent-spinner" /><span>{labels[visibleJobs.find((job) => ['SUBMITTING', 'SUBMISSION_UNKNOWN', 'PENDING', 'RUNNING'].includes(job.status) && isReusableVideoJob(job))?.status ?? ''] || '视频生成中'}</span>{visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status)) && <button type="button" disabled={busy} onClick={() => void action(visibleJobs.find((job) => ['PENDING', 'RUNNING'].includes(job.status))!.id, 'refresh')}>刷新状态</button>}</div>}

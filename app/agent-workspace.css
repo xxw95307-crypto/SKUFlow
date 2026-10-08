@@ -1702,11 +1702,12 @@ body {
 .agent-shell-v2 .video-audio-choice { margin: 18px 0 0; padding: 0; border: 0; }
 .agent-shell-v2 .video-audio-choice legend { margin-bottom: 9px; color: #283c34; font-size: 14px; font-weight: 650; }
 .agent-shell-v2 .video-audio-options { display: flex; flex-wrap: wrap; gap: 8px; }
-.agent-shell-v2 .video-audio-options label { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid #d9e4df; border-radius: 8px; color: #365046; cursor: pointer; }
+.agent-shell-v2 .video-audio-options label { display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 8px 12px; border: 1px solid #d9e4df; border-radius: 8px; color: #365046; font-weight: 500; cursor: pointer; }
 .agent-shell-v2 .video-audio-options label:has(input:checked) { border-color: #438262; background: #e9f3ed; }
 .agent-shell-v2 .video-audio-options input { accent-color: #3c7e5b; }
 .agent-shell-v2 .video-narration-label { display: block; margin-top: 16px; color: #283c34; font-size: 14px; font-weight: 650; }
 .agent-shell-v2 .video-narration-label small { display: block; margin-top: 5px; color: #6b7e77; font-size: 12px; font-weight: 400; }
+.agent-shell-v2 .video-narration-preview-note { margin: 9px 0 0; color: #627b6e; font-size: 13px; line-height: 1.5; }
 .agent-shell-v2 .video-progress-row { display: flex; align-items: center; gap: 10px; padding: 16px; border-radius: 10px; background: #f3f7f4; color: #365046; }
 .agent-shell-v2 .video-progress-row button { margin-left: auto; }
 .agent-shell-v2 .video-result { width: fit-content; max-width: 100%; overflow: hidden; border-radius: 10px; background: #f7faf8; }

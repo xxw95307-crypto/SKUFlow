@@ -53,8 +53,10 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       return Response.json({ error: '请先确认商品事实与所有 Listing，再规划视频' }, { status: 409 });
     }
 
-    const body = await request.json().catch(() => ({})) as { guidance?: unknown; selectedImageIds?: unknown; sceneId?: unknown; purpose?: unknown; mode?: unknown; prompt?: unknown };
+    const body = await request.json().catch(() => ({})) as { guidance?: unknown; selectedImageIds?: unknown; sceneId?: unknown; purpose?: unknown; mode?: unknown; prompt?: unknown; audioMode?: unknown };
     const guidance = typeof body.guidance === 'string' ? body.guidance.slice(0, 1000) : '';
+    const audioMode = body.audioMode ?? 'ambient';
+    if (!['ambient', 'music', 'narration'].includes(audioMode as string)) return Response.json({ error: '请选择有效的声音方式' }, { status: 400 });
     const latestAssets = await listLatestGeneratedAssets(bindings.DB, taskId);
     let images;
     try {
@@ -117,7 +119,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
         plan.narrationSuggestion = removeBannedWords(plan.narrationSuggestion, preferences.bannedWords) as string;
       }
     }
-    plan = { ...plan, sceneId };
+    plan = { ...plan, sceneId, audioMode };
     const id = `video_${crypto.randomUUID()}`;
     await bindings.DB.prepare("INSERT INTO video_jobs (id,task_id,source_file_id,plan_json,status,created_at) VALUES (?,?,?,?,'DRAFT',?)")
       .bind(id, taskId, plan.sourceFileId, JSON.stringify(plan), new Date().toISOString()).run();
