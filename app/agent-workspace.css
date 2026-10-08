@@ -1618,6 +1618,14 @@ body {
   box-shadow: none;
 }
 
+.agent-shell-v2 .video-stage-card.split-video-stage { width: min(1040px, calc(100% - 45px)); max-width: min(1040px, calc(100% - 45px)); }
+.agent-shell-v2 .split-video-stage .scene-video-stage { padding: 18px 0; border-bottom: 1px solid var(--sf-line); }
+.agent-shell-v2 .split-video-stage .scene-video-stage:first-child { padding-top: 0; }
+.agent-shell-v2 .split-video-stage .scene-video-stage:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.agent-shell-v2 .split-video-stage .scene-video-stage > h3 { margin: 0 0 12px; color: #274c39; font-size: 16px; }
+.agent-shell-v2 .split-video-stage .scene-video-stage > .video-results-card { width: 100%; max-width: none; margin: 0; padding: 0; border: 0; box-shadow: none; }
+.agent-shell-v2 .split-video-stage .video-prompt-choice { max-width: none; }
+
 .agent-shell-v2 .video-stage-card > footer {
   display: flex;
   align-items: center;
@@ -1635,6 +1643,7 @@ body {
   width: max-content;
   max-width: min(1040px, calc(100% - 45px));
 }
+.agent-shell-v2 .video-stage-card.split-video-stage:has(.video-result):not(:has(.video-prompt-choice, .video-draft-review, .video-progress-row)) { width: min(1040px, calc(100% - 45px)); }
 .agent-shell-v2 .chat-message.joined-action > div.joined-action-bubble:has(.video-result):not(:has(.video-prompt-choice, .video-draft-review, .video-progress-row)) {
   width: max-content;
   max-width: calc(100% - 45px);

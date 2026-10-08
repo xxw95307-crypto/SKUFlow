@@ -39,9 +39,9 @@ function VideoDraft({ job, configured, busy, onStart, onTranslate }: {
   </section>;
 }
 
-export function VideoConversation({ taskId, revision, selected, onToggle, selectable, showSuggestion = false, sourceImageIds, jobIds, onJobCreated }: {
+export function VideoConversation({ taskId, revision, selected, onToggle, selectable, showSuggestion = false, sourceImageIds, sceneId, jobIds, onJobCreated }: {
   taskId: string; revision: number; selected: string[]; onToggle: (id: string) => void;
-  selectable: boolean; showSuggestion?: boolean; sourceImageIds?: string[]; jobIds?: string[]; onJobCreated?: (id: string) => void;
+  selectable: boolean; showSuggestion?: boolean; sourceImageIds?: string[]; sceneId?: string; jobIds?: string[]; onJobCreated?: (id: string) => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [configured, setConfigured] = useState(false);
@@ -101,7 +101,7 @@ export function VideoConversation({ taskId, revision, selected, onToggle, select
     try {
       const response = await fetch(`/api/tasks/${taskId}/videos`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mode, guidance: guidance.trim(), prompt: customPrompt.trim(), selectedImageIds: sourceImageIds, purpose: 'revision' }),
+        body: JSON.stringify({ mode, guidance: guidance.trim(), prompt: customPrompt.trim(), selectedImageIds: sourceImageIds, sceneId, purpose: 'revision' }),
       });
       const data = await response.json() as { error?: string; job?: Job };
       if (!response.ok) throw new Error(data.error || '视频提示词准备失败');

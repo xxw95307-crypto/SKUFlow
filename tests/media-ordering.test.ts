@@ -50,6 +50,21 @@ test('three split scenes are arranged once and reused across sites without mixin
  assert.throws(()=>parseSceneMediaOrderPlan({groups:[{...groups[0],items:[...groups[0].items,groups[1].items[0]]},...groups.slice(1)]},images,sceneIds,true),/重复|未知|素材/);
  assert.throws(()=>parseSceneMediaOrderPlan({groups:groups.slice(1)},images,sceneIds,true),/每个场景/);
 });
+test('split media order includes each scene video only in its own scene',()=>{
+ const items=[
+  {id:'image_1',type:'IMAGE' as const,title:'通勤封面',purpose:'封面',sceneId:'commute'},
+  {id:'video_1',type:'VIDEO' as const,title:'通勤视频',purpose:'展示',sceneId:'commute'},
+  {id:'image_2',type:'IMAGE' as const,title:'居家封面',purpose:'封面',sceneId:'home'},
+  {id:'video_2',type:'VIDEO' as const,title:'居家视频',purpose:'展示',sceneId:'home'},
+ ];
+ assert.deepEqual(mediaCandidatesForScene(items,'commute',true).map(item=>item.id),['image_1','video_1']);
+ assert.deepEqual(mediaCandidatesForScene(items,'home',true).map(item=>item.id),['image_2','video_2']);
+ const groups=['commute','home'].map(sceneId=>({sceneId,items:mediaCandidatesForScene(items,sceneId,true).map((item,index)=>({id:item.id,role:index===0?'COVER':'VIDEO',alt:item.title,reason:'按场景展示'}))}));
+ const plan=parseSceneMediaOrderPlan({groups},items,['commute','home'],true);
+ assert.equal(plan.groups[0].items[1].id,'video_1');
+ assert.equal(plan.groups[1].items[1].id,'video_2');
+ assert.throws(()=>parseSceneMediaOrderPlan({groups:[{...groups[0],items:[groups[0].items[0],groups[1].items[1]]},groups[1]]},items,['commute','home'],true),/未知|素材/);
+});
 const expected={title:'t',variants:[],files:[{alt:'hero',contentType:'IMAGE'},{alt:'video',contentType:'VIDEO'},{alt:'detail',contentType:'IMAGE'}]};
 const actual={title:'t',collections:{nodes:[]},variants:{nodes:[]},featuredMedia:{alt:'hero'},media:{nodes:[{id:'h',alt:'hero',mediaContentType:'IMAGE',status:'READY'},{id:'v',alt:'video',mediaContentType:'VIDEO',status:'PROCESSING'},{id:'d',alt:'detail',mediaContentType:'IMAGE',status:'READY'}]}};
 test('readback verifies cover order media type and pending video independently',()=>{

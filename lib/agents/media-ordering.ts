@@ -4,7 +4,7 @@ export interface MediaOrderPlan {items:MediaPlacement[]}
 export interface SceneMediaOrderGroup extends MediaOrderPlan {sceneId:string}
 export interface SceneMediaOrderPlan {groups:SceneMediaOrderGroup[]}
 export function mediaCandidatesForScene<T extends MediaCandidate>(candidates:readonly T[],sceneId:string,split:boolean):T[] {
- return split?candidates.filter(candidate=>candidate.type==='IMAGE'&&candidate.sceneId===sceneId):[...candidates];
+ return split?candidates.filter(candidate=>candidate.sceneId===sceneId):[...candidates];
 }
 export function parseSceneMediaOrderPlan(raw:unknown,candidates:MediaCandidate[],sceneIds:string[],split:boolean):SceneMediaOrderPlan {
  const groups=(raw as {groups?:unknown})?.groups;
