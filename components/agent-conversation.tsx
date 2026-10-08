@@ -1147,7 +1147,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
         await responseJson(await fetch(`/api/tasks/${currentTask.id}/media-plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedAssetIds:selectedAssetsRef.current,guidance:mediaGuidance})}),'媒体编排失败');
         setPhase('publish'); setPublishOpen(false);
         mediaPlanRef.current=null;setMediaPlanReady(false);
-        append('agent', '上架包已经准备完成。请分别确认各站点、各场景的封面和图片顺序，再检查目标站点译文；只有你明确确认后我才会调用测试交付工具。', '等待图片顺序确认', {
+        append('agent', '上架包已经准备完成。请确认各场景的封面和图片顺序，再检查目标站点译文；只有你明确确认后我才会调用测试交付工具。', '等待图片顺序确认', {
           kind: 'publish',
           items: [{ id: currentTask.id, label: currentTask.productName, value: `${currentTask.platforms.length} 个目标平台`, detail: `${currentTask.markets.join('、')} · 测试草稿`, status: '待确认' }],
         });
@@ -1820,7 +1820,7 @@ export function AgentConversation({ account, initialWorkspace = 'agent' }: { acc
           {phase === 'assets' && !joinAssetsToLastAgentReply && <article className="chat-message agent asset-conversation"><span className="chat-avatar">AI</span>{assetCard}</article>}
           {phase === 'video' && !joinVideoToLastAgentReply && <article className="chat-message agent video-stage-conversation"><span className="chat-avatar">AI</span>{videoCard}</article>}
 
-          {phase === 'publish' && task && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview hasShopify={task.platforms.includes('shopify')} hasAmazonSandbox={task.platforms.includes('amazon')} hasMock={task.platforms.some((platform) => platform !== 'shopify' && platform !== 'amazon')} scenePlan={scenePlan} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
+          {phase === 'publish' && task && <article className="chat-message agent"><span className="chat-avatar">AI</span><MediaOrderReview scenePlan={scenePlan} onReselect={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);setPhase('assets');}} taskId={task.id} selectedIds={selectedAssets} guidance={mediaGuidance} onInvalidated={()=>{mediaPlanRef.current=null;setMediaPlanReady(false);setPublishOpen(false);}} onConfirmed={id=>{mediaPlanRef.current=id;setMediaPlanReady(true);setPublishOpen(true);}}/></article>}
           {phase === 'publish' && <div className="chat-action-card checkpoint final"><div className="checkpoint-icon">↗</div><div><span>最后确认</span><h3>上新内容已准备好</h3><p>检查并确认后，才会开始测试交付。</p></div><button type="button" disabled={!mediaPlanReady} onClick={() => setPublishOpen(true)}>查看并确认交付</button></div>}
 
           {phase === 'complete' && <div className="chat-action-card completed"><span>✓</span><div><small>测试交付已完成</small><h3>{publishedCount} 个平台结果已保存</h3><p>任务、商品事实、人工决策和测试结果均已保留追溯信息。</p></div>{task?.platforms.includes('shopify') && <button type="button" onClick={recheckShopify}>重新核对 Shopify</button>}<button className="primary" type="button" onClick={() => void newConversation()}>处理下一个商品</button></div>}

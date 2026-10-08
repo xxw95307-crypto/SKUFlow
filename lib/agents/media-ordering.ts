@@ -1,35 +1,32 @@
 export interface MediaCandidate {id:string;type:'IMAGE'|'VIDEO';title:string;purpose:string;url?:string;sceneId?:string}
 export interface MediaPlacement {id:string;role:'COVER'|'GALLERY'|'VIDEO';alt:string;reason:string}
 export interface MediaOrderPlan {items:MediaPlacement[]}
-export interface MediaOrderTarget {platformId:string;market:string;sceneId:string}
-export interface TargetMediaOrderGroup extends MediaOrderTarget,MediaOrderPlan {}
-export interface TargetMediaOrderPlan {groups:TargetMediaOrderGroup[]}
-export function mediaOrderTargetKey(target:MediaOrderTarget):string {return JSON.stringify([target.platformId,target.market,target.sceneId]);}
-export function mediaCandidatesForTarget<T extends MediaCandidate>(candidates:readonly T[],target:MediaOrderTarget,split:boolean):T[] {
- return split?candidates.filter(candidate=>candidate.type==='IMAGE'&&candidate.sceneId===target.sceneId):[...candidates];
+export interface SceneMediaOrderGroup extends MediaOrderPlan {sceneId:string}
+export interface SceneMediaOrderPlan {groups:SceneMediaOrderGroup[]}
+export function mediaCandidatesForScene<T extends MediaCandidate>(candidates:readonly T[],sceneId:string,split:boolean):T[] {
+ return split?candidates.filter(candidate=>candidate.type==='IMAGE'&&candidate.sceneId===sceneId):[...candidates];
 }
-export function parseTargetMediaOrderPlan(raw:unknown,candidates:MediaCandidate[],targets:MediaOrderTarget[],split:boolean):TargetMediaOrderPlan {
+export function parseSceneMediaOrderPlan(raw:unknown,candidates:MediaCandidate[],sceneIds:string[],split:boolean):SceneMediaOrderPlan {
  const groups=(raw as {groups?:unknown})?.groups;
- if(!Array.isArray(groups)||groups.length!==targets.length||!targets.length)throw new Error('请为每个站点和场景分别安排图片');
- const expected=new Map(targets.map(target=>[mediaOrderTargetKey(target),target]));
- if(expected.size!==targets.length)throw new Error('目标站点和场景重复');
+ if(!Array.isArray(groups)||groups.length!==sceneIds.length||!sceneIds.length)throw new Error('请为每个场景分别安排图片');
+ const expected=new Set(sceneIds);
+ if(expected.size!==sceneIds.length)throw new Error('场景重复');
  const seen=new Set<string>();const used=new Set<string>();
  const parsed=groups.map(value=>{
-  const group=value as TargetMediaOrderGroup;
-  const key=mediaOrderTargetKey(group);
-  const target=expected.get(key);
-  if(!target||seen.has(key))throw new Error('媒体方案包含重复或未知的站点场景');
-  seen.add(key);
-  const own=mediaCandidatesForTarget(candidates,target,split);
-  if(!own.length)throw new Error(`场景 ${target.sceneId} 缺少已选择的图片`);
+  const group=value as SceneMediaOrderGroup;
+  if(!group||!expected.has(group.sceneId)||seen.has(group.sceneId))throw new Error('媒体方案包含重复或未知的场景');
+  seen.add(group.sceneId);
+  const own=mediaCandidatesForScene(candidates,group.sceneId,split);
+  if(!own.length)throw new Error(`场景 ${group.sceneId} 缺少已选择的图片`);
   const plan=parseMediaOrderPlan(group,own);
   for(const item of plan.items)used.add(item.id);
-  return {...target,...plan};
+  return {sceneId:group.sceneId,...plan};
  });
  if(used.size!==candidates.length||candidates.some(candidate=>!used.has(candidate.id)))throw new Error('有选中的素材不属于任何上架场景');
  return {groups:parsed};
 }
-export function sameTargetMediaSelection(plan:TargetMediaOrderPlan,ids:string[]):boolean {
+export function sameSceneMediaSelection(plan:SceneMediaOrderPlan,ids:string[],sceneIds:string[]):boolean {
+ if(!Array.isArray(plan.groups)||plan.groups.length!==sceneIds.length||new Set(plan.groups.map(group=>group.sceneId)).size!==sceneIds.length||plan.groups.some(group=>!sceneIds.includes(group.sceneId)))return false;
  const used=new Set(plan.groups?.flatMap(group=>group.items?.map(item=>item.id)??[])??[]);
  return new Set(ids).size===ids.length&&used.size===ids.length&&ids.every(id=>used.has(id));
 }
