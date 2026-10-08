@@ -126,7 +126,7 @@ function RichMessageContent({ message }: { message: ChatMessage }) {
     {displayText && <p>{displayText}</p>}
     {message.attachments && message.attachments.length > 0 && <div className="rich-file-list">
       {message.attachments.map((file) => {
-        if(file.fileId.startsWith('video_')&&file.contentType.startsWith('video/')) return <div className="chat-result-video" key={file.fileId}><video controls playsInline preload="metadata" src={`/api/tasks/${file.taskId}/videos/${file.fileId}/file`}/><a href={`/api/tasks/${file.taskId}/videos/${file.fileId}/file`} download>下载结果视频</a></div>;
+        if(file.fileId.startsWith('video_')&&file.contentType.startsWith('video/')) return <div className="chat-result-video" key={file.fileId}><video controls playsInline preload="metadata" src={`/api/tasks/${file.taskId}/videos/${file.fileId}/file`} onEnded={(event) => { event.currentTarget.pause(); event.currentTarget.currentTime = 0; }}/><a href={`/api/tasks/${file.taskId}/videos/${file.fileId}/file`} download>下载结果视频</a></div>;
         const image = file.contentType.startsWith('image/');
         return <article className="rich-file" key={file.fileId}>
           {image
