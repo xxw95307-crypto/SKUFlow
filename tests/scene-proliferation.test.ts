@@ -42,6 +42,11 @@ test('each split scene receives its chosen image count, and delivery keeps image
   assert.deepEqual(parseScenePlan(JSON.stringify({ mode: 'SPLIT', scenes: countedScenes, confirmedAt: '2026-10-08T00:00:00.000Z' }))?.scenes.map((scene) => scene.imageCount), [2, 3]);
   const planned = parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤全身'), asset('scene_1', '通勤细节'), asset('scene_2', '周末咖啡馆'), asset('scene_2', '周末街拍'), asset('scene_2', '周末特写')] }), 5, undefined, countedScenes);
   assert.deepEqual(planned.map((item) => item.sceneId), ['scene_1', 'scene_1', 'scene_2', 'scene_2', 'scene_2']);
+  const sceneOnly = parseAssetPlan(JSON.stringify({ assets: [
+    { ...asset('', '通勤全身'), sceneId: undefined },
+    { ...asset('scene_2', '通勤细节') },
+  ] }), 2, undefined, [countedScenes[0]]);
+  assert.deepEqual(sceneOnly.map((item) => item.sceneId), ['scene_1', 'scene_1']);
   assert.throws(() => parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤'), asset('scene_1', '通勤二'), asset('scene_1', '通勤三'), asset('scene_2', '周末'), asset('scene_2', '周末二')] }), 5, undefined, countedScenes), /每套场景/);
   const candidates = [
     { id: 'image_1', sceneId: 'scene_1', type: 'IMAGE' as const },

@@ -94,7 +94,7 @@ export function buildAssetPlanningMessages(context: AssetPlanningContext): Array
     role: 'system',
     content: `你是跨境电商视觉策划 Agent。根据商家本轮自然语言要求、已确认的店铺默认偏好、已有图片和可信商品事实，自由规划这一轮要生成的商品图片。商家本轮要求优先，不套用固定图种组合。
 
-只输出 JSON：{"assets":[{"kind":"CUSTOM","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的详细中文生成指令","acceptance":"该图完成后可从画面判断的具体验收标准","negativePrompt":"这张图片中明确禁止出现的元素；没有则为空字符串","sourceMode":"ORIGINAL 或 CURRENT"}]}。
+只输出 JSON：{"assets":[{"sceneId":"如果是场景裂变则填写当前场景 ID","kind":"CUSTOM","title":"中文标题","note":"中文用途说明","size":"1024*1024","instruction":"给图像模型的详细中文生成指令","acceptance":"该图完成后可从画面判断的具体验收标准","negativePrompt":"这张图片中明确禁止出现的元素；没有则为空字符串","sourceMode":"ORIGINAL 或 CURRENT"}]}。
 
 这一阶段只规划图片，不规划、提交或生成视频。视频会在商家确认最终图片后单独处理。
 
@@ -150,7 +150,9 @@ export function parseAssetPlan(value: string, requestedCount?: number | null, ta
     const acceptance = plainText(record.acceptance).slice(0, 500);
     const negativePrompt = plainText(record.negativePrompt).slice(0, 300);
     const sourceMode = record.sourceMode === 'CURRENT' ? 'CURRENT' : 'ORIGINAL';
-    const sceneId = plainText(record.sceneId);
+    // A per-scene planning call already has a trusted scene identity. Do not rely on the model
+    // repeating that ID correctly for every image in the batch.
+    const sceneId = scenes?.length === 1 ? scenes[0].id : plainText(record.sceneId);
     const size = plainText(record.size);
     if (!GENERATED_ASSET_KINDS.includes(kind as (typeof GENERATED_ASSET_KINDS)[number]) || !title || !note || !instruction || !acceptance) continue;
     if (!ALLOWED_SIZES.includes(size as AssetGenerationSpec['size'])) continue;
