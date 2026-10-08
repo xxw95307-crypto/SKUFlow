@@ -41,6 +41,10 @@ export function classifyBatchItem(row: ItemRow): Pick<BatchItemSummary, 'stage' 
   if (row.draft_count > 0 && row.published_count === row.draft_count) return { stage: 'PUBLISHED', reason: '所有目标已交付' };
   if (row.task_status === 'CREATED') return { stage: 'NEW', reason: '等待开始资料分析' };
   if (row.conflict_count > 0) return { stage: 'NEEDS_ATTENTION', reason: `${row.conflict_count} 处资料冲突待确认` };
+  if (['FACTS_EXTRACTED', 'NEEDS_CONFIRMATION'].includes(row.task_status)
+    && row.draft_count > 0 && row.review_count === 0 && row.approved_count === 0 && row.published_count === 0) {
+    return { stage: 'NEEDS_ATTENTION', reason: '商品资料已整理，请打开任务确认上新方式' };
+  }
   if (row.review_count > 0) {
     return { stage: 'NEEDS_ATTENTION', reason: `${row.draft_count - row.approved_count - row.published_count} 份 Listing 待审核` };
   }

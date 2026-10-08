@@ -12,12 +12,6 @@ import './batch-workspace.css';
 interface BatchListItem { id: string; name: string; sourceLabel: string; createdAt: string; itemCount: number }
 interface Target { platformId: PlatformId; market: string }
 const noPreferredTargets: Target[] = [];
-interface ReviewDraft {
-  id: string; platformId: string; market: string; status: string;
-  payload: { fields: Record<string, unknown>; fieldSources: Record<string, string>; confirmedInferredFields?: string[]; schema: { fields: Array<{ key: string; label: string }> } };
-  validationIssues: Array<{ severity: string }>;
-}
-interface ReviewCandidate { item: BatchItemSummary; drafts: ReviewDraft[] }
 const supportedPlatforms = platformRegistry.filter((platform) => platform.capabilities.contentGeneration);
 const stageLabels: Record<BatchItemSummary['stage'], string> = {
   NEW: '待开始', PROCESSING: '处理中', NEEDS_ATTENTION: '待处理',
@@ -47,8 +41,6 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
   const [error, setError] = useState('');
   const [progress, setProgress] = useState('');
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
-  const [reviewCandidates, setReviewCandidates] = useState<ReviewCandidate[]>([]);
-  const [reviewOpen, setReviewOpen] = useState(false);
   const attachFolderInput = useCallback((input: HTMLInputElement | null) => {
     folderInput.current = input;
     if (input) {
@@ -176,14 +168,8 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
       }
       await post('extract-facts');
     }
-    let passport = (await api<{ passport: { conflicts: Array<{ status: string }>; platformDrafts: Array<{ id: string; status: string }> } }>(`/api/tasks/${taskId}/passport`)).passport;
-    if (passport.conflicts.some((conflict) => conflict.status === 'OPEN')) return;
-    for (let i = 0; i < passport.platformDrafts.length; i++) {
-      if (!passport.platformDrafts.some((draft) => draft.status === 'PLANNED')) break;
-      setProgress(`正在为「${current.folder}」准备第 ${i + 1}/${passport.platformDrafts.length} 份站点文案…`);
-      await post('compile-drafts');
-      passport = (await api<{ passport: typeof passport }>(`/api/tasks/${taskId}/passport`)).passport;
-    }
+    // Each product now stops after fact extraction so its seller can confirm
+    // conflicts, choose the scene plan, and review its own Listing in chat.
   };
 
   const processBatch = async (only?: BatchItemSummary) => {
@@ -207,53 +193,6 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
         await refreshBatch(batch.id);
       }
     } finally { setBusy(''); setProgress(''); }
-  };
-
-  const prepareBulkReview = async () => {
-    if (!batch) return;
-    setBusy('reviewing'); setError('');
-    try {
-      const candidates: ReviewCandidate[] = [];
-      for (const item of batch.items.filter((entry) => entry.stage === 'NEEDS_ATTENTION' && entry.conflictCount === 0 && entry.draftCount > 0)) {
-        const response = await api<{ passport: { platformDrafts: ReviewDraft[] } }>(`/api/tasks/${item.taskId}/passport`);
-        const drafts = response.passport.platformDrafts;
-        if (!drafts.length || !drafts.every((draft) => {
-          if (draft.status !== 'VALIDATED' || !Array.isArray(draft.payload?.schema?.fields)
-            || !draft.payload?.fields || !Array.isArray(draft.validationIssues)
-            || draft.validationIssues.some((issue) => issue.severity === 'error')) return false;
-          const confirmed = new Set(draft.payload.confirmedInferredFields || []);
-          return Object.entries(draft.payload.fieldSources || {}).every(([key, source]) => source !== 'AI_INFERRED' || confirmed.has(key));
-        })) continue;
-        candidates.push({ item, drafts });
-      }
-      setReviewCandidates(candidates);
-      setReviewOpen(true);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : '审核资料加载失败'); }
-    finally { setBusy(''); }
-  };
-
-  const approveBulkReview = async () => {
-    if (!batch || !reviewCandidates.length) return;
-    setBusy('approving'); setError('');
-    try {
-      for (const candidate of reviewCandidates) {
-        for (const draft of candidate.drafts) {
-          try {
-            await api(`/api/tasks/${candidate.item.taskId}/listing-drafts`, {
-              method: 'PATCH', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ draftId: draft.id, action: 'approve', fields: draft.payload.fields,
-                confirmedInferredFields: draft.payload.confirmedInferredFields || [] }),
-            });
-          } catch (caught) {
-            const message = caught instanceof Error ? caught.message : '审核失败';
-            setItemErrors((previous) => ({ ...previous, [candidate.item.taskId]: message }));
-            await reportItemError(batch.id, candidate.item.taskId, message).catch(() => undefined);
-          }
-        }
-      }
-      await refreshBatch(batch.id);
-      setReviewOpen(false); setReviewCandidates([]);
-    } finally { setBusy(''); }
   };
 
   const publishBatch = async (only?: BatchItemSummary) => {
@@ -331,16 +270,12 @@ export function BatchWorkspace({ embedded = false, preferredTargets = noPreferre
         {error && <p className="batch-error">{error}{!batchesLoaded && <button type="button" onClick={() => window.location.reload()}>重新加载</button>}</p>}
         {view === 'detail' && batch && counts && <section className="batch-board"><div className="batch-board-head"><div><h2>{batch.name}</h2><small>{counts.total} 款商品{counts.attention > 0 ? ` · ${counts.attention} 款待处理` : ''}{counts.ready > 0 ? ` · ${counts.ready} 款可交付` : ''}{counts.delivered > 0 ? ` · ${counts.delivered} 款已交付` : ''}</small></div><button type="button" onClick={() => void refreshBatch(batch.id)}>刷新</button></div>
           <details className="batch-target-details"><summary>{batch.targets.length} 个目标站点</summary><p>{batch.targets.map((target) => `${target.platformId} ${target.market}`).join('、')}</p></details>
-          <div className="batch-actions">{batch.items.some((item) => ['NEW','PROCESSING','FAILED'].includes(item.stage)) && <button type="button" disabled={!!busy} onClick={() => void processBatch()}>{busy === 'processing' ? '正在分析商品…' : batch.items.some((item) => item.stage === 'NEW') ? '开始分析商品' : '继续分析商品'}</button>}{counts.attention > 0 && <button type="button" disabled={!!busy} onClick={() => void prepareBulkReview()}>查看批量审核</button>}{counts.ready > 0 && <button className="batch-primary" type="button" disabled={!!busy} onClick={() => void publishBatch()}>交付已审核商品（{counts.ready}）</button>}{busy && <button type="button" onClick={() => { stopRequested.current = true; }}>当前商品完成后停止</button>}</div>
+          <div className="batch-actions">{batch.items.some((item) => ['NEW','PROCESSING','FAILED'].includes(item.stage)) && <button type="button" disabled={!!busy} onClick={() => void processBatch()}>{busy === 'processing' ? '正在分析商品…' : batch.items.some((item) => item.stage === 'NEW') ? '开始分析商品' : '继续分析商品'}</button>}{counts.ready > 0 && <button className="batch-primary" type="button" disabled={!!busy} onClick={() => void publishBatch()}>交付已审核商品（{counts.ready}）</button>}{busy && <button type="button" onClick={() => { stopRequested.current = true; }}>当前商品完成后停止</button>}</div>
           {progress && <p className="batch-progress" role="status">{progress}</p>}
           <div className="batch-items">{batch.items.map((item) => <article key={item.taskId} className={`batch-item ${item.stage.toLowerCase()}${activeConversationId === item.conversationId ? ' is-active' : ''}`}><div className="batch-item-info"><span className="batch-folder">{item.folder}</span><h3>{item.productName}</h3><small>{item.reason}</small>{(itemErrors[item.taskId] || item.lastError) && <em>{itemErrors[item.taskId] || item.lastError}</em>}</div><div className="batch-item-side"><span className="batch-badge">{stageLabels[item.stage]}</span>{onOpenConversation ? <button type="button" disabled={conversationSwitchDisabled} onClick={() => onOpenConversation(item.conversationId)}>{activeConversationId === item.conversationId ? '右侧已打开' : '打开商品任务'}</button> : <Link href={`/?conversation=${item.conversationId}`}>打开商品任务</Link>}{['NEW','PROCESSING','FAILED'].includes(item.stage) && <button type="button" disabled={!!busy} onClick={() => void processBatch(item)}>{item.stage === 'NEW' ? '开始分析' : '继续分析'}</button>}{item.stage === 'READY_TO_PUBLISH' && <button type="button" disabled={!!busy} onClick={() => void publishBatch(item)}>交付此商品</button>}</div></article>)}</div>
           {!embedded && <p className="batch-note">批量交付仅处理已逐项审核、完成必要媒体确认的商品。Shopify 创建未公开草稿；Amazon 使用官方静态沙箱；其他平台为本地演示草稿。</p>}
         </section>}
       </section>
     </div>
-    {reviewOpen && <div className="batch-review-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setReviewOpen(false); }}><section className="batch-review-dialog" role="dialog" aria-modal="true" aria-label="批量审核 Listing">
-      <header><div><span>批量审核</span><h2>{reviewCandidates.length ? `${reviewCandidates.length} 款商品可一起确认` : '没有可批量确认的商品'}</h2></div><button type="button" aria-label="关闭" disabled={!!busy} onClick={() => setReviewOpen(false)}>×</button></header>
-      {reviewCandidates.length ? <><p>以下商品没有未决冲突或待确认的 AI 推断字段。请逐项查看平台稿，确认后才能进入交付。</p><div className="batch-review-list">{reviewCandidates.map(({ item, drafts }) => <article key={item.taskId}><h3>{item.productName}</h3>{drafts.map((draft) => <details key={draft.id}><summary>{draft.platformId} · {draft.market} · {draft.payload.schema.fields.length} 个字段</summary><dl>{draft.payload.schema.fields.filter((field) => draft.payload.fields[field.key] !== undefined).map((field) => <div key={field.key}><dt>{field.label}</dt><dd>{typeof draft.payload.fields[field.key] === 'string' ? String(draft.payload.fields[field.key]) : JSON.stringify(draft.payload.fields[field.key])}</dd></div>)}</dl></details>)}</article>)}</div><footer><button type="button" disabled={!!busy} onClick={() => setReviewOpen(false)}>稍后再审</button><button className="batch-primary" type="button" disabled={!!busy} onClick={() => void approveBulkReview()}>{busy === 'approving' ? '正在确认…' : `确认这 ${reviewCandidates.length} 款商品`}</button></footer></> : <><p>其他商品有资料冲突、缺失字段或待核实的 AI 推断，请在对应商品任务中处理。</p><footer><button type="button" onClick={() => setReviewOpen(false)}>知道了</button></footer></>}
-    </section></div>}
   </div>;
 }

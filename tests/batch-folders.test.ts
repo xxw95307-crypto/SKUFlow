@@ -39,3 +39,11 @@ test('never marks an unapproved item ready for bulk delivery', () => {
   assert.equal(classifyBatchItem({ ...item, review_count: 0, approved_count: 2 } as never).stage, 'READY_TO_PUBLISH');
   assert.equal(classifyBatchItem({ ...item, review_count: 0, approved_count: 2, needs_media: 1 } as never).stage, 'NEEDS_ATTENTION');
 });
+
+test('a conflict-free analyzed product still waits for its seller to choose the listing path', () => {
+  const item = { task_status: 'FACTS_EXTRACTED', draft_count: 2, published_count: 0,
+    conflict_count: 0, review_count: 0, approved_count: 0, needs_media: 0, media_plan_id: null } as const;
+  assert.deepEqual(classifyBatchItem(item as never), {
+    stage: 'NEEDS_ATTENTION', reason: '商品资料已整理，请打开任务确认上新方式',
+  });
+});
