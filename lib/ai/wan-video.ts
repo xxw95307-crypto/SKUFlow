@@ -40,8 +40,35 @@ export function prepareVideoAudio(plan:VideoPlan,audioUrl?:string) {
  if(!['ambient','music','narration'].includes(mode))throw new Error('声音方式无效');
  const narration=plan.narrationText?.trim()??'';
  if(mode==='narration'&&(!narration||narration.length>60||!audioUrl))throw new Error('请填写不超过 60 字的解说文案，并生成配音');
+ if(mode!=='narration'&&!audioUrl)throw new Error('请先生成自然音效或背景音乐，再开始生成视频');
  const suffix=mode==='music'?'配轻柔、自然的纯音乐，节奏贴合镜头；不要人声、歌词或口播。':mode==='narration'?'使用提供的配音作为画外解说，镜头只展示商品；不要让画面人物对口型，不要额外生成对白或背景音乐。':'只保留与画面相符的自然环境音效；不要背景音乐、口播或对白。';
  return {prompt:`${plan.prompt.trim()}\n声音要求：${suffix}`,media:audioUrl?[{type:'driving_audio',url:audioUrl}]:[]};
+}
+export async function synthesizeVideoSound(c:WanVideoConfig,plan:VideoPlan,fetcher:typeof fetch=fetch):Promise<{url:string;duration:number}> {
+ requireWanConfig(c);
+ const mode=plan.audioMode??'ambient';
+ if(mode!=='ambient'&&mode!=='music')throw new Error('仅自然音效和背景音乐需要生成场景音频');
+ const scene=`${plan.title}。${plan.prompt}`.slice(0,700);
+ const targetSeconds=Math.min(30,plan.duration+2);
+ const textPrompt=mode==='music'
+  ? `为一段约${targetSeconds}秒的商品短视频生成清晰可闻的轻柔纯器乐背景音乐。只有旋律和乐器，没有歌词、说话或旁白。画面场景：${scene}`
+  : `为一段约${targetSeconds}秒的商品短视频生成清晰可闻、与画面匹配的自然环境音效。只要真实的环境声和动作声，没有音乐、说话或旁白。画面场景：${scene}`;
+ const response=await fetcher(c.baseUrl+'/services/audio/tts/SpeechSynthesizer',{method:'POST',headers:{Authorization:`Bearer ${c.apiKey}`,'content-type':'application/json'},body:JSON.stringify({model:'qwen-audio-3.1-tts-next',input:{text_prompt:textPrompt,format:'wav',sample_rate:24000,channels:1,volume:80}}),signal:AbortSignal.timeout(120_000)});
+ const payload=await response.json() as {code?:string;message?:string;output?:{audio?:{url?:string}}};
+ if(!response.ok||payload.code||!payload.output?.audio?.url)throw new WanVideoRequestError('声音生成失败，请检查百炼账号是否开通音频生成模型后重试。');
+ const url=new URL(payload.output.audio.url);
+ if(!['http:','https:'].includes(url.protocol)||!url.hostname.endsWith('.aliyuncs.com')||url.username||url.password)throw new WanVideoRequestError('声音服务返回了无效音频地址，请重试');
+ const audio=await fetcher(url.toString(),{signal:AbortSignal.timeout(30_000)});
+ if(!audio.ok)throw new WanVideoRequestError('声音文件下载失败，请重试');
+ const contentLength=Number(audio.headers.get('content-length'));
+ if(contentLength>15*1024*1024)throw new WanVideoRequestError('声音文件超过 15 MB，请重试');
+ const bytes=new Uint8Array(await audio.arrayBuffer());
+ if(bytes.length>15*1024*1024||contentLength>0&&bytes.length!==contentLength)throw new WanVideoRequestError('声音文件不完整，请重试');
+ let duration:number;
+ try {duration=wavDurationSeconds(bytes);} catch {throw new WanVideoRequestError('声音文件格式无效，请重试');}
+ if(duration<2||duration>30)throw new WanVideoRequestError('声音时长不符合视频生成要求，请重试');
+ if(!wavHasAudibleSignal(bytes))throw new WanVideoRequestError('生成的音频没有可听见的声音，请重试');
+ return {url:url.toString(),duration};
 }
 export function wavDurationSeconds(bytes:Uint8Array):number {
  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -62,6 +89,20 @@ export function wavDurationSeconds(bytes:Uint8Array):number {
  const duration=dataSize/byteRate;
  if(!Number.isFinite(duration)||duration<=0)throw new Error('无法读取配音时长');
  return duration;
+}
+function wavHasAudibleSignal(bytes:Uint8Array):boolean {
+ const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+ let offset=12;
+ while(offset+8<=bytes.length){
+  const size=view.getUint32(offset+4,true),id=view.getUint32(offset,false);
+  if(id===0x64617461){
+   const end=Math.min(bytes.length,offset+8+size);
+   for(let sample=offset+8;sample+1<end;sample+=2)if(Math.abs(view.getInt16(sample,true))>655)return true;
+   return false;
+  }
+  offset+=8+size+(size%2);
+ }
+ return false;
 }
 export function matchedVideoDuration(audioSeconds:number):number {
  if(!Number.isFinite(audioSeconds)||audioSeconds<2)throw new Error('解说不足 2 秒，请补充文案后再生成');
