@@ -1,6 +1,6 @@
 import { currentAccount, withAuthentication } from '@/lib/server/auth';
 import { ensureSchema, getBindings } from '@/db/client';
-import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt } from '@/lib/agents/asset-generation';
+import { ASSET_PLAN_VERSION, buildAssetGenerationPrompt, sceneAssetUserGuidance } from '@/lib/agents/asset-generation';
 import { callBailianAssetPlanning, callBailianVisualIntent } from '@/lib/ai/bailian-client';
 import { loadBailianConfig, loadBailianImageConfig, missingBailianConfig, missingBailianImageConfig } from '@/lib/config/bailian';
 import type { GeneratedAsset, GeneratedAssetSummary } from '@/lib/domain/generated-asset';
@@ -92,6 +92,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
     const isSceneBriefRetry = splitScenes.length > 0 && options.guidance?.startsWith('我已确认图片生成需求，请生成图片') === true;
     const sharedNotes = options.notes ?? (isSceneBriefRetry ? options.guidance?.match(/；其他要求：(.+?)。只生成图片/)?.[1]?.trim() : null) ?? null;
     const sharedStyle = options.style ?? (isSceneBriefRetry ? options.guidance?.match(/；风格：(.+?)；其他要求：/)?.[1]?.trim() : null) ?? null;
+    const sceneGuidance = sceneAssetUserGuidance(options.confirmedBrief || isSceneBriefRetry, sharedNotes, options.guidance);
     const preferences = await getShopPreferences(bindings.DB, (await currentAccount())!.id);
     const reusable = existing.filter((asset) => asset.status === 'COMPLETED' && asset.batchId.startsWith(`asset_dynamic_${ASSET_PLAN_VERSION}_`));
     if (!options.force && !options.guidance && !options.count && !options.style && reusable.length > 0 && existing.every((asset) => asset.status === 'COMPLETED')) return Response.json({ assets: existing, summary: summarize(existing), reused: true });
@@ -138,7 +139,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
           scenes: [scene],
           sceneListings: sceneListings.filter((entry) => entry.sceneId === scene.id),
           requestedCount: scene.imageCount ?? 1,
-          userGuidance: `只为「${scene.name}」生成 ${scene.imageCount ?? 1} 张不同图片。${options.confirmedBrief || isSceneBriefRetry ? sharedNotes || '' : options.guidance || ''}`,
+          userGuidance: sceneGuidance,
         })); return Promise.all(scenePlans).then((parts) => ({ assets: parts.flatMap((part) => part.assets), model: parts[0].model })); })()
       : callBailianAssetPlanning(planningConfig, {
           ...planningContext, scenes: splitScenes, sceneListings, userGuidance: options.guidance,
@@ -213,8 +214,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ taskId:
       const batch = await Promise.allSettled(resolvedPlan.assets.slice(start, start + 6).map(async (spec, offset) => {
         const position = start + offset;
         const prompt = buildAssetGenerationPrompt({ spec, scene: sceneFor(spec.sceneId), productName: task.productName, facts: passport.facts, listings: listingsFor(spec.sceneId), preferences });
-        const sceneGuidance = (options.confirmedBrief || isSceneBriefRetry) && splitScenes.length ? `本张属于「${sceneFor(spec.sceneId)?.name ?? spec.sceneId}」场景。${sharedNotes ?? ''}` : options.guidance;
-        const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, sceneGuidance, { bytes, contentType: image.content_type }, resolvedPlan.assets.filter((item) => item !== spec && item.sceneId === spec.sceneId).map((item) => `${item.kind}｜${item.title}`));
+        const imageGuidance = splitScenes.length ? sceneGuidance : options.guidance;
+        const { generated, reviewWarning } = await generateVerifiedImage(config, planningConfig, { bytes, contentType: image.content_type }, spec, prompt, imageGuidance, { bytes, contentType: image.content_type }, resolvedPlan.assets.filter((item) => item !== spec && item.sceneId === spec.sceneId).map((item) => `${item.kind}｜${item.title}`));
         return { spec, prompt, generated, reviewWarning, id: `asset_${crypto.randomUUID()}`, position };
       }));
       prepared.push(...batch);

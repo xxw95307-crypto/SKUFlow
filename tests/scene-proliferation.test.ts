@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildScenePlanningMessages, parseScenePlanningOutput } from '../lib/agents/scene-planning.ts';
-import { parseAssetPlan } from '../lib/agents/asset-generation.ts';
+import { parseAssetPlan, sceneAssetUserGuidance } from '../lib/agents/asset-generation.ts';
+import { callBailianAssetPlanning } from '../lib/ai/bailian-client.ts';
 import { parseScenePlan } from '../lib/domain/scene-plan.ts';
 import { mediaIdsForScene } from '../lib/agents/scene-media.ts';
 import { availableAgentTools, requiredListingStageTool } from '../lib/agents/commerce-orchestrator.ts';
@@ -38,6 +39,10 @@ test('listing generation pauses for a scene decision before creating drafts', ()
 const asset = (sceneId: string, title: string) => ({ sceneId, kind: 'LIFESTYLE', title, note: `${title}展示`, size: '1024*1024', instruction: `${title}场景展示真实商品`, acceptance: `画面呈现${title}`, sourceMode: 'ORIGINAL' });
 
 test('each split scene receives its chosen image count, and delivery keeps images separated', () => {
+  assert.equal(sceneAssetUserGuidance(true, null, '我已确认图片生成需求，请生成图片。数量：9 张；其他要求：无。'), null);
+  assert.equal(sceneAssetUserGuidance(true, '无', '生成图片 · 9 张'), null);
+  assert.equal(sceneAssetUserGuidance(true, '自然光，不要文字', '生成图片 · 9 张'), '自然光，不要文字');
+  assert.equal(sceneAssetUserGuidance(false, null, '请改成户外场景'), '请改成户外场景');
   const countedScenes = [{ ...scenes[0], imageCount: 2 }, { ...scenes[1], imageCount: 3 }];
   assert.deepEqual(parseScenePlan(JSON.stringify({ mode: 'SPLIT', scenes: countedScenes, confirmedAt: '2026-10-08T00:00:00.000Z' }))?.scenes.map((scene) => scene.imageCount), [2, 3]);
   const planned = parseAssetPlan(JSON.stringify({ assets: [asset('scene_1', '通勤全身'), asset('scene_1', '通勤细节'), asset('scene_2', '周末咖啡馆'), asset('scene_2', '周末街拍'), asset('scene_2', '周末特写')] }), 5, undefined, countedScenes);
@@ -55,6 +60,27 @@ test('each split scene receives its chosen image count, and delivery keeps image
   ];
   assert.deepEqual(mediaIdsForScene(['image_1', 'video', 'image_2'], candidates, 'scene_2', true), ['image_2']);
   assert.throws(() => mediaIdsForScene(['image_1'], candidates, 'scene_2', true), /缺少/);
+});
+
+test('a count-only scene brief plans all images without treating synthesized count text as seller restrictions', async () => {
+  let calls = 0;
+  const fetchMock = (async () => {
+    calls += 1;
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ assets: [
+      { ...asset('', '通勤全身'), sceneId: undefined },
+      { ...asset('', '通勤侧面'), sceneId: undefined },
+      { ...asset('', '通勤搭配'), sceneId: undefined },
+    ] }) } }] });
+  }) as typeof fetch;
+  const planned = await callBailianAssetPlanning(
+    { apiKey: 'test-key', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'test-model' },
+    { productName: '针织衫', facts: [], listings: [], scenes: [{ ...scenes[0], imageCount: 3 }],
+      platforms: ['shopify'], markets: ['美国'], sourceImageCount: 1, requestedCount: 3,
+      userGuidance: sceneAssetUserGuidance(true, null, '生成图片 · 9 张') },
+    fetchMock,
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(planned.assets.map((image) => image.sceneId), ['scene_1', 'scene_1', 'scene_1']);
 });
 
 test('a partly delivered scene batch can still deliver its remaining draft', () => {
