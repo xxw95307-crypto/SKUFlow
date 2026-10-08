@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseMediaOrderPlan,sameMediaSelection,planMediaOrder} from '../lib/agents/media-ordering.ts';
+import {parseMediaOrderPlan,sameMediaSelection,planMediaOrder,completeMediaOrderPlan} from '../lib/agents/media-ordering.ts';
 import {compareIntegratedProduct,reorderShopifyMedia,refreshMediaOrderStatus,publishIntegratedShopify} from '../lib/platforms/shopify-integrated.ts';
 const candidates=[{id:'detail',type:'IMAGE' as const,title:'细节',purpose:'DETAIL'},{id:'hero',type:'IMAGE' as const,title:'全貌',purpose:'HERO'},{id:'video',type:'VIDEO' as const,title:'展示',purpose:'场景'}];
 const raw={items:[{id:'hero',role:'COVER',alt:'商品全貌',reason:'商品清晰可见'},{id:'video',role:'VIDEO',alt:'商品展示视频',reason:'随后观看动作'},{id:'detail',role:'GALLERY',alt:'商品细节',reason:'最后核对细节'}]};
@@ -13,6 +13,22 @@ test('agent order keeps exact seller selection with one image cover and freely p
 });
 test('model receives product context and cannot invent or omit selected media',async()=>{
  const p=await planMediaOrder({apiKey:'test',baseUrl:'https://test',model:'qwen'},{candidates,facts:[],platforms:['shopify'],guidance:'视频放第二位'},async(_u,init)=>{assert.match(String(init?.body),/视频放第二位/);return Response.json({choices:[{message:{content:JSON.stringify(raw)}}]});});assert.equal(p.items[1].id,'video');
+});
+test('nine selected scene images remain unique and complete when the ordering model omits or repeats IDs',async()=>{
+ const images=Array.from({length:9},(_,index)=>({id:`image_${index+1}`,type:'IMAGE' as const,title:`场景图 ${index+1}`,purpose:`场景 ${Math.floor(index/3)+1}`}));
+ const incomplete={items:[{id:'image_2',role:'COVER',alt:'第二张',reason:'适合开场'},{id:'image_2',role:'GALLERY',alt:'重复',reason:'重复'},{id:'image_4',role:'GALLERY',alt:'第四张',reason:'延续展示'}]};
+ let calls=0;
+ const plan=await planMediaOrder({apiKey:'test',baseUrl:'https://test',model:'qwen'},{candidates:images,facts:[],platforms:['shopify']},async(_url,init)=>{
+  calls++;
+  if(calls===2)assert.match(String(init?.body),/每个恰好一次/);
+  return Response.json({choices:[{message:{content:JSON.stringify(incomplete)}}]});
+ });
+ assert.equal(calls,2);
+ assert.equal(plan.items.length,9);
+ assert.equal(plan.items[0].id,'image_2');
+ assert.deepEqual(new Set(plan.items.map(item=>item.id)),new Set(images.map(image=>image.id)));
+ assert.equal(sameMediaSelection(plan,images.map(image=>image.id)),true);
+ assert.equal(completeMediaOrderPlan({items:[]},images).items.length,9);
 });
 const expected={title:'t',variants:[],files:[{alt:'hero',contentType:'IMAGE'},{alt:'video',contentType:'VIDEO'},{alt:'detail',contentType:'IMAGE'}]};
 const actual={title:'t',collections:{nodes:[]},variants:{nodes:[]},featuredMedia:{alt:'hero'},media:{nodes:[{id:'h',alt:'hero',mediaContentType:'IMAGE',status:'READY'},{id:'v',alt:'video',mediaContentType:'VIDEO',status:'PROCESSING'},{id:'d',alt:'detail',mediaContentType:'IMAGE',status:'READY'}]}};
