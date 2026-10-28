@@ -11,7 +11,7 @@ import {
   normalizeProductAttributeKey,
   PRODUCT_ATTRIBUTE_DEFINITIONS,
   productAttributeLabel,
-} from '../domain/product-attributes.ts';
+} from '../domain/product-attributes';
 import type { VisionAgentRun } from '../domain/vision-analysis';
 
 export const FACT_EXTRACTION_PROMPT_VERSION = 'day4-open-passport-v3';

@@ -4,7 +4,7 @@ import {
   normalizeProductAttributeKey,
   PRODUCT_ATTRIBUTE_DEFINITIONS,
   productAttributeLabel,
-} from '../domain/product-attributes.ts';
+} from '../domain/product-attributes';
 import type { NormalizedImageBox, VisionAnalysisOutput, VisionFactObservation } from '../domain/vision-analysis';
 
 export const VISION_ANALYSIS_PROMPT_VERSION = 'vision-v2';
