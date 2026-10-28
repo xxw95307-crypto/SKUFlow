@@ -123,5 +123,4 @@ docs/                    设计与接入文档
 | [video-generation.md](docs/video-generation.md) | 图生视频、音频生成与 Shopify 媒体编排 |
 | [amazon-us-integration.md](docs/amazon-us-integration.md) | Amazon 沙箱接入与真实上架的后续步骤 |
 | [platform-access-matrix.md](docs/platform-access-matrix.md) | 各平台开发者权限状态 |
-| [user-authentication.md](docs/user-authentication.md) | 登录与数据归属 |
 | `day-0X-acceptance.md` | 开发阶段的逐日验收记录 |
