@@ -4,6 +4,10 @@
 
 跨境卖家上新一款商品，往往要从零散的供应商资料里手工摘参数，再按 Amazon、Shopify、TikTok Shop、Shopee 各自的字段规则重写一遍，最后还要配图、做视频、翻译成目标站点语言。SKUFlow 用一个对话式 Agent 把这条链路串起来：**AI 负责整理和撰写，商家只在关键节点做决定。**
 
+## 界面预览
+
+![SKUFlow AI 上新工作台](docs/images/skuflow-workspace.png)
+
 ## 它是怎么工作的
 
 ```text
